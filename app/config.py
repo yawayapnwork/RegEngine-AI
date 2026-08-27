@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     qdrant_upsert_batch_size: int = 64
     qdrant_timeout_seconds: float = 30.0
 
+    # --- Compliance rule extraction (CrewAI dual-agent pipeline) ---
+    anthropic_api_key: str | None = None
+    agent_verbose: bool = False
+    agent_max_rpm: int = 20
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
