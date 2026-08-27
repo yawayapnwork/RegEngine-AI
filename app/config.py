@@ -1,0 +1,49 @@
+"""Application configuration.
+
+All tunables are sourced from environment variables (via .env in local dev)
+so the service can be promoted across environments without code changes.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
+
+    # --- Service ---
+    service_name: str = "sebi-circular-parser"
+    max_upload_mb: int = Field(default=50, description="Max accepted PDF size in MB")
+    parse_timeout_seconds: int = Field(default=180, description="Hard timeout for a single parse job")
+    parse_concurrency: int = Field(default=4, description="Max PDFs processed concurrently by this instance")
+
+    # --- Extraction backend ---
+    # "unstructured" (hi_res, layout aware) or "tika" (fallback, faster, weaker layout fidelity)
+    extraction_backend: str = "unstructured"
+    unstructured_strategy: str = "hi_res"  # hi_res | fast | ocr_only
+    tika_server_url: str = "http://localhost:9998"
+
+    # --- Chunking ---
+    chunk_max_chars: int = 2400
+    chunk_overlap_chars: int = 200
+    chunk_min_chars: int = 40
+
+    # --- Embeddings ---
+    embedding_model_name: str = "BAAI/bge-large-en-v1.5"
+    embedding_dim: int = 1024
+    embedding_batch_size: int = 16
+
+    # --- Qdrant ---
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    qdrant_collection: str = "sebi_master_circulars"
+    qdrant_upsert_batch_size: int = 64
+    qdrant_timeout_seconds: float = 30.0
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
