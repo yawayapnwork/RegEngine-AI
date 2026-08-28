@@ -53,6 +53,8 @@ class PolicyOutcome(BaseModel):
     package: str
     allow: bool | None = Field(None, description="None means OPA returned undefined (missing/insufficient facts).")
     violations: list[str] = Field(default_factory=list)
+    circular_number: str | None = Field(None, description="Echoed from the compiled Rego decision object; feeds the audit ledger's SEBI circular mapping.")
+    clause_number: str | None = Field(None, description="Echoed from the compiled Rego decision object; feeds the audit ledger's section_reference.")
 
 
 class EvaluationResult(BaseModel):

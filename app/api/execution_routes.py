@@ -30,6 +30,9 @@ from app.execution.tasks import (
     process_batch_task,
     process_cdc_event_task,
 )
+from app.ledger.dependencies import get_ledger_service
+from app.ledger.integration import log_evaluation
+from app.ledger.service import LedgerService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/execution")
@@ -42,17 +45,26 @@ router = APIRouter(prefix="/v1/execution")
 async def evaluate_transaction(
     transaction: TransactionPayload,
     evaluator: Evaluator = Depends(get_evaluator),
+    ledger: LedgerService = Depends(get_ledger_service),
 ) -> EvaluationResult:
     """Evaluate a single broker-submitted transaction against compiled Rego
     policies via the embedded OPA engine and return allow/deny/flagged
     immediately. FLAGGED responses carry a `hitl_case_id`; the final
     decision is delivered later to `transaction.callback_url`, if set, once
-    a human resolves it (see POST /hitl/cases/{case_id}/resolve)."""
+    a human resolves it (see POST /hitl/cases/{case_id}/resolve).
+
+    Every evaluation is also recorded in the tamper-evident audit ledger
+    (app.ledger) before the response is returned. A ledger write failure
+    is logged but never turns a completed compliance decision into a
+    5xx — see the trade-off note in app.ledger.integration.log_evaluation."""
     try:
-        return await evaluator.evaluate_transaction(transaction)
+        result = await evaluator.evaluate_transaction(transaction)
     except OPAEngineError as exc:
         logger.error("OPA engine unavailable evaluating transaction '%s': %s", transaction.transaction_id, exc)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Policy engine unavailable.") from exc
+
+    await log_evaluation(ledger, transaction, result)
+    return result
 
 
 # --- Requirement 2: async batch handling for legacy SFTP / CDC pipelines ---

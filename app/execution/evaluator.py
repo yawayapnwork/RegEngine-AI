@@ -69,6 +69,8 @@ class Evaluator:
                         package=package,
                         allow=bool(result.get("allow", False)),
                         violations=list(result.get("violations", []) or []),
+                        circular_number=result.get("circular_number"),
+                        clause_number=result.get("clause_number"),
                     )
                 )
 

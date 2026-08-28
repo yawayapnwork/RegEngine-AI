@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     webhook_max_retries: int = 5
     webhook_retry_backoff_seconds: float = 3.0
 
+    # --- Tamper-evident audit ledger (PostgreSQL, SHA-256 hash chain) ---
+    ledger_database_url: str = "postgresql+asyncpg://regengine_ledger_writer:changeme@localhost:5432/regengine"
+    ledger_pool_size: int = 10
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
