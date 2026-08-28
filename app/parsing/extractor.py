@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _PDF_MAGIC = b"%PDF-"
 
 _CIRCULAR_NUMBER_RE = re.compile(
-    r"(SEBI/[A-Z\-]+/\d{4}[-/]\d{2,4}/\d+|Circular\s+No\.?\s*[:\-]?\s*[\w/\-]+)",
+    r"(SEBI/[A-Z\-]+(?:/[A-Z\-]+)*/\d{4}(?:[-/]\d{2,4})?/\d+|Circular\s+No\.?\s*[:\-]?\s*[\w/\-]+)",
     re.IGNORECASE,
 )
 _ISSUE_DATE_RE = re.compile(
@@ -152,7 +152,16 @@ def _build_document_elements(raw_elements: list[dict]) -> list[DocumentElement]:
             )
             continue
 
-        if kind == ElementKind.FOOTNOTE:
+        # `is_footnote`'s heuristic ("digit(s) + '.'/')' + text") is
+        # structurally identical to a top-level clause header ("1. Applicability"
+        # matches it exactly the same as a real footnote "1. As amended..." would).
+        # Clause detection above is the more specific signal (a dedicated,
+        # ordered pattern table vs. one loose regex), so a line already
+        # recognized as a numbered clause/section header must never be
+        # demoted to a footnote and silently dropped from the hierarchy
+        # tracker -- that would corrupt section_path for every subsequent
+        # clause nested under it.
+        if kind == ElementKind.FOOTNOTE and clause is None:
             result.append(
                 DocumentElement(
                     element_id=str(uuid.uuid4()),
