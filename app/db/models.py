@@ -39,7 +39,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
-    text,
+    text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -117,7 +117,7 @@ class Tenant(Base):
     )
     sebi_reg_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
+        Boolean, nullable=False, server_default=sa_text("true")
     )
     contact_email: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -128,7 +128,7 @@ class Tenant(Base):
     # Per-tenant risk overlay: margin thresholds, exposure caps, rule weights.
     # Read by the sandbox evaluator; pushed as OPA bundle data by the compiler.
     risk_overlay: Mapped[dict[str, Any]] = mapped_column(
-        _JSON_TYPE, nullable=False, server_default=text("'{}'")
+        _JSON_TYPE, nullable=False, server_default=sa_text("'{}'")
     )
 
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -186,7 +186,7 @@ class Circular(Base):
     )
     # True for SEBI baseline circulars that are readable by every tenant.
     is_shared: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
+        Boolean, nullable=False, server_default=sa_text("false")
     )
 
     # Business key: SEBI's own reference, e.g. "SEBI/HO/MRD/DP/CIR/P/2026/45".
@@ -222,7 +222,7 @@ class Circular(Base):
         Index(
             "ix_circulars_tenant_shared",
             "is_shared",
-            postgresql_where=text("is_shared = true"),
+            postgresql_where=sa_text("is_shared = true"),
         ),
         CheckConstraint("length(raw_text_digest) = 64", name="raw_text_digest_len"),
     )
@@ -271,7 +271,7 @@ class Clause(Base):
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     contains_table: Mapped[bool] = mapped_column(
-        nullable=False, server_default=text("false")
+        nullable=False, server_default=sa_text("false")
     )
 
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -339,10 +339,10 @@ class CompiledRule(Base):
     opa_package_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     jsonlogic_ast: Mapped[dict | None] = mapped_column(_JSON_TYPE, nullable=True)
 
-    is_compiled: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    is_compiled: Mapped[bool] = mapped_column(nullable=False, server_default=sa_text("false"))
     # Exactly one version per (rule_id, tenant_id) may be is_active=true —
     # see the partial unique index below.
-    is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    is_active: Mapped[bool] = mapped_column(nullable=False, server_default=sa_text("false"))
 
     hitl_status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="NONE"
@@ -369,7 +369,7 @@ class CompiledRule(Base):
             "uq_compiled_rules_one_active_per_rule_id",
             "rule_id",
             unique=True,
-            postgresql_where=text("is_active = true"),
+            postgresql_where=sa_text("is_active = true"),
         ),
         CheckConstraint(f"hitl_status IN {_COMPILED_RULE_HITL_STATUSES!r}", name="hitl_status"),
     )

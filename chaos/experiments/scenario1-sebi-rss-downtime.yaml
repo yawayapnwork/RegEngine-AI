@@ -1,0 +1,304 @@
+# =============================================================================
+# Chaos Experiment: Scenario 1 — SEBI RSS Web Portal Downtime
+# =============================================================================
+#
+# Hypothesis
+# ----------
+# When sebi.gov.in becomes unreachable, the RegEngine AI ingestion pipeline:
+#   1. Retries with exponential backoff (max 4 attempts, per ingestion_max_retries)
+#   2. Continues polling via the HTML listing fallback when RSS is blocked
+#   3. Logs a warning per failed poll (never a silent failure)
+#   4. Does NOT lose any circulars that were already in-flight / parsed
+#   5. Recovers automatically within one poll interval (15 min) once the
+#      portal comes back, without operator intervention
+#
+# Failure modes tested
+# --------------------
+#   A. DNS-level blackhole   — `HttpChaos` drops all connections to sebi.gov.in
+#   B. HTTP 503 responses    — `HttpChaos` injects 503s to simulate portal overload
+#   C. Connection timeout    — `NetworkChaos` delays to 30s > ingestion timeout
+#
+# Implementation
+# --------------
+# Three Chaos Mesh experiments, chained via a LitmusChaos ChaosEngine
+# workflow.  All apply ONLY to the `regengine-beat` pod (the Celery beat
+# scheduler that fires ingestion tasks) and the `regengine-worker` pods that
+# actually execute them — never the API pods serving broker traffic.
+#
+# Alert validation
+# ----------------
+# A PrometheusRule fires `SEBIIngestionFailure` when
+# `regengine_ingestion_fetch_errors_total` exceeds 3 in a 5-minute window.
+# The validation script (chaos/validation/validate_scenario1.py) checks
+# this alert fired and was subsequently resolved.
+#
+# Steady-state probes
+# -------------------
+#   BEFORE: ingestion_last_successful_poll_timestamp < 5 minutes ago
+#   AFTER:  same probe recovers within 2 × ingestion_poll_interval_seconds
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# Experiment A: DNS blackhole — total SEBI portal unavailability
+# ---------------------------------------------------------------------------
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HttpChaos
+metadata:
+  name: sebi-rss-dns-blackhole
+  namespace: regengine-staging
+  labels:
+    chaos.regengine.io/scenario: "scenario1"
+    chaos.regengine.io/variant: "dns-blackhole"
+    chaos.regengine.io/owner: "reliability-team"
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - regengine-staging
+    labelSelectors:
+      # Target only ingestion worker pods, not the API serving broker traffic
+      app.kubernetes.io/name: regengine-ai
+      app.kubernetes.io/component: worker
+
+  # Abort all egress to sebi.gov.in by responding with connection abort
+  target: Request
+  port: 443
+  method: GET
+  path: "*"
+  # Match only sebi.gov.in traffic using a header filter
+  # (Chaos Mesh HttpChaos matches on the Host header)
+  headers:
+    Host: "sebi.gov.in"
+
+  # Abort the connection — simulates DNS-level unreachability
+  abort: true
+
+  duration: "10m"
+  scheduler:
+    cron: "@once"
+
+---
+# ---------------------------------------------------------------------------
+# Experiment B: HTTP 503 Service Unavailable injection
+# ---------------------------------------------------------------------------
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HttpChaos
+metadata:
+  name: sebi-rss-http-503
+  namespace: regengine-staging
+  labels:
+    chaos.regengine.io/scenario: "scenario1"
+    chaos.regengine.io/variant: "http-503"
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - regengine-staging
+    labelSelectors:
+      app.kubernetes.io/name: regengine-ai
+      app.kubernetes.io/component: worker
+
+  target: Response
+  port: 443
+  method: GET
+  path: "*"
+  headers:
+    Host: "sebi.gov.in"
+
+  # Replace every response with a 503 — mirrors SEBI portal under maintenance
+  replace:
+    code: 503
+    body: "eyJlcnJvciI6ICJTZXJ2aWNlIFVuYXZhaWxhYmxlIn0="  # {"error":"Service Unavailable"} base64
+
+  duration: "8m"
+  scheduler:
+    cron: "@once"
+
+---
+# ---------------------------------------------------------------------------
+# Experiment C: Connection timeout injection (30s > ingestion_request_timeout_seconds=20s)
+# ---------------------------------------------------------------------------
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: sebi-rss-connection-timeout
+  namespace: regengine-staging
+  labels:
+    chaos.regengine.io/scenario: "scenario1"
+    chaos.regengine.io/variant: "timeout"
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - regengine-staging
+    labelSelectors:
+      app.kubernetes.io/name: regengine-ai
+      app.kubernetes.io/component: worker
+
+  # 30s delay on TCP port 443 — exceeds the 20s ingestion_request_timeout_seconds
+  # so every connection attempt hits httpx.TimeoutException, which is_transient()
+  # correctly classifies as retryable.
+  delay:
+    latency: "30000ms"
+    correlation: "100"   # 100% correlation = every packet delayed, not just some
+    jitter: "0ms"
+
+  # Scope to SEBI's IP range (185.199.x.x / SEBI CDN block) to avoid
+  # inadvertently delaying Redis/Postgres traffic on the same worker pod.
+  # Replace with actual SEBI IP ranges from your network policy config.
+  externalTargets:
+    - "14.99.184.0/24"    # sebi.gov.in origin (representative; verify via dig)
+    - "103.21.244.0/22"   # Cloudflare CDN range used by sebi.gov.in assets
+
+  duration: "6m"
+  scheduler:
+    cron: "@once"
+
+---
+# ---------------------------------------------------------------------------
+# LitmusChaos ChaosEngine: orchestrates A → B → C sequentially
+# ---------------------------------------------------------------------------
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: scenario1-sebi-rss-downtime
+  namespace: regengine-staging
+  annotations:
+    # Link to the hypothesis document in the runbook
+    chaos.regengine.io/hypothesis: "RSS downtime triggers retry + fallback; no circular loss"
+    chaos.regengine.io/runbook: "https://wiki.internal/regengine/chaos/scenario1"
+spec:
+  appinfo:
+    appns: regengine-staging
+    applabel: "app.kubernetes.io/name=regengine-ai"
+    appkind: deployment
+
+  engineState: active
+  chaosServiceAccount: litmus-admin
+
+  # Steady-state validation runs before and after each fault injection
+  jobCleanupPolicy: retain    # keep job pods for log inspection
+
+  experiments:
+    # -----------------------------------------------------------------------
+    # Phase 1: Confirm retries fire and DLQ is empty before injection
+    # -----------------------------------------------------------------------
+    - name: http-chaos
+      spec:
+        components:
+          env:
+            # Chaos Mesh experiment name to apply
+            - name: CHAOS_NAME
+              value: sebi-rss-dns-blackhole
+            - name: TOTAL_CHAOS_DURATION
+              value: "600"   # 10 minutes
+            - name: CHAOS_INTERVAL
+              value: "600"
+          experiments:
+            - name: pod-http-chaos
+              spec:
+                probe:
+                  # Pre-flight: ingestion must be healthy before we inject
+                  - name: "ingestion-healthy-before"
+                    type: "httpProbe"
+                    httpProbe/inputs:
+                      url: "http://regengine-ai-api.regengine-staging.svc.cluster.local/healthz"
+                      insecureSkipVerify: false
+                      responseTimeout: 5000
+                      method:
+                        get:
+                          criteria: "=="
+                          responseCode: "200"
+                    mode: SOT          # Start Of Test
+                    runProperties:
+                      probeTimeout: 10
+                      interval: 5
+                      retry: 3
+
+                  # During chaos: API endpoints must stay healthy
+                  # (ingestion failure must not cascade to the API serving brokers)
+                  - name: "api-healthy-during-chaos"
+                    type: "httpProbe"
+                    httpProbe/inputs:
+                      url: "http://regengine-ai-api.regengine-staging.svc.cluster.local/v1/execution/transactions/evaluate"
+                      insecureSkipVerify: false
+                      responseTimeout: 3000
+                      method:
+                        post:
+                          contentType: "application/json"
+                          body: '{"transaction_id":"chaos-probe-001","entity_type":"Stockbroker","facts":{"upfront_margin_pct":20}}'
+                          criteria: "!="
+                          responseCode: "500"
+                    mode: Continuous
+                    runProperties:
+                      probeTimeout: 5
+                      interval: 15
+                      retry: 2
+
+                  # Post-chaos: verify ingestion recovered
+                  - name: "ingestion-recovered-after"
+                    type: "cmdProbe"
+                    cmdProbe/inputs:
+                      command: >
+                        python chaos/validation/validate_scenario1.py
+                        --check recovery
+                        --max-wait-minutes 35
+                    mode: EOT          # End Of Test
+                    runProperties:
+                      probeTimeout: 120
+                      interval: 10
+                      retry: 0
+
+---
+# ---------------------------------------------------------------------------
+# PrometheusRule: Alert on sustained ingestion failures
+# ---------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: regengine-ingestion-alerts
+  namespace: regengine-staging
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: regengine.ingestion
+      interval: 60s
+      rules:
+        - alert: SEBIIngestionFetchFailure
+          # Fires when the ingestion worker has failed > 3 fetch attempts in 5 min
+          expr: |
+            increase(regengine_ingestion_fetch_errors_total[5m]) > 3
+          for: 2m
+          labels:
+            severity: warning
+            team: reliability
+            scenario: scenario1
+          annotations:
+            summary: "SEBI ingestion fetch failures detected"
+            description: >
+              The RegEngine AI ingestion worker has failed {{ $value }} RSS/HTTP
+              fetch attempts in the last 5 minutes.  The scraper will retry with
+              exponential backoff (max 4 attempts per poll cycle).  If this alert
+              persists beyond 15 minutes (one poll interval), check sebi.gov.in
+              reachability and the DLQ.
+            runbook_url: "https://wiki.internal/regengine/runbooks/ingestion-failure"
+
+        - alert: SEBIIngestionStalled
+          # Fires when no successful poll has completed in > 30 minutes
+          expr: |
+            time() - regengine_ingestion_last_successful_poll_timestamp > 1800
+          for: 5m
+          labels:
+            severity: critical
+            team: reliability
+            scenario: scenario1
+          annotations:
+            summary: "SEBI ingestion has stalled for > 30 minutes"
+            description: >
+              No successful SEBI circular poll has completed in the last
+              {{ humanizeDuration $value }}.  Check beat pod health, outbound
+              network connectivity, and the DLQ for LLM_EXTRACTION failures.

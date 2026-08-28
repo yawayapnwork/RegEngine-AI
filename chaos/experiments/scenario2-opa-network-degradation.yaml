@@ -1,0 +1,225 @@
+# =============================================================================
+# Chaos Experiment: Scenario 2 — OPA Policy Engine Network Degradation
+# =============================================================================
+#
+# Hypothesis
+# ----------
+# When network communication between the FastAPI execution engine and the OPA
+# policy engine experiences 500ms latency and 10% packet loss:
+#   1. FastAPI handles latency gracefully via configured httpx timeouts
+#      and async connection pooling without exhausting worker threads.
+#   2. Packet loss and timeouts result in explicit evaluation errors or fallback
+#      routing to HITL review queues rather than unhandled 500 server crashes.
+#   3. Zero transaction evaluations drop silently or return false approvals.
+#   4. Metrics (`opa_policy_evaluation_duration_seconds`) capture elevated p95/p99.
+#   5. Alert `OPAPolicyLatencyHigh` fires when p95 latency exceeds 400ms for > 2m.
+#
+# Failure modes tested
+# --------------------
+#   A. Network Latency — 500ms latency + 50ms jitter injected on port 8181.
+#   B. Packet Loss    — 10% packet loss on egress to OPA sidecar/service.
+#
+# Target Selector
+# ---------------
+# Applies to egress from `app.kubernetes.io/component: api` pods to OPA engine
+# on port 8181 in the `regengine-staging` namespace.
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# Chaos Mesh: NetworkChaos — 500ms latency + 10% packet loss on OPA traffic
+# ---------------------------------------------------------------------------
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: opa-network-degradation
+  namespace: regengine-staging
+  labels:
+    chaos.regengine.io/scenario: "scenario2"
+    chaos.regengine.io/variant: "opa-latency-loss"
+    chaos.regengine.io/owner: "reliability-team"
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - regengine-staging
+    labelSelectors:
+      app.kubernetes.io/name: regengine-ai
+      app.kubernetes.io/component: api
+
+  # Target TCP port 8181 (OPA policy engine server port)
+  target:
+    selector:
+      namespaces:
+        - regengine-staging
+      labelSelectors:
+        app.kubernetes.io/name: regengine-ai
+        app.kubernetes.io/component: opa
+    mode: all
+
+  direction: to
+
+  # Inject 500ms latency with 50ms jitter and 100% correlation
+  delay:
+    latency: "500ms"
+    jitter: "50ms"
+    correlation: "100"
+
+  # Inject 10% packet loss
+  loss:
+    loss: "10"
+
+  duration: "10m"
+  scheduler:
+    cron: "@once"
+
+---
+# ---------------------------------------------------------------------------
+# LitmusChaos ChaosEngine: Orchestrates load and probe assertions
+# ---------------------------------------------------------------------------
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: scenario2-opa-network-degradation
+  namespace: regengine-staging
+  annotations:
+    chaos.regengine.io/hypothesis: "OPA latency & loss handled gracefully without transaction loss or API crashes"
+    chaos.regengine.io/runbook: "https://wiki.internal/regengine/chaos/scenario2"
+spec:
+  appinfo:
+    appns: regengine-staging
+    applabel: "app.kubernetes.io/name=regengine-ai"
+    appkind: deployment
+
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  jobCleanupPolicy: retain
+
+  experiments:
+    - name: network-chaos
+      spec:
+        components:
+          env:
+            - name: CHAOS_NAME
+              value: opa-network-degradation
+            - name: TOTAL_CHAOS_DURATION
+              value: "600" # 10 minutes
+          experiments:
+            - name: pod-network-latency
+              spec:
+                probe:
+                  # Pre-flight: verify OPA engine respond < 20ms before chaos
+                  - name: "opa-healthy-preflight"
+                    type: "httpProbe"
+                    httpProbe/inputs:
+                      url: "http://opa.regengine-staging.svc.cluster.local:8181/v1/data"
+                      insecureSkipVerify: false
+                      responseTimeout: 1000
+                      method:
+                        get:
+                          criteria: "=="
+                          responseCode: "200"
+                    mode: SOT
+                    runProperties:
+                      probeTimeout: 5
+                      interval: 2
+                      retry: 3
+
+                  # Continuous probe: FastAPI /healthz must remain 200 OK throughout
+                  - name: "api-healthz-continuous"
+                    type: "httpProbe"
+                    httpProbe/inputs:
+                      url: "http://regengine-ai-api.regengine-staging.svc.cluster.local:8000/healthz"
+                      insecureSkipVerify: false
+                      responseTimeout: 3000
+                      method:
+                        get:
+                          criteria: "=="
+                          responseCode: "200"
+                    mode: Continuous
+                    runProperties:
+                      probeTimeout: 5
+                      interval: 10
+                      retry: 2
+
+                  # Post-chaos: run Scenario 2 Python validation script
+                  - name: "validate-scenario2-postflight"
+                    type: "cmdProbe"
+                    cmdProbe/inputs:
+                      command: >
+                        python chaos/validation/validate_scenario2.py
+                        --check latency-slo
+                        --max-error-rate 0.15
+                    mode: EOT
+                    runProperties:
+                      probeTimeout: 120
+                      interval: 5
+                      retry: 0
+
+---
+# ---------------------------------------------------------------------------
+# PrometheusRule: Alerts for OPA Latency, Packet Loss, and Evaluation SLO
+# ---------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: regengine-opa-chaos-alerts
+  namespace: regengine-staging
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: regengine.opa.network
+      interval: 30s
+      rules:
+        - alert: OPAPolicyLatencyHigh
+          # Fires when p95 OPA policy evaluation duration exceeds 400ms for > 2 min
+          expr: |
+            histogram_quantile(0.95, sum(rate(opa_policy_evaluation_duration_seconds_bucket[5m])) by (le)) > 0.400
+          for: 2m
+          labels:
+            severity: warning
+            team: reliability
+            scenario: scenario2
+          annotations:
+            summary: "High OPA policy evaluation latency (p95 > 400ms)"
+            description: >
+              The 95th percentile latency of OPA policy evaluations is {{ $value | humanizeDuration }},
+              exceeding the 400ms threshold. Check network latency between FastAPI execution engine and OPA sidecar.
+            runbook_url: "https://wiki.internal/regengine/runbooks/opa-latency"
+
+        - alert: OPAPolicyPacketLossElevated
+          # Fires when OPA HTTP evaluation error rate exceeds 5% over 3 min
+          expr: |
+            (
+              sum(rate(opa_policy_evaluation_duration_seconds_count{outcome="error"}[3m]))
+              /
+              sum(rate(opa_policy_evaluation_duration_seconds_count[3m]))
+            ) > 0.05
+          for: 2m
+          labels:
+            severity: warning
+            team: reliability
+            scenario: scenario2
+          annotations:
+            summary: "Elevated OPA evaluation error rate (> 5%)"
+            description: >
+              OPA evaluation error rate is currently {{ $value | humanizePercentage }}.
+              Network packet loss or connection timeouts are impacting policy evaluation.
+
+        - alert: TransactionEvaluationSLOBreach
+          # Fires when transaction end-to-end latency p99 exceeds 1500ms
+          expr: |
+            histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{handler="/v1/execution/transactions/evaluate"}[5m])) by (le)) > 1.5
+          for: 1m
+          labels:
+            severity: critical
+            team: reliability
+            scenario: scenario2
+          annotations:
+            summary: "Transaction evaluation SLO breach (p99 > 1.5s)"
+            description: >
+              Transaction evaluation p99 latency reached {{ $value | humanizeDuration }}.
+              Broker transaction response SLA is breached.

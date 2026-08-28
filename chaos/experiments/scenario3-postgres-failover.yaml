@@ -1,0 +1,189 @@
+# =============================================================================
+# Chaos Experiment: Scenario 3 — Primary PostgreSQL DB Termination & Failover
+# =============================================================================
+#
+# Hypothesis
+# ----------
+# When the primary PostgreSQL database node is terminated abruptly (pod-kill):
+#   1. Automatic failover / read-replica promotion occurs within 30 seconds (RTO < 30s).
+#   2. FastAPI execution engine and Celery workers reconnect to the new primary node
+#      without application crashes or lingering deadlocks.
+#   3. Active compliance transactions undergoing evaluation during failover are either
+#      safely committed or retried cleanly by application-level retries.
+#   4. The tamper-evident `compliance_audit_ledger` preserves 100% sequence number
+#      monotonicity (`sequence_num` has zero gaps) and SHA-256 hash chain validity.
+#   5. Prometheus alert `PostgreSQLPrimaryDown` fires immediately upon pod termination.
+#
+# Target Selector
+# ---------------
+# Targets the PostgreSQL primary StatefulSet pod (`app.kubernetes.io/component: database-primary`
+# or `role=primary`) in namespace `regengine-staging`.
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# Chaos Mesh: PodChaos — pod-kill on Primary PostgreSQL Node
+# ---------------------------------------------------------------------------
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: postgres-primary-kill
+  namespace: regengine-staging
+  labels:
+    chaos.regengine.io/scenario: "scenario3"
+    chaos.regengine.io/variant: "db-primary-kill"
+    chaos.regengine.io/owner: "reliability-team"
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - regengine-staging
+    labelSelectors:
+      app.kubernetes.io/name: regengine-ai
+      app.kubernetes.io/component: postgres-primary
+
+  # Grace period: 0 = immediate SIGKILL without clean shutdown
+  gracePeriod: 0
+
+  scheduler:
+    cron: "@once"
+
+---
+# ---------------------------------------------------------------------------
+# LitmusChaos ChaosEngine: Orchestrates load execution and gapless verification
+# ---------------------------------------------------------------------------
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: scenario3-postgres-failover
+  namespace: regengine-staging
+  annotations:
+    chaos.regengine.io/hypothesis: "Primary DB node termination triggers replica failover with zero audit sequence gaps"
+    chaos.regengine.io/runbook: "https://wiki.internal/regengine/chaos/scenario3"
+spec:
+  appinfo:
+    appns: regengine-staging
+    applabel: "app.kubernetes.io/name=regengine-ai"
+    appkind: deployment
+
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  jobCleanupPolicy: retain
+
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: CHAOS_NAME
+              value: postgres-primary-kill
+            - name: TOTAL_CHAOS_DURATION
+              value: "300" # 5 minutes
+          experiments:
+            - name: pod-delete-primary-db
+              spec:
+                probe:
+                  # Pre-flight: verify PostgreSQL connectivity and write ability
+                  - name: "postgres-write-preflight"
+                    type: "cmdProbe"
+                    cmdProbe/inputs:
+                      command: >
+                        python -c "import psycopg2; conn = psycopg2.connect('postgresql://regengine:changeme@postgres-primary:5432/regengine'); cur = conn.cursor(); cur.execute('SELECT 1'); print('OK')"
+                    mode: SOT
+                    runProperties:
+                      probeTimeout: 10
+                      interval: 2
+                      retry: 3
+
+                  # Continuous probe: ensure read endpoints answer during failover
+                  - name: "api-readiness-during-failover"
+                    type: "httpProbe"
+                    httpProbe/inputs:
+                      url: "http://regengine-ai-api.regengine-staging.svc.cluster.local:8000/healthz"
+                      insecureSkipVerify: false
+                      responseTimeout: 5000
+                      method:
+                        get:
+                          criteria: "=="
+                          responseCode: "200"
+                    mode: Continuous
+                    runProperties:
+                      probeTimeout: 10
+                      interval: 5
+                      retry: 3
+
+                  # Post-flight: run Scenario 3 sequence preservation check
+                  - name: "validate-scenario3-sequence-integrity"
+                    type: "cmdProbe"
+                    cmdProbe/inputs:
+                      command: >
+                        python chaos/validation/validate_scenario3.py
+                        --check sequence-gapless
+                        --max-failover-seconds 30
+                    mode: EOT
+                    runProperties:
+                      probeTimeout: 180
+                      interval: 10
+                      retry: 0
+
+---
+# ---------------------------------------------------------------------------
+# PrometheusRule: Alerts for Database Unavailability and Sequence Gaps
+# ---------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: regengine-postgres-chaos-alerts
+  namespace: regengine-staging
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: regengine.postgres.chaos
+      interval: 15s
+      rules:
+        - alert: PostgreSQLPrimaryDown
+          # Fires when the primary PostgreSQL node is unreachable
+          expr: |
+            pg_up{role="primary"} == 0
+          for: 5s
+          labels:
+            severity: critical
+            team: database
+            scenario: scenario3
+          annotations:
+            summary: "Primary PostgreSQL node is DOWN"
+            description: >
+              Primary PostgreSQL node {{ $labels.instance }} is unreachable. Automated failover / replica promotion initiated.
+            runbook_url: "https://wiki.internal/regengine/runbooks/postgres-failover"
+
+        - alert: PostgreSQLFailoverTriggered
+          # Fires when read-replica promotion is detected
+          expr: |
+            changes(pg_replication_is_replica[2m]) > 0
+          for: 0s
+          labels:
+            severity: warning
+            team: database
+            scenario: scenario3
+          annotations:
+            summary: "PostgreSQL read-replica failover triggered"
+            description: >
+              Read-replica has been promoted to primary due to node failure.
+
+        - alert: AuditLedgerSequenceGapDetected
+          # Fires when audit ledger sequence gap or chain break is detected
+          expr: |
+            regengine_audit_ledger_sequence_gaps_total > 0
+          for: 0s
+          labels:
+            severity: critical
+            team: security-reliability
+            scenario: scenario3
+          annotations:
+            summary: "CRITICAL: Audit ledger sequence gap detected!"
+            description: >
+              The compliance audit ledger detected a gap or invalid cryptographic hash link.
+              Immediate manual audit required.
