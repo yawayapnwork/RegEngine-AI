@@ -15,11 +15,19 @@ from app.parsing.exceptions import (
     ParseTimeoutError,
     UnsupportedFileError,
 )
+from app.security.dependencies import require_roles
+from app.security.models import Role
 from app.services.pipeline import parse_pdf_bytes
 from app.vectorstore.qdrant_store import index_chunks
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Ingesting a new circular is what feeds the compiler pipeline that
+# eventually produces enforceable policy -- gated the same as the HITL
+# review portal's read access: compliance officers and infra admins, never
+# a broker's own API client.
+_require_ingestion_role = Depends(require_roles(Role.COMPLIANCE_OFFICER, Role.SYSTEM_ADMIN))
 
 _ERROR_STATUS_MAP: dict[type[Exception], int] = {
     UnsupportedFileError: status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -35,7 +43,12 @@ def _map_status(exc: Exception) -> int:
     return _ERROR_STATUS_MAP.get(type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@router.post("/v1/circulars/parse", response_model=ParseResult, status_code=status.HTTP_200_OK)
+@router.post(
+    "/v1/circulars/parse",
+    response_model=ParseResult,
+    status_code=status.HTTP_200_OK,
+    dependencies=[_require_ingestion_role],
+)
 async def parse_circular(
     file: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
@@ -68,7 +81,12 @@ async def parse_circular(
         ) from exc
 
 
-@router.post("/v1/circulars/index", response_model=IndexResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/v1/circulars/index",
+    response_model=IndexResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[_require_ingestion_role],
+)
 async def index_circular(
     request: IndexRequest,
     settings: Settings = Depends(get_settings),
@@ -91,6 +109,7 @@ async def index_circular(
     "/v1/circulars/parse-and-index",
     response_model=IndexResponse,
     status_code=status.HTTP_200_OK,
+    dependencies=[_require_ingestion_role],
 )
 async def parse_and_index_circular(
     file: UploadFile = File(...),

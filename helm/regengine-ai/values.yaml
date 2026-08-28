@@ -219,6 +219,26 @@ config:
   LEDGER_POOL_SIZE: "10"
   INGESTION_POLL_INTERVAL_SECONDS: "900"
   INGESTION_RESPECT_ROBOTS_TXT: "true"
+  # --- Security: JWT / rate limiting / transport (non-secret half) ---
+  # Signing/verification key material is NOT here -- see values.yaml's
+  # `secrets` block and app/security/secrets.py; SECRETS_BACKEND below
+  # selects where JWT_SECRET_KEY / JWT_PRIVATE_KEY_PEM actually resolve
+  # from in this environment.
+  JWT_ALGORITHM: "RS256"
+  JWT_ISSUER: "regengine-ai"
+  JWT_AUDIENCE: "regengine-ai-api"
+  JWT_ACCESS_TOKEN_TTL_SECONDS: "3600"
+  # Set to your enterprise SSO provider's issuer/JWKS endpoint so
+  # Compliance_Officer/System_Admin tokens are verified there, never
+  # against this service's own signing key -- see app/security/jwt.py.
+  JWT_EXTERNAL_ISSUER: ""
+  JWT_JWKS_URL: ""
+  SECRETS_BACKEND: "aws"  # "aws" | "vault" | "env" -- "env" is dev-only, see app/security/secrets.py
+  AWS_SECRETS_REGION: "ap-south-1"
+  ENFORCE_HTTPS: "true"  # TLS terminates at the ingress (see ingress.yaml); this rejects anything that skipped it
+  RATE_LIMIT_WINDOW_SECONDS: "60"
+  RATE_LIMIT_REQUESTS_PER_WINDOW: "300"
+  PAYLOAD_ENCRYPTION_ENABLED: "false"  # opt-in defense-in-depth layer -- see app/security/crypto.py
 
 # --- Secrets: connection strings and credentials. Production default is
 # `existingSecret` pointing at a Secret you manage out-of-band (sealed-secrets,
@@ -232,6 +252,11 @@ secrets:
   # Keys the Deployments expect on either the created or existing Secret:
   #   DATABASE_URL, LEDGER_DATABASE_URL, REDIS_URL, QDRANT_URL,
   #   QDRANT_API_KEY, ANTHROPIC_API_KEY, WEBHOOK_HMAC_SECRET
+  # NOTE: with SECRETS_BACKEND=aws|vault (the production default -- see
+  # config.SECRETS_BACKEND above), JWT_SECRET_KEY / JWT_PRIVATE_KEY_PEM and
+  # any per-tenant payload_key are NOT read from this Secret at all -- they
+  # resolve through app/security/secrets.py's AWS/Vault provider instead.
+  # They belong here only when SECRETS_BACKEND=env (dev/demo).
   values: {}
   #   DATABASE_URL: "postgresql+asyncpg://regengine_app:...@postgres.internal:5432/regengine"
   #   LEDGER_DATABASE_URL: "postgresql+asyncpg://regengine_ledger_writer:...@postgres.internal:5432/regengine"
@@ -240,6 +265,9 @@ secrets:
   #   QDRANT_API_KEY: ""
   #   ANTHROPIC_API_KEY: ""
   #   WEBHOOK_HMAC_SECRET: ""
+  #   JWT_SECRET_KEY: ""            # only if SECRETS_BACKEND=env and JWT_ALGORITHM=HS256
+  #   JWT_PRIVATE_KEY_PEM: ""       # only if SECRETS_BACKEND=env and JWT_ALGORITHM=RS256
+  #   JWT_PUBLIC_KEY_PEM: ""
 
 extraEnv: []
 # - name: LOG_LEVEL

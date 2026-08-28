@@ -33,19 +33,37 @@ from app.execution.tasks import (
 from app.ledger.dependencies import get_ledger_service
 from app.ledger.integration import log_evaluation
 from app.ledger.service import LedgerService
+from app.security.dependencies import require_roles
+from app.security.models import Principal, Role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/execution")
+
+# Brokers read/execute compiled policy against their own transactions;
+# System_Admin is included for operational (non-broker) callers -- e.g.
+# replaying a batch during an incident -- never Compliance_Officer, which
+# has no legitimate reason to submit live transactions.
+_require_broker_role = Depends(require_roles(Role.BROKER_API_CLIENT, Role.SYSTEM_ADMIN))
+# The HITL portal's read side (queue visibility) is shared with admins;
+# resolving a case is compliance sign-off authority alone -- see
+# app.api.hitl_review_routes' module docstring for the same principle
+# applied to policy-level (rather than transaction-level) HITL.
+_require_hitl_read_role = Depends(require_roles(Role.COMPLIANCE_OFFICER, Role.SYSTEM_ADMIN))
 
 
 # --- Requirement 1: synchronous, instant transaction evaluation ---
 
 
-@router.post("/transactions/evaluate", response_model=EvaluationResult, status_code=status.HTTP_200_OK)
+@router.post(
+    "/transactions/evaluate",
+    response_model=EvaluationResult,
+    status_code=status.HTTP_200_OK,
+)
 async def evaluate_transaction(
     transaction: TransactionPayload,
     evaluator: Evaluator = Depends(get_evaluator),
     ledger: LedgerService = Depends(get_ledger_service),
+    principal: Principal = Depends(require_roles(Role.BROKER_API_CLIENT, Role.SYSTEM_ADMIN)),
 ) -> EvaluationResult:
     """Evaluate a single broker-submitted transaction against compiled Rego
     policies via the embedded OPA engine and return allow/deny/flagged
@@ -57,6 +75,15 @@ async def evaluate_transaction(
     (app.ledger) before the response is returned. A ledger write failure
     is logged but never turns a completed compliance decision into a
     5xx — see the trade-off note in app.ledger.integration.log_evaluation."""
+    # Cross-tenant scoping: a Broker_API_Client may only submit
+    # transactions for its OWN tenant. System_Admin is exempt (an
+    # operational escape hatch, e.g. replaying a batch during an incident).
+    if not principal.is_admin() and transaction.broker_id and transaction.broker_id != principal.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token tenant_id does not match transaction.broker_id.",
+        )
+
     try:
         result = await evaluator.evaluate_transaction(transaction)
     except OPAEngineError as exc:
@@ -70,7 +97,7 @@ async def evaluate_transaction(
 # --- Requirement 2: async batch handling for legacy SFTP / CDC pipelines ---
 
 
-@router.post("/batches", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/batches", status_code=status.HTTP_202_ACCEPTED, dependencies=[_require_broker_role])
 async def submit_batch(request: BatchIngestRequest) -> dict[str, str]:
     """Enqueue a batch parsed from a legacy SFTP landing-zone file (or any
     caller with an in-memory batch) for asynchronous processing on the
@@ -80,7 +107,7 @@ async def submit_batch(request: BatchIngestRequest) -> dict[str, str]:
     return {"batch_id": request.batch_id, "status": BatchJobStatus.QUEUED.value}
 
 
-@router.get("/batches/{batch_id}", response_model=BatchJobResult)
+@router.get("/batches/{batch_id}", response_model=BatchJobResult, dependencies=[_require_broker_role])
 async def get_batch_status(batch_id: str) -> BatchJobResult:
     result = get_batch_result(batch_id)
     if result is None:
@@ -88,7 +115,7 @@ async def get_batch_status(batch_id: str) -> BatchJobResult:
     return result
 
 
-@router.post("/cdc/events", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/cdc/events", status_code=status.HTTP_202_ACCEPTED, dependencies=[_require_broker_role])
 async def receive_cdc_event(event: CDCEvent, oms_webhook_url: str | None = None) -> dict[str, str]:
     """Receiver for a Debezium/Kafka-Connect HTTP sink (or a direct DB
     trigger) capturing INSERT/UPDATE on the legacy `transactions` table.
@@ -106,12 +133,12 @@ async def receive_cdc_event(event: CDCEvent, oms_webhook_url: str | None = None)
 # --- Requirement 3: HITL fallback for ambiguous / flagged decisions ---
 
 
-@router.get("/hitl/cases", response_model=list[HITLCase])
+@router.get("/hitl/cases", response_model=list[HITLCase], dependencies=[_require_hitl_read_role])
 async def list_hitl_cases(hitl_queue: HITLQueue = Depends(get_hitl_queue)) -> list[HITLCase]:
     return await hitl_queue.list_pending()
 
 
-@router.get("/hitl/cases/{case_id}", response_model=HITLCase)
+@router.get("/hitl/cases/{case_id}", response_model=HITLCase, dependencies=[_require_hitl_read_role])
 async def get_hitl_case(case_id: str, hitl_queue: HITLQueue = Depends(get_hitl_queue)) -> HITLCase:
     case = await hitl_queue.get(case_id)
     if case is None:
@@ -124,6 +151,7 @@ async def resolve_hitl_case(
     case_id: str,
     resolution: HITLResolutionRequest,
     hitl_queue: HITLQueue = Depends(get_hitl_queue),
+    principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER)),
 ) -> HITLCase:
     """A compliance reviewer resolves an ambiguous transaction as ALLOW or
     DENY. If the original transaction carried a `callback_url`, the final
@@ -132,9 +160,16 @@ async def resolve_hitl_case(
     if resolution.decision not in (Decision.ALLOW, Decision.DENY):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resolution decision must be 'allow' or 'deny'.")
 
+    # The authenticated principal's subject is the audit-trail source of
+    # truth for "who approved this" -- never the request body's
+    # `resolved_by`, which an unauthenticated-for-this-field caller could
+    # set to any name. Kept on HITLResolutionRequest for backward
+    # compatibility with callers/tests that still populate it, but ignored.
+    resolved_by = principal.subject
+
     status_map = {Decision.ALLOW: HITLStatus.APPROVED, Decision.DENY: HITLStatus.REJECTED}
     try:
-        case = await hitl_queue.resolve(case_id, status_map[resolution.decision], resolution.resolved_by, resolution.notes)
+        case = await hitl_queue.resolve(case_id, status_map[resolution.decision], resolved_by, resolution.notes)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -145,7 +180,7 @@ async def resolve_hitl_case(
             event_type="hitl.case.resolved",
             transaction_id=case.transaction.transaction_id,
             decision=resolution.decision,
-            payload={"case_id": case.case_id, "resolved_by": resolution.resolved_by, "notes": resolution.notes},
+            payload={"case_id": case.case_id, "resolved_by": resolved_by, "notes": resolution.notes},
         )
         dispatch_webhook_task.delay(case.transaction.callback_url, event.model_dump(mode="json"))
 

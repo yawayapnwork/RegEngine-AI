@@ -126,6 +126,44 @@ class Settings(BaseSettings):
     ingestion_state_key_prefix: str = "regengine:ingestion"
     ingestion_pdf_download_dir: str = "./data/ingested_pdfs"
 
+    # --- Security: JWT / OAuth2 ---
+    # Self-issued tokens (Broker_API_Client, via POST /v1/auth/token).
+    jwt_algorithm: str = "HS256"  # or "RS256"; see app/security/jwt.py
+    jwt_secret_key: str = "changeme-dev-only-use-secrets-backend-in-prod"  # HS256; resolved via app.security.secrets in prod
+    jwt_public_key_pem: str | None = None  # RS256 verification key
+    jwt_private_key_pem: str | None = None  # RS256 signing key
+    jwt_issuer: str = "regengine-ai"
+    jwt_audience: str = "regengine-ai-api"
+    jwt_access_token_ttl_seconds: int = 3600
+    # External SSO (Compliance_Officer / System_Admin), verified via JWKS.
+    jwt_external_issuer: str | None = None
+    jwt_jwks_url: str | None = None
+    jwt_external_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
+    tenant_client_key_prefix: str = "regengine:tenant_clients"
+
+    # --- Security: secrets management backend ---
+    secrets_backend: str = "env"  # "env" | "aws" | "vault" -- see app/security/secrets.py
+    secrets_cache_ttl_seconds: float = 300.0
+    aws_secrets_region: str = "ap-south-1"
+    vault_addr: str = "http://localhost:8200"
+    vault_token: str | None = None
+    vault_kv_mount: str = "secret"
+
+    # --- Security: transport / rate limiting / payload encryption ---
+    # Defaults to False so the service still boots cleanly over plain HTTP
+    # in local dev / docker-compose (neither terminates TLS itself -- see
+    # docker-compose.yml). Set true in production, where TLS is terminated
+    # at the ingress/load balancer and X-Forwarded-Proto is trustworthy --
+    # helm/regengine-ai's values.yaml.config sets this explicitly.
+    enforce_https: bool = False
+    rate_limit_key_prefix: str = "regengine:ratelimit"
+    rate_limit_window_seconds: int = 60
+    rate_limit_requests_per_window: int = 300
+    rate_limit_exempt_paths: list[str] = Field(
+        default_factory=lambda: ["/healthz", "/", "/docs", "/openapi.json", "/redoc"]
+    )
+    payload_encryption_enabled: bool = False
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

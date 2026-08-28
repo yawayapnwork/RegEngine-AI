@@ -35,6 +35,19 @@ feedparser>=6.0
 beautifulsoup4>=4.12
 lxml>=5.2
 
+# Security: OAuth2/JWT auth, RBAC, tenant client credential hashing,
+# application-layer payload encryption (see app/security/)
+pyjwt[crypto]>=2.9
+bcrypt>=4.1
+# cryptography is already pulled in by pyjwt[crypto]; used directly by
+# app/security/crypto.py (AES-256-GCM) too.
+
+# Secrets management backends (app/security/secrets.py) -- lazy-imported,
+# only the one selected via SECRETS_BACKEND needs to actually be installed;
+# uncomment whichever this deployment uses (both are harmless to install).
+# boto3>=1.34       # SECRETS_BACKEND=aws
+# hvac>=2.1         # SECRETS_BACKEND=vault
+
 # Testing
 pytest>=8.2
 pytest-asyncio>=0.23

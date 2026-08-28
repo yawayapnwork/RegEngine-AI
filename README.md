@@ -30,6 +30,7 @@ flowchart LR
 - [Quickstart](#quickstart)
 - [Configuration](#configuration)
 - [API surface](#api-surface)
+- [Security](#security)
 - [Frontend dashboard](#frontend-dashboard)
 - [Testing](#testing)
 - [Production notes](#production-notes)
@@ -159,6 +160,12 @@ a working local-dev default — nothing is required to boot the service against 
 | `ledger_pool_size` | `10` | Ledger connection pool size |
 | `database_url` | `postgresql+asyncpg://...@localhost:5432/regengine` | Main schema connection (circulars/clauses/compiled_rules/hitl_reviews); ordinary-privilege role, distinct from the ledger's |
 | `database_pool_size` | `10` | Main schema connection pool size |
+| `jwt_algorithm` / `jwt_issuer` / `jwt_audience` | `HS256` / `regengine-ai` / `regengine-ai-api` | Self-issued token settings — see [Security](#security) |
+| `jwt_external_issuer` / `jwt_jwks_url` | — | Verify SSO-issued human tokens via JWKS instead of a local secret |
+| `secrets_backend` | `env` | `env` \| `aws` \| `vault` — where key material actually resolves from (`app/security/secrets.py`) |
+| `enforce_https` | `False` | Reject non-TLS requests (`X-Forwarded-Proto`); enable once behind a TLS-terminating ingress |
+| `rate_limit_requests_per_window` / `rate_limit_window_seconds` | `300` / `60` | Per-tenant/per-user/per-IP request quota |
+| `payload_encryption_enabled` | `False` | Opt-in AES-256-GCM body encryption on top of TLS (`X-Encrypted: true`) |
 
 See `app/config.py` for the complete, authoritative list.
 
@@ -172,16 +179,32 @@ See `app/config.py` for the complete, authoritative list.
 | `POST` | `/v1/circulars/parse-and-index` | Both steps in one call |
 | `GET` | `/healthz` | Liveness |
 
-**Execution** (`app/api/execution_routes.py`, prefix `/v1/execution`)
+**Execution** (`app/api/execution_routes.py`, prefix `/v1/execution`) — requires `Broker_API_Client` or `System_Admin`
+unless noted
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/transactions/evaluate` | Synchronous `allow` / `deny` / `flagged` decision + ledger write |
 | `POST` | `/batches` | Enqueue an SFTP-sourced batch (Celery, `regengine_batch`) |
 | `GET` | `/batches/{batch_id}` | Batch job status/results |
 | `POST` | `/cdc/events` | Receiver for Debezium/Kafka-Connect/DB-trigger change events |
-| `GET` | `/hitl/cases` | List pending HITL cases |
-| `GET` | `/hitl/cases/{case_id}` | Fetch one case |
-| `POST` | `/hitl/cases/{case_id}/resolve` | Compliance officer resolves an ambiguous transaction |
+| `GET` | `/hitl/cases` | List pending HITL cases — `Compliance_Officer` or `System_Admin` |
+| `GET` | `/hitl/cases/{case_id}` | Fetch one case — `Compliance_Officer` or `System_Admin` |
+| `POST` | `/hitl/cases/{case_id}/resolve` | Resolve an ambiguous transaction — `Compliance_Officer` only |
+
+**Auth** (`app/api/auth_routes.py`, prefix `/v1/auth`)
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/token` | OAuth2 `client_credentials` grant — issues a `Broker_API_Client` token for a registered tenant |
+| `GET` | `/me` | Introspect the caller's own resolved identity |
+
+**HITL review portal** (`app/api/hitl_review_routes.py`, prefix `/v1/hitl-reviews`) — policy-level HITL (approving
+a *compiled policy version*, distinct from `/v1/execution/hitl/cases` which resolves a *live transaction*)
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | List reviews — `Compliance_Officer` or `System_Admin` |
+| `GET` | `/{review_id}` | Fetch one review — `Compliance_Officer` or `System_Admin` |
+| `POST` | `/{review_id}/approve` | Activate the compiled policy — `Compliance_Officer` only |
+| `POST` | `/{review_id}/reject` | Refuse it — `Compliance_Officer` only |
 
 Interactive docs: `http://localhost:8000/docs` once the service is running.
 
@@ -190,6 +213,34 @@ Interactive docs: `http://localhost:8000/docs` once the service is running.
 python -m app.ledger.verify_cli --start 2026-01-01 --end 2026-01-31
 ```
 Prints a JSON `ChainVerificationResult` and exits non-zero on any detected break.
+
+## Security
+
+OAuth2/JWT authentication and RBAC (`app/security/`) — see that package's module docstrings for full design
+rationale.
+
+**Roles**
+| Role | Identity type | Can |
+|---|---|---|
+| `Compliance_Officer` | Human, enterprise SSO | Approve/reject compiled policies and resolve ambiguous transactions (HITL) |
+| `Broker_API_Client` | Machine, one per broker tenant | Submit/read transactions, batches, and CDC events for its own `tenant_id` |
+| `System_Admin` | Human or service account | Trigger ingestion, parse/index circulars, operational execution access — deliberately **excluded** from HITL approval (separation of duties) |
+
+**Tokens**: `Broker_API_Client` tokens are self-issued via `POST /v1/auth/token` (RFC 6749 `client_credentials`);
+`Compliance_Officer`/`System_Admin` tokens come from your enterprise SSO provider, verified via JWKS
+(`jwt_jwks_url`) — this service never sees a human's password. Broker tenant clients are registered out-of-band
+via `app.security.tenant_store.TenantClientStore` (no public self-service signup).
+
+**Middleware stack** (`app/security/middleware.py`), mounted in this order: `SecurityHeadersMiddleware` (HSTS +
+HTTPS enforcement) → `JWTAuthenticationMiddleware` (opportunistic — attaches `request.state.principal`, never
+itself 401s) → `TenantRateLimitMiddleware` (Redis fixed-window, keyed by `tenant_id` so one broker's burst can't
+starve another's quota) → `PayloadEncryptionMiddleware` (optional AES-256-GCM body encryption on top of TLS, opt
+in via `X-Encrypted: true`). Actual 401/403 enforcement is per-route via `app.security.dependencies.require_roles(...)`.
+
+**Secrets** (`app/security/secrets.py`): JWT signing keys, per-tenant payload-encryption keys, and other key
+material resolve through `SECRETS_BACKEND` (`env` for local dev, `aws` for AWS Secrets Manager, `vault` for
+HashiCorp Vault KV v2) rather than being read as plain settings in production — swap the backend, no other code
+changes.
 
 ## Frontend dashboard
 
