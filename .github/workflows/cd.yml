@@ -1,0 +1,578 @@
+# .github/workflows/cd.yml
+#
+# Continuous Deployment — triggers on merge to `main` (after CI gate passes).
+#
+# Pipeline stages:
+#
+#   1. gate          Confirm the CI workflow passed for this exact SHA before
+#                    building anything (prevents deploying a broken commit that
+#                    merged via admin override).
+#
+#   2. opa-bundle    Re-run (or reuse) the OPA bundle workflow as a required
+#                    check.  The signed bundle artifact is embedded in the image.
+#
+#   3. docker-build  Build multi-arch (linux/amd64 + linux/arm64) Docker image
+#                    via docker/build-push-action with BuildKit cache.  Image is
+#                    tagged with full SHA, short SHA, and `latest-staging`.
+#                    Publishes to ghcr.io.
+#
+#   4. deploy-staging  Helm upgrade to the `regengine-staging` namespace.
+#                      Runs a rollout status check (5 min timeout).
+#                      On failure: automatic rollback + Slack alert.
+#
+#   5. smoke-staging   Lightweight post-deploy health check against staging
+#                      API endpoint.  Blocks promotion to production.
+#
+#   6. deploy-prod     Helm upgrade to the `regengine-prod` namespace with
+#                      production values override.  Rolling update with
+#                      max-unavailable=0 (zero-downtime).  Same rollback logic.
+#
+#   7. notify          Post success/failure summary to Slack.
+#
+# Required repository secrets:
+#   GHCR_TOKEN                  GitHub PAT with packages:write
+#   KUBECONFIG_STAGING          base64-encoded kubeconfig for staging cluster
+#   KUBECONFIG_PROD             base64-encoded kubeconfig for production cluster
+#   OPA_BUNDLE_SIGNING_KEY      RSA private key PEM for signing OPA bundles
+#   SLACK_WEBHOOK_URL           Slack incoming webhook for deployment notifications
+#   STAGING_API_URL             Base URL of the staging API (for smoke tests)
+#
+# Required repository variables (Settings → Variables → Actions):
+#   IMAGE_REGISTRY              ghcr.io/your-org
+#   IMAGE_NAME                  regengine-ai
+#   HELM_RELEASE_NAME           regengine-ai
+#   K8S_NAMESPACE_STAGING       regengine-staging
+#   K8S_NAMESPACE_PROD          regengine-prod
+#   HELM_CHART_PATH             helm/regengine-ai
+#   ROLLOUT_TIMEOUT             300s
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+# Only one CD run at a time — concurrent deploys to the same namespace would
+# race Helm's lock.  New pushes queue; they don't cancel in-progress deploys
+# (unlike CI where cancelling is safe) because a half-completed rollout is
+# worse than waiting.
+concurrency:
+  group: cd-deploy
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  REGISTRY: ${{ vars.IMAGE_REGISTRY || 'ghcr.io/your-org' }}
+  IMAGE_NAME: ${{ vars.IMAGE_NAME || 'regengine-ai' }}
+  HELM_RELEASE: ${{ vars.HELM_RELEASE_NAME || 'regengine-ai' }}
+  NS_STAGING: ${{ vars.K8S_NAMESPACE_STAGING || 'regengine-staging' }}
+  NS_PROD: ${{ vars.K8S_NAMESPACE_PROD || 'regengine-prod' }}
+  HELM_CHART: ${{ vars.HELM_CHART_PATH || 'helm/regengine-ai' }}
+  ROLLOUT_TIMEOUT: ${{ vars.ROLLOUT_TIMEOUT || '300s' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job: gate
+  # Refuse to deploy unless the CI workflow for this exact commit succeeded.
+  # Prevents a broken commit merged via admin-bypass from reaching staging.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: "CI Gate Check"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify CI passed for ${{ github.sha }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: checks } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              check_name: 'CI Gate',
+              filter: 'latest',
+            });
+            const passed = checks.check_runs.some(r =>
+              r.conclusion === 'success' || r.conclusion === 'neutral'
+            );
+            if (!passed) {
+              core.setFailed(
+                `CI Gate check has not passed for SHA ${context.sha}. ` +
+                `Refusing to deploy. Run CI first or wait for it to complete.`
+              );
+            }
+
+  # ---------------------------------------------------------------------------
+  # Job: opa-bundle
+  # Reuse the OPA bundle workflow as a required gate — reuses the artifact
+  # from the same SHA if CI already built it; otherwise builds fresh.
+  # ---------------------------------------------------------------------------
+  opa-bundle:
+    name: "OPA Bundle"
+    needs: gate
+    uses: ./.github/workflows/opa-bundle.yml
+    secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # Job: docker-build
+  # Multi-arch image build with BuildKit layer caching to ghcr.io.
+  # Embeds the signed OPA bundle artifact into the image.
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: "Docker Build & Push"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    needs: opa-bundle
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write   # for keyless Cosign signing
+
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+      short-sha: ${{ steps.slug.outputs.sha-short }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute short SHA
+        id: slug
+        run: echo "sha-short=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      # Download the signed OPA bundle built in the opa-bundle job and place
+      # it where the Dockerfile expects it (docker/opa-bundle/).
+      - name: Download OPA bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: opa-bundle-${{ github.sha }}
+          path: docker/opa-bundle/
+
+      - name: Set up QEMU (multi-arch emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          # Use the container driver so BuildKit cache can be exported/imported
+          # to the GitHub Actions cache backend.
+          driver: docker-container
+          driver-opts: |
+            network=host
+            image=moby/buildkit:latest
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      # Generate image tags + OCI labels from git metadata.
+      # Tags produced:
+      #   ghcr.io/your-org/regengine-ai:<full-sha>
+      #   ghcr.io/your-org/regengine-ai:<short-sha>
+      #   ghcr.io/your-org/regengine-ai:latest-staging  (staging-only, overwritten per deploy)
+      - name: Docker image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=sha,format=short,prefix=
+            type=raw,value=latest-staging
+          labels: |
+            org.opencontainers.image.title=RegEngine AI
+            org.opencontainers.image.description=SEBI compliance execution engine
+            org.opencontainers.image.vendor=RegEngine AI
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      # Build and push.  BuildKit GitHub cache means unchanged layers are not
+      # re-pushed, keeping average build time under 5 minutes for small diffs.
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pass OPA version used in the bundle so the Helm OPA sidecar tag
+          # matches the policy API version compiled into the bundle.
+          build-args: |
+            OPA_BUNDLE_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=regengine-main
+          cache-to: type=gha,mode=max,scope=regengine-main
+          provenance: true
+          sbom: true   # Generate SBOM attestation via BuildKit
+
+      - name: Output image digest
+        run: |
+          echo "Image digest: ${{ steps.build.outputs.digest }}"
+          echo "Full image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
+      # Keyless Cosign signing — attaches a Sigstore signature to the image
+      # so the Kubernetes admission controller (if configured) can verify it.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless / OIDC)
+        run: |
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
+      # Trivy scan the pushed image — catches OS-layer CVEs that Dockerfile
+      # builds from a pre-existing base image may not catch at the FS level.
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+          format: "sarif"
+          output: "trivy-image.sarif"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload image scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+  # ---------------------------------------------------------------------------
+  # Job: deploy-staging
+  # Helm upgrade → rollout status check → rollback on failure.
+  # ---------------------------------------------------------------------------
+  deploy-staging:
+    name: "Deploy → Staging"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    needs: docker-build
+
+    environment:
+      name: staging
+      url: ${{ secrets.STAGING_API_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl + Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.15.0"
+
+      - name: Configure kubeconfig (staging)
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+          kubectl cluster-info
+
+      - name: Helm upgrade (staging)
+        id: helm-staging
+        run: |
+          helm upgrade ${{ env.HELM_RELEASE }} ${{ env.HELM_CHART }} \
+            --namespace ${{ env.NS_STAGING }} \
+            --create-namespace \
+            --install \
+            --atomic \
+            --timeout ${{ env.ROLLOUT_TIMEOUT }} \
+            --history-max 5 \
+            --set image.repository="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" \
+            --set image.tag="${{ needs.docker-build.outputs.short-sha }}" \
+            --set image.digest="${{ needs.docker-build.outputs.image-digest }}" \
+            --set global.deployedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --set global.gitSha="${{ github.sha }}" \
+            --values helm/regengine-ai/values.yaml \
+            --values helm/regengine-ai/values-staging.yaml \
+            --wait
+
+      # --atomic above already rolls back on Helm timeout, but we additionally
+      # watch the Kubernetes rollout directly to catch mid-rollout OOMKills or
+      # liveness probe failures that Helm's --wait might not surface cleanly.
+      - name: Verify rollout (staging)
+        id: rollout-staging
+        run: |
+          kubectl rollout status deployment/${{ env.HELM_RELEASE }}-api \
+            --namespace ${{ env.NS_STAGING }} \
+            --timeout=${{ env.ROLLOUT_TIMEOUT }}
+          kubectl rollout status deployment/${{ env.HELM_RELEASE }}-worker \
+            --namespace ${{ env.NS_STAGING }} \
+            --timeout=${{ env.ROLLOUT_TIMEOUT }}
+
+      - name: Rollback staging on failure
+        if: failure() && steps.helm-staging.conclusion == 'failure'
+        run: |
+          echo "Helm upgrade failed — rolling back to previous release."
+          helm rollback ${{ env.HELM_RELEASE }} 0 \
+            --namespace ${{ env.NS_STAGING }} \
+            --wait \
+            --timeout ${{ env.ROLLOUT_TIMEOUT }}
+
+      - name: Capture staging pod events on failure
+        if: failure()
+        run: |
+          kubectl get events \
+            --namespace ${{ env.NS_STAGING }} \
+            --sort-by='.lastTimestamp' \
+            --field-selector type=Warning \
+          | tail -40
+
+  # ---------------------------------------------------------------------------
+  # Job: smoke-staging
+  # Lightweight API health + compliance evaluation smoke tests against the
+  # live staging endpoint.  Blocks production promotion on failure.
+  # ---------------------------------------------------------------------------
+  smoke-staging:
+    name: "Smoke Tests (Staging)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    needs: deploy-staging
+
+    env:
+      STAGING_URL: ${{ secrets.STAGING_API_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          extras: "httpx>=0.27 pytest>=8.2"
+
+      # Basic health check — must return 200 with status=running within 60s
+      # of deployment completing (allows for pod readiness propagation).
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            STATUS=$(curl -sf "${STAGING_URL}/" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+            if [[ "$STATUS" == "running" ]]; then
+              echo "Health check passed (attempt $i)."
+              exit 0
+            fi
+            echo "Waiting... attempt $i/12"
+            sleep 5
+          done
+          echo "ERROR: Health check failed after 60 seconds."
+          exit 1
+
+      # Metrics endpoint must be reachable (ensures Prometheus scraping works).
+      - name: Metrics endpoint check
+        run: |
+          curl -sf "${STAGING_URL}/metrics" | grep -q "python_gc_objects" || \
+            { echo "ERROR: /metrics endpoint not returning Prometheus data."; exit 1; }
+          echo "Metrics endpoint OK."
+
+      # Docs endpoint — confirms FastAPI is serving OpenAPI spec.
+      - name: OpenAPI spec check
+        run: |
+          HTTP_STATUS=$(curl -so /dev/null -w "%{http_code}" "${STAGING_URL}/openapi.json")
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "ERROR: /openapi.json returned HTTP $HTTP_STATUS"
+            exit 1
+          fi
+          echo "OpenAPI spec OK (HTTP 200)."
+
+      - name: Upload smoke test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-staging
+          path: smoke-results/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Job: deploy-prod
+  # Production Helm deploy with zero-downtime rolling update.
+  # Requires manual approval via GitHub Environments protection rules —
+  # configure a required reviewer in Settings → Environments → production.
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: "Deploy → Production"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    needs: smoke-staging
+
+    environment:
+      name: production
+      # GitHub will pause here for manual approval before running the steps.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.15.0"
+
+      - name: Configure kubeconfig (production)
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+          kubectl cluster-info
+
+      # Run Alembic migrations as a Kubernetes Job BEFORE updating the app
+      # Deployment — "expand/contract" strategy ensures old pods can read the
+      # new schema during the rolling update, and new pods never see old schema.
+      - name: Run DB migrations (production)
+        run: |
+          # Render the migration Job manifest from Helm's migrate template
+          # with the same image tag we're about to deploy.
+          helm template ${{ env.HELM_RELEASE }} ${{ env.HELM_CHART }} \
+            --namespace ${{ env.NS_PROD }} \
+            --set image.repository="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" \
+            --set image.tag="${{ needs.docker-build.outputs.short-sha }}" \
+            --set image.digest="${{ needs.docker-build.outputs.image-digest }}" \
+            --values helm/regengine-ai/values.yaml \
+            --values helm/regengine-ai/values-production.yaml \
+            --show-only templates/migrate-job.yaml \
+          | kubectl apply -f - --namespace ${{ env.NS_PROD }}
+
+          # Wait for the migration job to complete (up to 5 minutes).
+          kubectl wait job/regengine-migrate \
+            --for=condition=complete \
+            --namespace ${{ env.NS_PROD }} \
+            --timeout=300s
+
+          kubectl delete job/regengine-migrate \
+            --namespace ${{ env.NS_PROD }} \
+            --ignore-not-found
+
+      - name: Helm upgrade (production)
+        id: helm-prod
+        run: |
+          helm upgrade ${{ env.HELM_RELEASE }} ${{ env.HELM_CHART }} \
+            --namespace ${{ env.NS_PROD }} \
+            --install \
+            --atomic \
+            --timeout ${{ env.ROLLOUT_TIMEOUT }} \
+            --history-max 10 \
+            --set image.repository="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" \
+            --set image.tag="${{ needs.docker-build.outputs.short-sha }}" \
+            --set image.digest="${{ needs.docker-build.outputs.image-digest }}" \
+            --set global.deployedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --set global.gitSha="${{ github.sha }}" \
+            --values helm/regengine-ai/values.yaml \
+            --values helm/regengine-ai/values-production.yaml \
+            --wait
+
+      - name: Verify rolling update (production)
+        run: |
+          kubectl rollout status deployment/${{ env.HELM_RELEASE }}-api \
+            --namespace ${{ env.NS_PROD }} \
+            --timeout=${{ env.ROLLOUT_TIMEOUT }}
+          kubectl rollout status deployment/${{ env.HELM_RELEASE }}-worker \
+            --namespace ${{ env.NS_PROD }} \
+            --timeout=${{ env.ROLLOUT_TIMEOUT }}
+
+      - name: Rollback production on failure
+        if: failure() && steps.helm-prod.conclusion == 'failure'
+        run: |
+          echo "::error::Production Helm upgrade failed — rolling back."
+          helm rollback ${{ env.HELM_RELEASE }} 0 \
+            --namespace ${{ env.NS_PROD }} \
+            --wait \
+            --timeout ${{ env.ROLLOUT_TIMEOUT }}
+
+      - name: Capture production events on failure
+        if: failure()
+        run: |
+          kubectl get events \
+            --namespace ${{ env.NS_PROD }} \
+            --sort-by='.lastTimestamp' \
+            --field-selector type=Warning \
+          | tail -40
+
+      - name: Tag deployed commit in Git
+        if: success()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "deploy/prod-$(date -u +%Y%m%d-%H%M%S)" \
+            -m "Production deploy: ${{ needs.docker-build.outputs.short-sha }}"
+          git push origin --tags
+
+  # ---------------------------------------------------------------------------
+  # Job: notify
+  # Post a Slack message summarising the entire CD pipeline outcome.
+  # Runs unconditionally so failures are always reported.
+  # ---------------------------------------------------------------------------
+  notify:
+    name: "Notify"
+    runs-on: ubuntu-22.04
+    needs: [docker-build, deploy-staging, smoke-staging, deploy-prod]
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          # Map GitHub job result to emoji + colour
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "emoji=:x:" >> "$GITHUB_OUTPUT"
+            echo "color=#CC0000"  >> "$GITHUB_OUTPUT"
+            echo "text=FAILED"    >> "$GITHUB_OUTPUT"
+          elif [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "emoji=:warning:"    >> "$GITHUB_OUTPUT"
+            echo "color=#FF8C00" >> "$GITHUB_OUTPUT"
+            echo "text=CANCELLED" >> "$GITHUB_OUTPUT"
+          else
+            echo "emoji=:white_check_mark:" >> "$GITHUB_OUTPUT"
+            echo "color=#006633"  >> "$GITHUB_OUTPUT"
+            echo "text=SUCCEEDED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send Slack notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "attachments": [{
+                "color": "${{ steps.status.outputs.color }}",
+                "blocks": [
+                  {
+                    "type": "header",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "${{ steps.status.outputs.emoji }} RegEngine AI — CD Pipeline ${{ steps.status.outputs.text }}"
+                    }
+                  },
+                  {
+                    "type": "section",
+                    "fields": [
+                      { "type": "mrkdwn", "text": "*Branch:*\n`${{ github.ref_name }}`" },
+                      { "type": "mrkdwn", "text": "*Commit:*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ needs.docker-build.outputs.short-sha }}`>" },
+                      { "type": "mrkdwn", "text": "*Image:*\n`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build.outputs.short-sha }}`" },
+                      { "type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}" }
+                    ]
+                  },
+                  {
+                    "type": "actions",
+                    "elements": [{
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "View Run" },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }]
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

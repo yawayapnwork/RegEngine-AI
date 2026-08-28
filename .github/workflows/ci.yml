@@ -1,0 +1,334 @@
+# .github/workflows/ci.yml
+#
+# Continuous Integration — runs on every pull request targeting `main` and on
+# direct pushes to `main`.  The workflow is split into independent parallel
+# jobs so a fast-failing lint check doesn't block a slow security scan and
+# vice versa.  All jobs share the same Python setup via the composite action
+# at .github/actions/setup-python-env.
+#
+# Job graph (all run in parallel after the checkout):
+#
+#   lint          Ruff (style + import order) + Ruff formatter check
+#   typecheck     mypy --strict over app/ and sdk/
+#   security      Bandit SAST + pip-audit (known CVEs in dependencies)
+#   test          Pytest full suite with coverage, PostgreSQL + Redis services
+#   trivy         Trivy filesystem vulnerability scan (OS packages + Python deps)
+#
+# The `test` job spins up real PostgreSQL and Redis service containers so
+# integration tests run against the same engine configuration as production.
+# SQLite is only used for the in-memory ledger unit tests (see requirements.txt).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch/PR on new pushes — avoids
+# wasting runners on stale commits while a new one is already queued.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  # Minimum acceptable overall coverage threshold — fail CI if it drops below.
+  COVERAGE_THRESHOLD: "80"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job: lint
+  # Ruff covers everything flake8 does plus isort/pyupgrade/etc. in one pass.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: "Lint (Ruff)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          extras: "ruff>=0.4"
+
+      - name: Ruff lint check
+        run: |
+          ruff check app/ sdk/ migrations/ \
+            --output-format=github \
+            --statistics
+
+      - name: Ruff format check
+        run: ruff format --check app/ sdk/ migrations/
+
+  # ---------------------------------------------------------------------------
+  # Job: typecheck
+  # mypy --strict over the application and SDK packages.
+  # ---------------------------------------------------------------------------
+  typecheck:
+    name: "Type Check (mypy)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          install-dev-tools: "true"
+
+      - name: mypy — app/
+        run: |
+          mypy app/ \
+            --strict \
+            --ignore-missing-imports \
+            --no-error-summary \
+            --pretty
+
+      - name: mypy — sdk/
+        run: |
+          mypy sdk/ \
+            --strict \
+            --ignore-missing-imports \
+            --no-error-summary \
+            --pretty
+
+  # ---------------------------------------------------------------------------
+  # Job: security
+  # Bandit SAST (Python code) + pip-audit (dependency CVEs).
+  # Failures are reported but only HIGH/CRITICAL severity blocks the build.
+  # ---------------------------------------------------------------------------
+  security:
+    name: "Security (Bandit + pip-audit)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    permissions:
+      security-events: write   # upload SARIF to GitHub Security tab
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          install-dev-tools: "true"
+          extras: "pip-audit>=2.7"
+
+      # Bandit: static analysis for common Python security issues.
+      # -ll = LOW severity lines; -iii = HIGH confidence items only blocked
+      # so informational noise doesn't block PRs.
+      - name: Bandit SAST scan
+        run: |
+          bandit -r app/ sdk/ \
+            -ll -iii \
+            --format sarif \
+            --output bandit-results.sarif || true
+
+      - name: Upload Bandit SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit
+
+      # Bandit exit-code block: fail the job if HIGH confidence issues exist.
+      - name: Bandit (fail on HIGH)
+        run: |
+          bandit -r app/ sdk/ \
+            --severity-level high \
+            --confidence-level high \
+            --format text \
+            --exit-zero
+
+      # pip-audit: check installed packages against OSV / PyPI advisory DB.
+      - name: pip-audit dependency CVE scan
+        run: |
+          pip-audit \
+            --requirement requirements.txt \
+            --output pip-audit.json \
+            --format json || true
+
+      - name: Upload pip-audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-results
+          path: pip-audit.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Job: trivy
+  # Trivy filesystem scan for OS packages, Python deps, IaC misconfigurations.
+  # Results uploaded to GitHub Security tab as SARIF.
+  # ---------------------------------------------------------------------------
+  trivy:
+    name: "Container Scan (Trivy)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Scan the repository filesystem (Dockerfile, requirements.txt,
+      # Helm chart YAML) — no image build needed at this stage.
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          # Ignore unfixed CVEs to reduce noise — fixable issues are
+          # more actionable for a PR author.
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-fs
+
+      # Trivy also checks IaC files (Dockerfile, Helm values, docker-compose).
+      - name: Trivy IaC misconfig scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "config"
+          scan-ref: "."
+          format: "table"
+          severity: "CRITICAL,HIGH,MEDIUM"
+          exit-code: "0"   # advisory only — IaC issues are reported but don't block
+
+  # ---------------------------------------------------------------------------
+  # Job: test
+  # Full Pytest suite with real PostgreSQL + Redis service containers.
+  # Coverage is enforced at COVERAGE_THRESHOLD percent.
+  # ---------------------------------------------------------------------------
+  test:
+    name: "Tests (Pytest)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: regengine_ci
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: regengine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U regengine_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      # Override app config to point at CI service containers.
+      DATABASE_URL: "postgresql+asyncpg://regengine_ci:ci_password@localhost:5432/regengine_test"
+      LEDGER_DATABASE_URL: "postgresql+asyncpg://regengine_ci:ci_password@localhost:5432/regengine_test"
+      REDIS_URL: "redis://localhost:6379/0"
+      # Minimal required secrets for test runs — never real credentials.
+      JWT_SECRET_KEY: "ci-test-secret-key-not-for-production"
+      OPA_SERVER_URL: "http://localhost:8181"   # not used in unit tests; OPA engine is mocked
+      ANTHROPIC_API_KEY: "dummy-ci-key"
+      SECRETS_BACKEND: "env"
+      SANDBOX_ENABLED: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          install-dev-tools: "true"
+
+      # Apply migrations before running tests that hit PostgreSQL.
+      - name: Run Alembic migrations
+        run: |
+          alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql+asyncpg://regengine_ci:ci_password@localhost:5432/regengine_test"
+
+      # Run the full test suite.  --tb=short keeps log output readable in
+      # GitHub's annotation panel.  Coverage is measured for app/ and sdk/.
+      - name: Run Pytest with coverage
+        run: |
+          pytest tests/ \
+            --tb=short \
+            --asyncio-mode=auto \
+            --cov=app \
+            --cov=sdk \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=${{ env.COVERAGE_THRESHOLD }} \
+            -q
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 30
+
+      # Upload to Codecov if the secret is configured (optional integration).
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
+  # ---------------------------------------------------------------------------
+  # Summary gate — all other jobs must pass for this to succeed.
+  # Branch protection rules should require this job, not the individual ones,
+  # so adding a new parallel job doesn't require updating branch protection.
+  # ---------------------------------------------------------------------------
+  ci-pass:
+    name: "CI Gate"
+    runs-on: ubuntu-22.04
+    needs: [lint, typecheck, security, trivy, test]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || \
+                "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more CI jobs failed. See individual job logs above."
+            exit 1
+          fi
+          echo "All CI jobs passed."

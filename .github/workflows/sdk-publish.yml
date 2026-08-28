@@ -1,0 +1,263 @@
+# .github/workflows/sdk-publish.yml
+#
+# SDK Release Pipeline — builds and publishes the `regengine-python` SDK to
+# PyPI on every version tag (v*.*.*) pushed to the repository.
+#
+# Workflow:
+#   1. validate     Run SDK-specific lint, type check, and tests.
+#   2. build        Build sdist + wheel via `python -m build`.
+#   3. publish-pypi Upload to PyPI using Trusted Publishing (OIDC — no API
+#                   token stored in GitHub secrets; the OIDC token is exchanged
+#                   for a short-lived PyPI upload credential automatically).
+#   4. publish-ghcr Also push the package to GitHub Packages (pip-installable
+#                   from ghcr.io for internal consumers who can't reach PyPI).
+#   5. release      Create a GitHub Release with auto-generated changelog and
+#                   attach the built wheel + sdist as release assets.
+#
+# Tag convention:  v<semver>  e.g. v1.2.3
+#                  v<semver>-rc.<n>  e.g. v1.2.3-rc.1  → uploads to PyPI Test
+#
+# PyPI Trusted Publishing setup (one-time, in PyPI project settings):
+#   Publisher: GitHub Actions
+#   Owner: your-org
+#   Repository: regengine-ai
+#   Workflow: sdk-publish.yml
+#   Environment: pypi-production (or pypi-test for RC tags)
+
+name: SDK Publish
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"          # stable release: v1.2.3
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+" # release candidate: v1.2.3-rc.1
+
+# Prevent concurrent publish runs for the same tag.
+concurrency:
+  group: sdk-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  SDK_DIR: "sdk"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job: validate
+  # Run the SDK-specific linting, type checks, and unit tests before building.
+  # Keeps the publish pipeline honest — we never ship untested code.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: "Validate SDK"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          install-dev-tools: "true"
+
+      - name: Install SDK in editable mode
+        run: pip install -e "${{ env.SDK_DIR }}[dev]"
+
+      - name: Ruff lint — SDK
+        run: ruff check ${{ env.SDK_DIR }}/ --output-format=github
+
+      - name: mypy — SDK
+        run: |
+          mypy ${{ env.SDK_DIR }}/regengine/ \
+            --strict \
+            --ignore-missing-imports \
+            --pretty
+
+      - name: Run SDK unit tests
+        run: |
+          pytest ${{ env.SDK_DIR }}/tests/ \
+            --tb=short \
+            --asyncio-mode=auto \
+            -q
+
+  # ---------------------------------------------------------------------------
+  # Job: build
+  # Produce the sdist (source distribution) and wheel, then verify the wheel
+  # is installable and its metadata matches the tag version.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build SDK Distribution"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    needs: validate
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is-rc: ${{ steps.version.outputs.is-rc }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          extras: "build>=1.2 twine>=5.0"
+
+      # Strip the leading 'v' from the tag to get the PEP 440 version.
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$TAG" == *"-rc."* ]]; then
+            echo "is-rc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is-rc=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Tag: $TAG  →  Version: $VERSION  (RC: $([ "$TAG" == *'-rc.'* ] && echo true || echo false))"
+
+      # Enforce that pyproject.toml's version matches the pushed tag.
+      # This prevents accidentally publishing v1.0.0 when the tag says v1.0.1.
+      - name: Verify version in pyproject.toml matches tag
+        run: |
+          TOML_VERSION=$(python3 -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('${{ env.SDK_DIR }}/pyproject.toml').read_text())
+          print(data['project']['version'])
+          ")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+
+          if [[ "$TOML_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::Version mismatch: pyproject.toml has '$TOML_VERSION' but tag is '$TAG_VERSION'."
+            echo "Update sdk/pyproject.toml before pushing the release tag."
+            exit 1
+          fi
+          echo "Version match confirmed: $TOML_VERSION"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m build ${{ env.SDK_DIR }}/ \
+            --outdir dist/
+
+      # twine check validates the long_description renders correctly on PyPI
+      # and that metadata is well-formed.
+      - name: Verify distribution with twine
+        run: twine check dist/*
+
+      # Verify the wheel is actually installable in a clean venv.
+      - name: Smoke test wheel install
+        run: |
+          python -m venv /tmp/test-venv
+          /tmp/test-venv/bin/pip install dist/*.whl
+          /tmp/test-venv/bin/python -c "
+          import regengine
+          print('regengine version:', regengine.__version__)
+          from regengine import RegEngineClient
+          print('RegEngineClient importable:', RegEngineClient)
+          "
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-dist-${{ github.ref_name }}
+          path: dist/
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Job: publish-pypi
+  # Upload to PyPI (stable) or PyPI Test (RC) using OIDC Trusted Publishing.
+  # No API token is stored in secrets — PyPI exchanges the GitHub OIDC token
+  # for a short-lived credential automatically.
+  # ---------------------------------------------------------------------------
+  publish-pypi:
+    name: "Publish → ${{ needs.build.outputs.is-rc == 'true' && 'PyPI Test' || 'PyPI' }}"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    needs: build
+
+    # Use separate GitHub Environments so PyPI Trusted Publishing can be
+    # scoped to the correct environment name.
+    environment:
+      name: ${{ needs.build.outputs.is-rc == 'true' && 'pypi-test' || 'pypi-production' }}
+      url: ${{ needs.build.outputs.is-rc == 'true' && 'https://test.pypi.org/p/regengine' || 'https://pypi.org/p/regengine' }}
+
+    permissions:
+      id-token: write   # Required for OIDC Trusted Publishing
+
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sdk-dist-${{ github.ref_name }}
+          path: dist/
+
+      - name: Publish to PyPI (stable release)
+        if: needs.build.outputs.is-rc == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          verify-metadata: true
+          skip-existing: false
+
+      - name: Publish to PyPI Test (release candidate)
+        if: needs.build.outputs.is-rc == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+          verify-metadata: true
+          skip-existing: true
+
+  # ---------------------------------------------------------------------------
+  # Job: release
+  # Create a GitHub Release, auto-generate a changelog from commits since the
+  # last tag, and attach the wheel + sdist as release assets.
+  # Skipped for RC tags — RCs get a pre-release instead.
+  # ---------------------------------------------------------------------------
+  release:
+    name: "GitHub Release"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    needs: [build, publish-pypi]
+
+    permissions:
+      contents: write   # create releases and push tags
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for changelog generation
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sdk-dist-${{ github.ref_name }}
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "regengine-python ${{ needs.build.outputs.version }}"
+          prerelease: ${{ needs.build.outputs.is-rc == 'true' }}
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ```bash
+            pip install regengine==${{ needs.build.outputs.version }}
+            ```
+
+            **PyPI:** https://pypi.org/project/regengine/${{ needs.build.outputs.version }}/
+
+            See [SDK README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/sdk/README.md) for quickstart and API reference.
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

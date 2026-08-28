@@ -1,0 +1,90 @@
+# .github/actions/setup-python-env/action.yml
+#
+# Reusable composite action: consistent Python + venv setup used by every
+# workflow that installs the project.  Centralising this means a Python
+# version bump or a cache-key change is a one-line edit in one file, not
+# a search-and-replace across every workflow.
+#
+# Usage in a workflow step:
+#   - uses: ./.github/actions/setup-python-env
+#     with:
+#       python-version: "3.11"
+#       extras: "bandit mypy"   # additional pip installs beyond requirements.txt
+
+name: "Setup Python Environment"
+description: "Install Python, restore pip cache, install requirements.txt + optional extras."
+
+inputs:
+  python-version:
+    description: "Python version to install (passed to actions/setup-python)."
+    required: false
+    default: "3.11"
+
+  extras:
+    description: >
+      Space-separated list of additional pip packages to install AFTER
+      requirements.txt (e.g. 'bandit mypy ruff').  Useful for dev/lint tools
+      that are not in the production requirements.
+    required: false
+    default: ""
+
+  install-dev-tools:
+    description: >
+      When 'true', install the standard set of CI dev tools (ruff, mypy,
+      bandit, pytest-cov) in addition to requirements.txt.
+    required: false
+    default: "false"
+
+outputs:
+  python-version:
+    description: "The resolved Python version that was installed."
+    value: ${{ steps.setup.outputs.python-version }}
+
+  cache-hit:
+    description: "Whether the pip cache was restored ('true'/'false')."
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: "composite"
+
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      id: setup
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # Cache key incorporates the full requirements.txt hash so any change
+    # to pinned versions busts the cache automatically.
+    - name: Restore pip cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          pip-${{ runner.os }}-py${{ inputs.python-version }}-
+
+    - name: Install project dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install dev tools (standard set)
+      if: inputs.install-dev-tools == 'true'
+      shell: bash
+      run: |
+        pip install \
+          "ruff>=0.4" \
+          "mypy>=1.10" \
+          "bandit[toml]>=1.7" \
+          "pytest-cov>=5.0" \
+          "types-redis" \
+          "types-python-dateutil" \
+          "types-beautifulsoup4"
+
+    - name: Install extra packages
+      if: inputs.extras != ''
+      shell: bash
+      run: pip install ${{ inputs.extras }}

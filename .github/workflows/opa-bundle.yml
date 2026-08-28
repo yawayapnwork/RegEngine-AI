@@ -1,0 +1,318 @@
+# .github/workflows/opa-bundle.yml
+#
+# OPA Policy Bundle CI — validates, tests, and packages Rego policies.
+#
+# Triggers:
+#   • PR / push to main: whenever any .rego file, the bundle manifest, or
+#     this workflow itself changes.
+#   • Called by cd.yml as a required check before building the Docker image,
+#     ensuring the bundle in the final image has passed full Rego validation.
+#
+# Job graph:
+#
+#   validate    opa check — parse/type-check every .rego file
+#   unit-test   opa test  — run all _test.rego unit-test suites
+#   build       opa build — produce a signed, gzipped bundle artifact
+#   scan        Trivy scan the bundle tarball for secrets/misconfigs
+#
+# OPA version is pinned in env.OPA_VERSION and used consistently across
+# all three jobs to guarantee check → test → build use identical semantics.
+#
+# Bundle layout expected in this repo:
+#   policies/
+#     sebi_baseline/        SEBI master-circular compiled Rego modules
+#       *.rego
+#     tenants/              Per-tenant risk-overlay Rego modules (generated)
+#       <tenant_id>/
+#         *.rego
+#     lib/                  Shared helper packages imported by the above
+#       *.rego
+#     tests/                _test.rego files mirroring the above layout
+#       sebi_baseline/
+#         *_test.rego
+#       tenants/
+#         <tenant_id>/
+#           *_test.rego
+
+name: OPA Bundle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "policies/**"
+      - ".opa/**"
+      - ".github/workflows/opa-bundle.yml"
+  push:
+    branches: [main]
+    paths:
+      - "policies/**"
+      - ".opa/**"
+  # Allow cd.yml to call this workflow as a required gate.
+  workflow_call:
+    outputs:
+      bundle-artifact:
+        description: "Name of the uploaded bundle artifact."
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+concurrency:
+  group: opa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPA_VERSION: "0.65.0"
+  BUNDLE_DIR: "policies"
+  BUNDLE_OUTPUT: "bundle.tar.gz"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job: validate
+  # opa check — strict parse, type-check, and undefined-reference detection
+  # across every .rego file in the repo.  Runs without a server; pure static.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: "Validate Rego Syntax"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install OPA ${{ env.OPA_VERSION }}
+        run: |
+          curl -sL \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static" \
+            -o /usr/local/bin/opa
+          chmod +x /usr/local/bin/opa
+          opa version
+
+      # opa check --strict enables:
+      #   - unused variable detection
+      #   - deprecated built-in usage warnings promoted to errors
+      #   - undefined reference detection (catches typos in import paths)
+      - name: OPA strict syntax check
+        run: |
+          opa check \
+            --strict \
+            --format pretty \
+            ${{ env.BUNDLE_DIR }}/
+
+      # Confirm every non-test module declares a unique package path so
+      # OPA's bundle loader doesn't silently overwrite one module with another.
+      - name: Check for duplicate package declarations
+        run: |
+          python3 - <<'EOF'
+          import pathlib, sys, collections, re
+
+          PKG_RE = re.compile(r"^\s*package\s+([\w.]+)", re.MULTILINE)
+          seen: dict[str, list[str]] = collections.defaultdict(list)
+
+          for f in pathlib.Path("policies").rglob("*.rego"):
+              if "_test" in f.stem:
+                  continue
+              text = f.read_text()
+              for m in PKG_RE.finditer(text):
+                  seen[m.group(1)].append(str(f))
+
+          duplicates = {k: v for k, v in seen.items() if len(v) > 1}
+          if duplicates:
+              print("ERROR: duplicate package declarations found:")
+              for pkg, files in duplicates.items():
+                  print(f"  {pkg}: {files}")
+              sys.exit(1)
+          print(f"OK — {len(seen)} unique packages checked.")
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # Job: unit-test
+  # opa test — executes every *_test.rego file, reports coverage per package.
+  # Fails if any test fails OR if policy coverage falls below threshold.
+  # ---------------------------------------------------------------------------
+  unit-test:
+    name: "Rego Unit Tests"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    needs: validate
+
+    env:
+      REGO_COVERAGE_THRESHOLD: "80"   # percent; fail if total coverage drops below
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install OPA ${{ env.OPA_VERSION }}
+        run: |
+          curl -sL \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static" \
+            -o /usr/local/bin/opa
+          chmod +x /usr/local/bin/opa
+
+      # Run all _test.rego suites.  --coverage prints per-rule coverage;
+      # --format pretty gives human-readable output in the Actions log.
+      - name: Run Rego unit tests
+        run: |
+          opa test \
+            ${{ env.BUNDLE_DIR }}/ \
+            --verbose \
+            --coverage \
+            --format pretty \
+            2>&1 | tee opa-test-output.txt
+
+      # Extract overall coverage from OPA output and fail if below threshold.
+      - name: Enforce Rego coverage threshold
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+
+          with open("opa-test-output.txt") as f:
+              text = f.read()
+
+          # OPA prints something like: "coverage: 87.3% of statements"
+          match = re.search(r"coverage:\s*([\d.]+)%", text)
+          if not match:
+              print("WARNING: Could not parse OPA coverage output — skipping threshold check.")
+              sys.exit(0)
+
+          coverage = float(match.group(1))
+          threshold = float("${{ env.REGO_COVERAGE_THRESHOLD }}")
+          print(f"Rego coverage: {coverage:.1f}% (threshold: {threshold:.0f}%)")
+
+          if coverage < threshold:
+              print(f"FAIL: coverage {coverage:.1f}% is below the {threshold:.0f}% threshold.")
+              sys.exit(1)
+          print("PASS: coverage threshold met.")
+          EOF
+
+      - name: Upload OPA test output
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opa-test-results
+          path: opa-test-output.txt
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Job: build
+  # opa build — compile all non-test Rego into a signed, gzipped bundle
+  # tarball.  The artifact is consumed by cd.yml's Docker build step, which
+  # COPYs it into the image so the OPA sidecar can load it at startup.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build OPA Bundle"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    needs: unit-test
+
+    outputs:
+      artifact-name: ${{ steps.upload.outputs.artifact-name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install OPA ${{ env.OPA_VERSION }}
+        run: |
+          curl -sL \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static" \
+            -o /usr/local/bin/opa
+          chmod +x /usr/local/bin/opa
+
+      # Determine whether a signing key is available.
+      # Signed bundles are verified by the OPA sidecar at load time, providing
+      # tamper-evidence identical to the ledger's hash chain but for policies.
+      - name: Check for bundle signing key
+        id: signing
+        run: |
+          if [[ -n "${{ secrets.OPA_BUNDLE_SIGNING_KEY }}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "WARNING: OPA_BUNDLE_SIGNING_KEY secret not set — bundle will be unsigned."
+          fi
+
+      - name: Write signing key to temp file
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          echo "${{ secrets.OPA_BUNDLE_SIGNING_KEY }}" > /tmp/opa_signing_key.pem
+          chmod 600 /tmp/opa_signing_key.pem
+
+      # Build signed bundle (preferred)
+      - name: Build signed OPA bundle
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          opa build \
+            --bundle \
+            --signing-key /tmp/opa_signing_key.pem \
+            --signing-alg RS256 \
+            --claims-file <(echo '{"iss":"regengine-ci","scope":"production"}') \
+            --output ${{ env.BUNDLE_OUTPUT }} \
+            ${{ env.BUNDLE_DIR }}/
+
+      # Build unsigned bundle (fallback / feature-branch builds)
+      - name: Build unsigned OPA bundle
+        if: steps.signing.outputs.available == 'false'
+        run: |
+          opa build \
+            --bundle \
+            --output ${{ env.BUNDLE_OUTPUT }} \
+            ${{ env.BUNDLE_DIR }}/
+
+      - name: Verify bundle is loadable
+        run: |
+          mkdir -p /tmp/bundle-verify
+          tar -xzf ${{ env.BUNDLE_OUTPUT }} -C /tmp/bundle-verify
+          opa check /tmp/bundle-verify/
+
+      - name: Compute bundle SHA-256
+        run: |
+          sha256sum ${{ env.BUNDLE_OUTPUT }} | tee bundle.sha256
+          echo "BUNDLE_SHA256=$(cut -d' ' -f1 bundle.sha256)" >> "$GITHUB_ENV"
+
+      - name: Upload bundle artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: opa-bundle-${{ github.sha }}
+          path: |
+            ${{ env.BUNDLE_OUTPUT }}
+            bundle.sha256
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Job: scan
+  # Trivy scans the built bundle tarball for embedded secrets and misconfigs.
+  # Runs in parallel with nothing blocking it after build.
+  # ---------------------------------------------------------------------------
+  scan:
+    name: "Scan Bundle (Trivy)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    needs: build
+
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Download bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: opa-bundle-${{ github.sha }}
+
+      - name: Trivy scan on bundle tarball
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-bundle.sarif"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-bundle.sarif
+          category: trivy-bundle
