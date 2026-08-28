@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
+from app.api.execution_routes import router as execution_router
 from app.api.routes import router
 from app.config import get_settings
 from app.parsing.exceptions import ParsingError
@@ -22,6 +23,7 @@ app = FastAPI(
     version="1.0.0",
 )
 app.include_router(router)
+app.include_router(execution_router)
 
 
 @app.exception_handler(ParsingError)

@@ -48,6 +48,30 @@ class Settings(BaseSettings):
     agent_verbose: bool = False
     agent_max_rpm: int = 20
 
+    # --- Execution service: embedded OPA engine ---
+    # OPA runs as a local/sidecar `opa run --server` process. Policies are
+    # pushed via its REST Policy API (PUT /v1/policies/{id}) for hot reload
+    # with no restart, so "embedded" here means co-located, not in-process.
+    opa_server_url: str = "http://localhost:8181"
+    opa_request_timeout_seconds: float = 2.0
+
+    # --- Execution service: Redis (Celery broker/backend + HITL queue + policy registry) ---
+    redis_url: str = "redis://localhost:6379/0"
+    policy_registry_key: str = "regengine:policy_registry"
+    hitl_key_prefix: str = "regengine:hitl"
+
+    # --- Execution service: Celery ---
+    celery_task_default_queue: str = "regengine_default"
+    celery_batch_queue: str = "regengine_batch"
+    celery_cdc_queue: str = "regengine_cdc"
+    celery_webhook_queue: str = "regengine_webhooks"
+
+    # --- Execution service: outbound webhooks (OMS/RMS/broker callbacks) ---
+    webhook_hmac_secret: str | None = None
+    webhook_timeout_seconds: float = 5.0
+    webhook_max_retries: int = 5
+    webhook_retry_backoff_seconds: float = 3.0
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
