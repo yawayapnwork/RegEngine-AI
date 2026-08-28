@@ -1,0 +1,23 @@
+{
+  "name": "mssql-legacy-broker-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "tasks.max": "1",
+    "database.hostname": "sqlserver",
+    "database.port": "1433",
+    "database.user": "sa",
+    "database.password": "Password123!",
+    "database.names": "BROKER_ERP",
+    "database.encrypt": "false",
+    "topic.prefix": "debezium.legacy",
+    "table.include.list": "dbo.TBL_TRADE_TRANSACTIONS,dbo.TBL_CLIENT_COLLATERAL",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.inventory",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "false"
+  }
+}

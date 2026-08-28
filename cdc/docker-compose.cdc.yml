@@ -1,0 +1,106 @@
+# =============================================================================
+# Docker Compose: Change-Data-Capture (CDC) Pipeline for Legacy Broker ERPs
+# =============================================================================
+# Architecture:
+#   1. Zookeeper + Apache Kafka (Message Broker & Event Log)
+#   2. MS SQL Server (Legacy Broker ERP DB with CDC Transaction Log mining enabled)
+#   3. Debezium Kafka Connect (Debezium SQL Server Connector engine)
+#   4. Python Async CDC Consumer Service (Consumes, normalizes, evaluates, DLQ)
+# =============================================================================
+
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - cdc-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cdc-net
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver-legacy-erp
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Password123!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./setup_cdc_db.sql:/docker-entrypoint-initdb.d/setup_cdc_db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P Password123! -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cdc-net
+
+  kafka-connect:
+    image: debezium/connect:2.6.0.Final
+    container_name: debezium-kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+    ports:
+      - "8383:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: debezium_connect_configs
+      OFFSET_STORAGE_TOPIC: debezium_connect_offsets
+      STATUS_STORAGE_TOPIC: debezium_connect_status
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    networks:
+      - cdc-net
+
+  cdc-consumer:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: regengine-cdc-consumer
+    command: python -m cdc.consumer --bootstrap-servers kafka:9092 --api-url http://api:8000
+    depends_on:
+      - kafka
+      - kafka-connect
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REGENGINE_API_URL: http://api:8000
+      DLQ_TOPIC: regengine.cdc.dlq
+    networks:
+      - cdc-net
+    restart: unless-stopped
+
+networks:
+  cdc-net:
+    driver: bridge
