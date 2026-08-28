@@ -29,6 +29,12 @@ ENV/
 htmlcov/
 coverage.xml
 
+# --- Node.js (frontend/) ---
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+npm-debug.log*
+
 # --- Editors / OS ---
 .vscode/
 .idea/
