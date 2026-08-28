@@ -58,11 +58,15 @@ app/
   execution/        FastAPI-facing evaluator, OPA client, policy registry,
                     Celery tasks (batch/CDC/webhooks), HITL queue
   ledger/           Hash-chain primitives, LedgerService, verifier, CLI
+  db/               Base/session for the main schema; ORM models (circulars, clauses,
+                    compiled_rules, hitl_reviews)
   api/              HTTP routers (circulars, execution)
   main.py           FastAPI app assembly
   config.py         Centralized environment-driven settings
 sql/
   ledger_schema.sql   PostgreSQL DDL for the audit ledger (immutability triggers, grants)
+migrations/         Alembic environment + versioned schema migrations
+alembic.ini
 frontend/
   src/components/   pipeline, splitview, hitl, vault, layout, shared
 tests/              pytest suite (compiler, agents, parsing, ledger)
@@ -79,7 +83,7 @@ requirements.txt
 | PostgreSQL 14+ | Audit ledger | Apply `sql/ledger_schema.sql` |
 | Redis 6+ | Celery broker/backend, policy registry, HITL queue | |
 | Qdrant | Vector index for parsed clauses | Local (`docker run qdrant/qdrant`) or hosted |
-| Anthropic API key | CrewAI extraction/audit agents | `ANTHROPIC_API_KEY` |
+
 
 ## Quickstart
 
@@ -108,7 +112,16 @@ restart required per policy update).
 psql "$LEDGER_ADMIN_DSN" -f sql/ledger_schema.sql
 ```
 This creates the append-only table, its immutability triggers, and the commented-out least-privilege role
-grants — uncomment and run those once per environment with your actual application role name.
+grants — uncomment and run those once per environment with your actual application role name. Apply this
+**before** running Alembic migrations below, since one of them alters this table.
+
+### 3b. Main schema (circulars / clauses / compiled_rules / hitl_reviews)
+
+```bash
+alembic upgrade head
+```
+Reads its target database from `database_url` (`app/config.py` / `.env`), not `alembic.ini`. Add
+`-x sqlalchemy_url=...` to target a different database ad hoc.
 
 ### 4. Async workers (batch / CDC / webhooks)
 
@@ -133,7 +146,6 @@ a working local-dev default — nothing is required to boot the service against 
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `anthropic_api_key` | — | Claude API key for the CrewAI extraction/audit agents |
 | `qdrant_url` / `qdrant_api_key` / `qdrant_collection` | `http://localhost:6333` / — / `sebi_master_circulars` | Vector store for parsed clauses |
 | `extraction_backend` / `unstructured_strategy` | `unstructured` / `hi_res` | PDF layout extraction backend |
 | `max_upload_mb` / `parse_timeout_seconds` / `parse_concurrency` | `50` / `180` / `4` | Ingestion limits |
@@ -145,6 +157,8 @@ a working local-dev default — nothing is required to boot the service against 
 | `webhook_timeout_seconds` / `webhook_max_retries` | `5.0` / `5` | Outbound delivery tuning |
 | `ledger_database_url` | `postgresql+asyncpg://...@localhost:5432/regengine` | Audit ledger connection (use the least-privilege `regengine_ledger_writer` role — see `sql/ledger_schema.sql`) |
 | `ledger_pool_size` | `10` | Ledger connection pool size |
+| `database_url` | `postgresql+asyncpg://...@localhost:5432/regengine` | Main schema connection (circulars/clauses/compiled_rules/hitl_reviews); ordinary-privilege role, distinct from the ledger's |
+| `database_pool_size` | `10` | Main schema connection pool size |
 
 See `app/config.py` for the complete, authoritative list.
 
@@ -212,7 +226,7 @@ DB-agnostic; `pg_advisory_xact_lock` concurrency control is exercised only again
   entry best-effort and returns the decision regardless. If your compliance posture requires "no evaluation
   without an audit row," put a durable outbox in front of `LedgerService.append_entry` (see
   `app/ledger/integration.py`).
-- **Secrets**: `ANTHROPIC_API_KEY`, `ledger_database_url`, and `webhook_hmac_secret` should come from your
+- **Secrets**: `ledger_database_url` and `webhook_hmac_secret` should come from your
   secrets manager in any non-local environment, never a committed `.env`.
 - **Webhook receivers** should verify the `X-RegEngine-Signature-256` HMAC header before trusting a decision
   notification.

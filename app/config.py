@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     webhook_max_retries: int = 5
     webhook_retry_backoff_seconds: float = 3.0
 
+    # --- Main application schema (circulars, clauses, compiled_rules, hitl_reviews) ---
+    # Same Postgres database as the ledger by default, but a distinct,
+    # ordinary-privilege role -- see app/db/session.py for why this is kept
+    # separate from ledger_database_url.
+    database_url: str = "postgresql+asyncpg://regengine_app:changeme@localhost:5432/regengine"
+    database_pool_size: int = 10
+
     # --- Tamper-evident audit ledger (PostgreSQL, SHA-256 hash chain) ---
     ledger_database_url: str = "postgresql+asyncpg://regengine_ledger_writer:changeme@localhost:5432/regengine"
     ledger_pool_size: int = 10

@@ -13,9 +13,13 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import CheckConstraint, Column, DateTime, MetaData, String, Table, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, String, Table, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON, BigInteger, Integer
+
+from app.db.base import Base
+from app.db import models as _db_models  # noqa: F401 - registers circulars/clauses/compiled_rules/hitl_reviews
+                                          # on Base.metadata so the FK columns below can resolve their targets
 
 # JSONB on PostgreSQL (indexable, efficient); generic JSON elsewhere (e.g.
 # SQLite in tests) via SQLAlchemy's standard cross-dialect variant idiom.
@@ -27,7 +31,11 @@ _JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
 # true BIGINT identity column, matching sql/ledger_schema.sql's BIGSERIAL.
 _ID_TYPE = BigInteger().with_variant(Integer, "sqlite")
 
-metadata = MetaData()
+# Bound to app.db.base.Base's MetaData (not a fresh MetaData()) so this
+# table, `circulars`, `clauses`, `compiled_rules`, and `hitl_reviews` are
+# all one schema for Alembic autogenerate and create_all -- see
+# app/db/models.py's module docstring for the full picture.
+metadata = Base.metadata
 
 GENESIS_HASH = "0" * 64  # previous_hash of sequence_num 0
 
@@ -57,8 +65,21 @@ compliance_audit_ledger = Table(
     Column("previous_hash", String(64), nullable=False),
     Column("current_hash", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # --- Referential-integrity columns (nullable, additive) ---
+    # The columns above (circular_id, clause_hash, rule_id, hitl_review_id)
+    # are the ones hashed into payload_digest and must never change shape --
+    # doing so would invalidate every existing row's hash chain. These
+    # surrogate-key FKs are purely for fast joins/reporting against the
+    # relational schema (app/db/models.py) and are not part of the chain;
+    # they are populated best-effort by the service layer, so they stay
+    # nullable rather than gating ledger writes on the referenced row
+    # existing (a ledger append must never fail because a lookup join did).
+    Column("circular_ref_id", ForeignKey("circulars.id", ondelete="SET NULL"), nullable=True),
+    Column("clause_ref_id", ForeignKey("clauses.id", ondelete="SET NULL"), nullable=True),
+    Column("compiled_rule_ref_id", ForeignKey("compiled_rules.id", ondelete="SET NULL"), nullable=True),
+    Column("hitl_review_ref_id", ForeignKey("hitl_reviews.id", ondelete="SET NULL"), nullable=True),
     UniqueConstraint("sequence_num", name="uq_ledger_sequence"),
-    CheckConstraint("evaluation_result IN ('PASS','FAIL','HITL_REVIEW')", name="ck_evaluation_result"),
+    CheckConstraint("evaluation_result IN ('PASS','FAIL','HITL_REVIEW')", name="evaluation_result"),
 )
 
 
