@@ -165,9 +165,26 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     rate_limit_requests_per_window: int = 300
     rate_limit_exempt_paths: list[str] = Field(
-        default_factory=lambda: ["/healthz", "/", "/docs", "/openapi.json", "/redoc"]
+        default_factory=lambda: ["/healthz", "/", "/docs", "/openapi.json", "/redoc", "/metrics"]
     )
     payload_encryption_enabled: bool = False
+
+    # --- Observability: OpenTelemetry tracing ---
+    otel_enabled: bool = True
+    otel_service_name: str = "regengine-ai"
+    # None -> ConsoleSpanExporter (stdout), safe zero-config local-dev
+    # default. Point at a real collector (e.g. "http://localhost:4318/v1/traces"
+    # for the OTel Collector's OTLP/HTTP receiver) in every other environment.
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_traces_sample_ratio: float = 1.0  # 1.0 = trace every request; lower in high-volume prod
+
+    # --- Observability: Prometheus metrics ---
+    metrics_enabled: bool = True
+    # hitl_review_queue_depth (a Gauge) is updated by a periodic background
+    # poll, not per-event -- see app/observability/metrics.py's module
+    # docstring for why a gauge like this is pull-refreshed rather than
+    # incrementally maintained.
+    metrics_queue_depth_poll_interval_seconds: float = 15.0
 
 
 @lru_cache(maxsize=1)

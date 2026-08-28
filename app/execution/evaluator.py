@@ -26,6 +26,7 @@ from app.execution.hitl_queue import HITLQueue
 from app.execution.models import Decision, EvaluationResult, PolicyOutcome, TransactionPayload
 from app.execution.opa_engine import OPAEngine, OPAEngineError
 from app.execution.policy_cache import PolicyLookup
+from app.observability.metrics import TRANSACTION_EVALUATION_TOTAL
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class Evaluator:
                 )
 
         decision, reasons = self._reduce(outcomes)
+        TRANSACTION_EVALUATION_TOTAL.labels(decision=decision.value).inc()
 
         hitl_case_id = None
         if decision == Decision.FLAGGED:

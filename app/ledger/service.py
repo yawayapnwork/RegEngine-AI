@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.ledger.hash_chain import GENESIS_HASH, compute_block_hash, compute_payload_digest
 from app.ledger.models import ComplianceEvaluationEvent, LedgerEntry, compliance_audit_ledger
+from app.observability.tracing import traced_span
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,10 @@ class LedgerService:
         return (row.sequence_num, row.current_hash) if row else None
 
     async def append_entry(self, event: ComplianceEvaluationEvent) -> LedgerEntry:
+        with traced_span("ledger.append_entry", transaction_id=event.transaction_id, rule_id=event.rule_id):
+            return await self._append_entry(event)
+
+    async def _append_entry(self, event: ComplianceEvaluationEvent) -> LedgerEntry:
         event_dict = event.model_dump(mode="json")
         # model_dump(mode="json") stringifies datetimes; hash_chain needs the
         # real datetime object for a stable ISO format independent of

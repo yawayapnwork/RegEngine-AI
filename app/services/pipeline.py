@@ -13,6 +13,8 @@ from pathlib import Path
 
 from app.config import Settings, get_settings
 from app.models import ParseResult
+from app.observability.metrics import observe_ingestion_latency
+from app.observability.tracing import traced_span
 from app.parsing.chunker import chunk_elements
 from app.parsing.exceptions import ParsingError
 from app.parsing.extractor import extract_pdf
@@ -38,7 +40,9 @@ async def parse_pdf_bytes(
     warnings: list[str] = []
 
     async with _gate(settings):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with observe_ingestion_latency(), traced_span(
+            "ingestion.parse_pdf_bytes", filename=filename, size_bytes=len(file_bytes), backend=settings.extraction_backend
+        ), tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir) / (filename or "upload.pdf")
             try:
                 await asyncio.to_thread(tmp_path.write_bytes, file_bytes)

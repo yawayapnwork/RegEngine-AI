@@ -26,6 +26,16 @@ spec:
         {{- end }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.metrics.enabled }}
+        # Annotation-based scrape discovery (prometheus.io/* convention) --
+        # only the api Deployment carries these: it's the only role
+        # exposing GET /metrics (app/main.py). Using a PodMonitor/
+        # ServiceMonitor CRD instead of annotations is equally valid if
+        # your cluster runs the Prometheus Operator; swap as needed.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.probes.port | quote }}
+        prometheus.io/path: {{ .Values.metrics.path | quote }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

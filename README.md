@@ -154,6 +154,8 @@ a working local-dev default — nothing is required to boot the service against 
 | `redis_url` | `redis://localhost:6379/0` | Celery broker/backend, policy registry, HITL queue |
 | `policy_registry_key` / `hitl_key_prefix` | `regengine:policy_registry` / `regengine:hitl` | Redis key namespacing |
 | `policy_cache_ttl_seconds` | `30.0` | L1 `PolicyCache` staleness safety net — pub/sub invalidation is the primary mechanism (`app/execution/policy_hot_reload.py`) |
+| `otel_enabled` / `otel_exporter_otlp_endpoint` | `True` / — | Distributed tracing (`app/observability/tracing.py`); unset endpoint falls back to stdout (`ConsoleSpanExporter`) |
+| `metrics_enabled` | `True` | Prometheus scrape endpoint at `GET /metrics` (`app/observability/metrics.py`) |
 | `celery_batch_queue` / `celery_cdc_queue` / `celery_webhook_queue` | `regengine_batch` / `regengine_cdc` / `regengine_webhooks` | Queue names, scaled independently |
 | `webhook_hmac_secret` | — | Signs outbound OMS/RMS/broker webhooks (`X-RegEngine-Signature-256`) |
 | `webhook_timeout_seconds` / `webhook_max_retries` | `5.0` / `5` | Outbound delivery tuning |
@@ -179,6 +181,7 @@ See `app/config.py` for the complete, authoritative list.
 | `POST` | `/v1/circulars/index` | Embed + upsert chunks into Qdrant |
 | `POST` | `/v1/circulars/parse-and-index` | Both steps in one call |
 | `GET` | `/healthz` | Liveness |
+| `GET` | `/metrics` | Prometheus scrape endpoint (`app/observability/metrics.py`) — network-restricted, not auth-gated |
 
 **Execution** (`app/api/execution_routes.py`, prefix `/v1/execution`) — requires `Broker_API_Client` or `System_Admin`
 unless noted

@@ -152,6 +152,13 @@ opa:
       cpu: 500m
       memory: 256Mi
 
+# Prometheus scrape annotations on the api Deployment -- see
+# templates/deployment.yaml. `path`/`port` must match config.METRICS_ENABLED's
+# app/main.py route (GET /metrics on the same port as probes.port).
+metrics:
+  enabled: true
+  path: /metrics
+
 probes:
   path: /healthz
   port: 8000
@@ -239,6 +246,16 @@ config:
   RATE_LIMIT_WINDOW_SECONDS: "60"
   RATE_LIMIT_REQUESTS_PER_WINDOW: "300"
   PAYLOAD_ENCRYPTION_ENABLED: "false"  # opt-in defense-in-depth layer -- see app/security/crypto.py
+  # --- Observability: OpenTelemetry tracing + Prometheus metrics ---
+  OTEL_ENABLED: "true"
+  OTEL_SERVICE_NAME: "regengine-ai"
+  # Point at an OpenTelemetry Collector's OTLP/HTTP receiver in the same
+  # cluster; unset falls back to ConsoleSpanExporter (dev-only, spans to
+  # stdout) -- see app/observability/tracing.py.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
+  OTEL_TRACES_SAMPLE_RATIO: "1.0"
+  METRICS_ENABLED: "true"
+  METRICS_QUEUE_DEPTH_POLL_INTERVAL_SECONDS: "15.0"
 
 # --- Secrets: connection strings and credentials. Production default is
 # `existingSecret` pointing at a Secret you manage out-of-band (sealed-secrets,

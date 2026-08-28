@@ -28,7 +28,7 @@ class HITLQueue:
         return f"{self._prefix}:case:{case_id}"
 
     @property
-    def _pending_set_key(self) -> str:
+    def pending_set_key(self) -> str:
         return f"{self._prefix}:pending"
 
     async def enqueue(
@@ -44,7 +44,7 @@ class HITLQueue:
             matched_policies=matched_policies,
         )
         await self._redis.set(self._case_key(case.case_id), case.model_dump_json())
-        await self._redis.sadd(self._pending_set_key, case.case_id)
+        await self._redis.sadd(self.pending_set_key, case.case_id)
         return case
 
     async def get(self, case_id: str) -> HITLCase | None:
@@ -52,7 +52,7 @@ class HITLQueue:
         return HITLCase.model_validate_json(raw) if raw else None
 
     async def list_pending(self) -> list[HITLCase]:
-        case_ids = await self._redis.smembers(self._pending_set_key)
+        case_ids = await self._redis.smembers(self.pending_set_key)
         cases = []
         for case_id in case_ids:
             case = await self.get(case_id if isinstance(case_id, str) else case_id.decode())
@@ -73,5 +73,5 @@ class HITLQueue:
         case.resolved_at = dt.datetime.utcnow()
 
         await self._redis.set(self._case_key(case_id), case.model_dump_json())
-        await self._redis.srem(self._pending_set_key, case_id)
+        await self._redis.srem(self.pending_set_key, case_id)
         return case

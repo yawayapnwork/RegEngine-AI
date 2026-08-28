@@ -52,6 +52,19 @@ bcrypt>=4.1
 click>=8.1
 rich>=13.7
 
+# Observability: OpenTelemetry distributed tracing + Prometheus metrics
+# (see app/observability/) -- opentelemetry-api/-sdk/-proto are already
+# transitive deps of other packages above; pinned explicitly here since
+# app/observability imports them directly, not just incidentally.
+opentelemetry-api>=1.27
+opentelemetry-sdk>=1.27
+opentelemetry-exporter-otlp-proto-http>=1.27
+opentelemetry-instrumentation-fastapi>=0.48b0
+opentelemetry-instrumentation-httpx>=0.48b0
+opentelemetry-instrumentation-sqlalchemy>=0.48b0
+opentelemetry-instrumentation-redis>=0.48b0
+prometheus-client>=0.20
+
 # Testing
 pytest>=8.2
 pytest-asyncio>=0.23
