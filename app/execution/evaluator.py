@@ -25,13 +25,19 @@ import time
 from app.execution.hitl_queue import HITLQueue
 from app.execution.models import Decision, EvaluationResult, PolicyOutcome, TransactionPayload
 from app.execution.opa_engine import OPAEngine, OPAEngineError
-from app.execution.policy_registry import PolicyRegistry
+from app.execution.policy_cache import PolicyLookup
 
 logger = logging.getLogger(__name__)
 
 
 class Evaluator:
-    def __init__(self, opa_engine: OPAEngine, policy_registry: PolicyRegistry, hitl_queue: HITLQueue) -> None:
+    def __init__(self, opa_engine: OPAEngine, policy_registry: PolicyLookup, hitl_queue: HITLQueue) -> None:
+        """`policy_registry` only needs to satisfy `PolicyLookup`
+        (`async def policies_for(entity_type) -> list[dict]`) -- production
+        wiring (app.execution.dependencies.get_evaluator) passes a
+        `PolicyCache` for sub-millisecond lookups on the hot path; a bare
+        `PolicyRegistry` (or a test double) works identically, just without
+        the L1 cache in front of it."""
         self._opa = opa_engine
         self._registry = policy_registry
         self._hitl = hitl_queue

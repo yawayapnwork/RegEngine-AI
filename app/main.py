@@ -1,7 +1,10 @@
 """FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -13,7 +16,8 @@ from app.api.hitl_review_routes import router as hitl_review_router
 from app.api.ingestion_routes import router as ingestion_router
 from app.api.routes import router
 from app.config import get_settings
-from app.execution.dependencies import get_redis_pool
+from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
+from app.execution.policy_hot_reload import PolicyHotReloadSubscriber
 from app.parsing.exceptions import ParsingError
 from app.security.middleware import (
     JWTAuthenticationMiddleware,
@@ -27,10 +31,39 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Starts PolicyHotReloadSubscriber as a background task for this
+    process's lifetime -- see that module's docstring for why it runs
+    per-process rather than as one centralized service. Constructed by
+    calling the dependency-provider functions directly (not through
+    FastAPI's `Depends`, which only resolves inside request handling) --
+    `get_opa_engine`/`get_policy_registry` take `settings` as a plain
+    argument here instead of relying on their `Depends(get_settings)`
+    defaults, exactly like any other direct call to them outside a route.
+    """
+    subscriber = PolicyHotReloadSubscriber(
+        redis_client=get_redis_pool(),
+        opa_engine=get_opa_engine(settings),
+        policy_registry=get_policy_registry(settings),
+        policy_cache=get_policy_cache(),
+    )
+    task = asyncio.create_task(subscriber.run(), name="policy-hot-reload-subscriber")
+    try:
+        yield
+    finally:
+        subscriber.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 app = FastAPI(
     title="SEBI Master Circular Parsing Service",
     description="Layout-aware, clause-hashed PDF parsing and Qdrant indexing for SEBI regulatory circulars.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Starlette runs middleware in the REVERSE of add_middleware() call order

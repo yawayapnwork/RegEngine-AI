@@ -29,6 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CompiledRule, HITLReview
 from app.db.session import get_db_session
+from app.execution.dependencies import get_policy_publisher
+from app.execution.policy_publisher import PolicyPublisher
 from app.security.dependencies import require_roles
 from app.security.models import Principal, Role
 
@@ -96,15 +98,19 @@ async def approve_review(
     resolution: ReviewResolutionRequest,
     session: AsyncSession = Depends(get_db_session),
     principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER)),
+    policy_publisher: PolicyPublisher = Depends(get_policy_publisher),
 ) -> HITLReview:
     """Approves the compiled policy this review concerns: activates its
     CompiledRule version (deactivating any prior active version of the
     same rule_id, so exactly one version is ever live -- see
-    app.db.models.CompiledRule's partial-unique-index comment) and marks
-    the review RESOLVED under this officer's identity. Publishing the now-
-    active Rego to OPA (app.execution.opa_engine.publish_policy) is a
-    separate, deliberately decoupled step -- this endpoint's job is the
-    compliance sign-off, not the deploy."""
+    app.db.models.CompiledRule's partial-unique-index comment), marks the
+    review RESOLVED under this officer's identity, and publishes a
+    PolicyEvent so every FastAPI worker's PolicyHotReloadSubscriber
+    hot-reloads OPA within its next pub/sub poll -- typically low
+    milliseconds, never a restart. Publishing happens AFTER the DB commit
+    (not inside the same transaction): a Redis PUBLISH cannot be rolled
+    back, so it must only ever fire once the approval it describes is
+    durably true, not before."""
     review = await _get_review_or_404(session, review_id)
     if review.status != "PENDING":
         raise HTTPException(
@@ -112,6 +118,7 @@ async def approve_review(
             detail=f"Review '{review_id}' is already '{review.status}'; cannot re-approve.",
         )
 
+    compiled_rule: CompiledRule | None = None
     if review.compiled_rule_id is not None:
         compiled_rule = await session.get(CompiledRule, review.compiled_rule_id)
         if compiled_rule is None:
@@ -133,6 +140,19 @@ async def approve_review(
     await session.commit()
     await session.refresh(review)
     logger.info("HITL review '%s' APPROVED by compliance officer '%s'", review_id, principal.subject)
+
+    if compiled_rule is not None:
+        try:
+            await policy_publisher.publish_approved(compiled_rule, approved_by=principal.subject)
+        except Exception:  # noqa: BLE001 - the approval itself is already durably committed; a pub/sub
+            # publish failure must never turn into a 500 that makes the officer think approval didn't
+            # happen. PolicyCache's TTL safety net (app/execution/policy_cache.py) still bounds staleness.
+            logger.exception(
+                "Approval of review '%s' committed, but publishing its PolicyEvent failed -- "
+                "OPA hot-reload for rule_id=%s will lag until the next event or cache TTL expiry.",
+                review_id, compiled_rule.rule_id,
+            )
+
     return review
 
 

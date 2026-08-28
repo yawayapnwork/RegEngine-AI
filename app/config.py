@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     policy_registry_key: str = "regengine:policy_registry"
     hitl_key_prefix: str = "regengine:hitl"
+    # L1 in-process PolicyCache TTL safety net (app/execution/policy_cache.py) --
+    # short on purpose; event-driven invalidation via pub/sub
+    # (app/execution/policy_hot_reload.py) is the primary mechanism, this
+    # only bounds the staleness window if a pub/sub message is ever dropped.
+    policy_cache_ttl_seconds: float = 30.0
 
     # --- Execution service: Celery ---
     celery_task_default_queue: str = "regengine_default"
