@@ -1,0 +1,61 @@
+# One-shot `alembic upgrade head`, run as a pre-install/pre-upgrade hook so
+# the schema is always current before api/worker Pods roll out against it.
+# Does NOT provision the audit ledger table itself (append-only triggers +
+# least-privilege grants) -- that is sql/ledger_schema.sql, applied once
+# per environment by an operator with DDL rights; see this chart's NOTES.txt.
+{{- if .Values.migrate.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "regengine-ai.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "regengine-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "regengine-ai.roleSelectorLabels" (dict "role" "migrate" "context" $) | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "regengine-ai.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "regengine-ai.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SERVICE_ROLE
+              value: migrate
+          envFrom:
+            - configMapRef:
+                name: {{ include "regengine-ai.fullname" . }}-config
+            - secretRef:
+                name: {{ include "regengine-ai.secretName" . }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

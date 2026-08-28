@@ -1,0 +1,14 @@
+# Non-secret configuration only, shared by every role (api/worker/beat/
+# migrate) via envFrom. Anything sensitive (connection strings with
+# credentials, API keys) lives in the Secret instead -- see secret.yaml /
+# values.yaml's `secrets` block and its "never commit real secrets" note.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "regengine-ai.fullname" . }}-config
+  labels:
+    {{- include "regengine-ai.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

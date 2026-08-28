@@ -1,0 +1,38 @@
+RegEngine AI has been deployed.
+
+1. Before this release goes live, make sure the audit ledger table exists:
+     psql "$LEDGER_ADMIN_DSN" -f sql/ledger_schema.sql
+   This is deliberately NOT run by this chart (its append-only triggers and
+   least-privilege GRANT/REVOKE block are a one-time, operator-run DDL
+   step -- see that file's header comment).
+
+2. The Alembic migration Job ({{ include "regengine-ai.fullname" . }}-migrate-{{ .Release.Revision }})
+   runs automatically as a pre-install/pre-upgrade hook. Check its status:
+     kubectl get jobs -l app.kubernetes.io/component=migrate -n {{ .Release.Namespace }}
+
+{{- if .Values.secrets.create }}
+
+3. WARNING: secrets.create=true is active -- credentials from values.yaml
+   were written into a Kubernetes Secret via this release. This is a
+   dev/demo convenience only. For production, set secrets.create=false and
+   secrets.existingSecretName to a Secret managed out-of-band (sealed-secrets,
+   External Secrets Operator, Vault, ...).
+{{- end }}
+
+4. Application URL:
+{{- if .Values.ingress.enabled }}
+   {{- if .Values.ingress.tls.enabled }}
+   https://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+   {{- else }}
+   http://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+   {{- end }}
+{{- else }}
+   Ingress is disabled. Port-forward to reach the API:
+     kubectl port-forward svc/{{ include "regengine-ai.fullname" . }}-api {{ .Values.api.service.port }}:{{ .Values.api.service.port }} -n {{ .Release.Namespace }}
+{{- end }}
+
+5. Interactive API docs are at /docs on that URL once the api Deployment is
+   Ready (check `kubectl get pods -l app.kubernetes.io/component=api`).
+
+6. Autoscaling status:
+     kubectl get hpa -n {{ .Release.Namespace }}

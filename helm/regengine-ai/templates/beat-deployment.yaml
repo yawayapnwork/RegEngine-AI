@@ -1,0 +1,61 @@
+# Celery beat: fires the scheduled SEBI ingestion poll
+# (app.ingestion.tasks.poll_sebi_sources_task) on the interval configured
+# by INGESTION_POLL_INTERVAL_SECONDS. Hard-pinned to 1 replica, no
+# autoscaling knob exposed in values.yaml -- see beat's comment there.
+{{- if .Values.beat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "regengine-ai.fullname" . }}-beat
+  labels:
+    {{- include "regengine-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: beat
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # never run two beat Pods simultaneously, even mid-rollout
+  selector:
+    matchLabels:
+      {{- include "regengine-ai.roleSelectorLabels" (dict "role" "beat" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "regengine-ai.roleSelectorLabels" (dict "role" "beat" "context" $) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "regengine-ai.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: beat
+          image: {{ include "regengine-ai.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SERVICE_ROLE
+              value: beat
+          envFrom:
+            - configMapRef:
+                name: {{ include "regengine-ai.fullname" . }}-config
+            - secretRef:
+                name: {{ include "regengine-ai.secretName" . }}
+          resources:
+            {{- toYaml .Values.beat.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

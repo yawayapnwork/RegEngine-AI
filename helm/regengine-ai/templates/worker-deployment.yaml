@@ -1,0 +1,150 @@
+# Celery worker (batch/CDC/webhook/ingestion queues). Also carries an OPA
+# sidecar: app.execution.tasks builds its own Evaluator per task, which
+# talks to OPA exactly the same way the api Deployment's does (see
+# app/execution/tasks.py's _build_evaluator) -- OPA must be reachable at
+# localhost:8181 from this Pod too, not just the api Pods.
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "regengine-ai.fullname" . }}-worker
+  labels:
+    {{- include "regengine-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+{{- if not .Values.worker.autoscaling.enabled }}
+  replicas: {{ .Values.worker.replicaCount }}
+{{- end }}
+  selector:
+    matchLabels:
+      {{- include "regengine-ai.roleSelectorLabels" (dict "role" "worker" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "regengine-ai.roleSelectorLabels" (dict "role" "worker" "context" $) | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "regengine-ai.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "regengine-ai.roleSelectorLabels" (dict "role" "worker" "context" $) | nindent 14 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "regengine-ai.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SERVICE_ROLE
+              value: worker
+            - name: CELERY_QUEUES
+              value: {{ .Values.worker.queues | quote }}
+            - name: CELERY_CONCURRENCY
+              value: {{ .Values.worker.concurrency | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "regengine-ai.fullname" . }}-config
+            - secretRef:
+                name: {{ include "regengine-ai.secretName" . }}
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - app.execution.celery_app
+                - inspect
+                - ping
+                - -d
+                - "celery@$(HOSTNAME)"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /app/data
+        - name: opa
+          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=localhost:8181
+            - --log-level=info
+          ports:
+            - name: opa
+              containerPort: 8181
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: opa
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.opa.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: opa-tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+{{- end }}

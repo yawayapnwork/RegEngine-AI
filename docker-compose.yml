@@ -1,0 +1,183 @@
+# Local/dev orchestration for RegEngine AI: FastAPI + Celery worker/beat +
+# Redis + PostgreSQL + Qdrant + OPA sidecar.
+#
+# Credentials/roles simplification vs. production: this compose file runs
+# the whole app schema (circulars/clauses/compiled_rules/hitl_reviews) AND
+# the audit ledger under one Postgres superuser (POSTGRES_USER) for
+# simplicity. The least-privilege role split documented in
+# sql/ledger_schema.sql (a dedicated INSERT+SELECT-only
+# `regengine_ledger_writer`) is a production/Kubernetes concern, applied
+# via Helm-managed Secrets against a real managed Postgres instance -- see
+# helm/regengine-ai/values.yaml.
+#
+# Usage:
+#   cp .env.example .env   # fill in ANTHROPIC_API_KEY at minimum
+#   docker compose up --build
+#   docker compose up --build --scale worker=3   # scale workers independently
+
+x-app-image: &app-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  image: regengine-ai:${IMAGE_TAG:-local}
+
+# Env every app-image service (api/worker/beat/migrate) shares: in-network
+# hostnames for the four infra services, plus everything else (secrets,
+# feature toggles) from .env via env_file.
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-regengine}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-regengine}
+  LEDGER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-regengine}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-regengine}
+  REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  OPA_SERVER_URL: http://opa:8181
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-regengine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-regengine}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Provisions the append-only audit ledger table, its immutability
+      # triggers, and indexes on first boot. The commented least-privilege
+      # GRANT/REVOKE block at the bottom of that file is intentionally not
+      # applied here -- see the module comment above.
+      - ./sql/ledger_schema.sql:/docker-entrypoint-initdb.d/01-ledger-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-regengine} -d ${POSTGRES_DB:-regengine}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [regengine-net]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-changeme}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-changeme} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [regengine-net]
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.0
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:6333/readyz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "6333:6333"  # REST -- optional, only needed for host-side debugging/inspection
+    networks: [regengine-net]
+    restart: unless-stopped
+
+  opa:
+    # Co-located policy engine (see app/execution/opa_engine.py's module
+    # docstring): a persistent server queried over loopback/service-network
+    # HTTP, not a subprocess spawned per evaluation. Compiled Rego is
+    # pushed to it at runtime via its Policy API -- no image rebuild or
+    # restart needed per policy update.
+    image: openpolicyagent/opa:0.68.0-static
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=info"]
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "-", "--stdin-input", "--format=raw"]
+      # Trivial always-succeeds probe: OPA has no /health check in the
+      # -static (non-Envoy) image's default config short of `opa eval`
+      # itself succeeding, which requires the server to be up and parsing.
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [regengine-net]
+    restart: unless-stopped
+
+  migrate:
+    <<: *app-image
+    environment:
+      <<: *app-env
+      SERVICE_ROLE: migrate
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [regengine-net]
+    restart: "no"
+
+  api:
+    <<: *app-image
+    environment:
+      <<: *app-env
+      SERVICE_ROLE: web
+    env_file: [.env]
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      opa: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [regengine-net]
+    restart: unless-stopped
+
+  worker:
+    <<: *app-image
+    environment:
+      <<: *app-env
+      SERVICE_ROLE: worker
+      CELERY_QUEUES: regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion
+      CELERY_CONCURRENCY: "4"
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      opa: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.execution.celery_app inspect ping -d celery@$$HOSTNAME | grep -q OK"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks: [regengine-net]
+    restart: unless-stopped
+    # Scale independently of `api`: docker compose up --scale worker=3
+
+  beat:
+    <<: *app-image
+    environment:
+      <<: *app-env
+      SERVICE_ROLE: beat
+    env_file: [.env]
+    depends_on:
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    # No HEALTHCHECK override: celery beat has no inspectable liveness
+    # signal short of a running process, and must stay at exactly one
+    # replica -- do not scale this service.
+    networks: [regengine-net]
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  qdrant_data:
+
+networks:
+  regengine-net:
+    driver: bridge

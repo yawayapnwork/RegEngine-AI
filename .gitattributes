@@ -1,0 +1,6 @@
+# Force LF regardless of platform/core.autocrlf for files that run inside
+# Linux containers -- a CRLF-mangled shell script fails at the shebang
+# line (`/bin/sh^M: bad interpreter`) with no useful error in `docker run`.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf

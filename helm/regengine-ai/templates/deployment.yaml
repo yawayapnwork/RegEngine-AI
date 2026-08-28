@@ -1,0 +1,163 @@
+# FastAPI execution API. Each Pod carries a co-located OPA sidecar (see
+# app/execution/opa_engine.py's module docstring: a persistent server
+# queried over loopback, not a subprocess spawned per evaluation) --
+# config.OPA_SERVER_URL is pinned to http://localhost:8181 for exactly
+# this reason (values.yaml's `config.OPA_SERVER_URL`).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "regengine-ai.fullname" . }}-api
+  labels:
+    {{- include "regengine-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+{{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicaCount }}
+{{- end }}
+  selector:
+    matchLabels:
+      {{- include "regengine-ai.roleSelectorLabels" (dict "role" "api" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "regengine-ai.roleSelectorLabels" (dict "role" "api" "context" $) | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "regengine-ai.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "regengine-ai.roleSelectorLabels" (dict "role" "api" "context" $) | nindent 14 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "regengine-ai.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SERVICE_ROLE
+              value: web
+            - name: PORT
+              value: {{ .Values.probes.port | quote }}
+            - name: UVICORN_WORKERS
+              value: {{ .Values.api.uvicornWorkers | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "regengine-ai.fullname" . }}-config
+            - secretRef:
+                name: {{ include "regengine-ai.secretName" . }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.probes.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /app/data
+      # OPA runs as a same-Pod sidecar (not a Kubernetes Service) so the
+      # api container reaches it over loopback with no network hop or
+      # extra DNS/Service dependency in the evaluation hot path.
+        - name: opa
+          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=localhost:8181
+            - --log-level=info
+          ports:
+            - name: opa
+              containerPort: 8181
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: opa
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.opa.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: opa-tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}

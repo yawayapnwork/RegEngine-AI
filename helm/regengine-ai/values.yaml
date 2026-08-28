@@ -1,0 +1,253 @@
+# Default values for regengine-ai.
+#
+# Design note: PostgreSQL, Redis, and Qdrant are treated as EXTERNAL
+# (managed) services, not sub-charts bundled here -- connection strings are
+# supplied via a Secret (see `secrets` below), the same way a production
+# deployment would point at RDS/ElastiCache/a managed Qdrant Cloud cluster.
+# This chart owns only the stateless FastAPI + Celery workload.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/your-org/regengine-ai
+  tag: ""  # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+# - name: regcred
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false  # this workload never calls the K8s API
+
+podAnnotations: {}
+podLabels: {}
+
+# Applied at the Pod level; container-level hardening lives alongside each
+# container in templates/deployment.yaml (allowPrivilegeEscalation: false,
+# readOnlyRootFilesystem: true, capabilities.drop: [ALL]). uid/gid 10001
+# matches the `regengine` user created in the Dockerfile -- keep in sync.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# --- API (FastAPI) deployment ---
+api:
+  replicaCount: 3
+  uvicornWorkers: 4
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 65
+    targetMemoryUtilizationPercentage: 75
+    # Compliance evaluation traffic arrives in bursts around market
+    # open/close and batch windows -- scale up fast, scale down cautiously
+    # so a brief lull doesn't thrash pods mid-burst.
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 30
+          - type: Pods
+            value: 4
+            periodSeconds: 30
+        selectPolicy: Max
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Percent
+            value: 25
+            periodSeconds: 60
+        selectPolicy: Min
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# --- Celery worker deployment ---
+worker:
+  enabled: true
+  replicaCount: 2
+  queues: "regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion"
+  concurrency: 4
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+    # NOTE: CPU is a proxy metric here. For scaling on actual Celery queue
+    # depth (the more accurate signal for "high-concurrency compliance
+    # evaluation" backlogs), install KEDA and add a ScaledObject with a
+    # redis-list trigger instead of/alongside this HPA -- out of scope for
+    # this chart, called out here so it isn't mistaken for an oversight.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# --- Celery beat (scheduled SEBI ingestion poll) ---
+# Deliberately NOT configurable to >1 replica or autoscaled -- running two
+# beat instances double-fires every scheduled task.
+beat:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+# --- One-shot Alembic migration Job, run via a Helm pre-upgrade hook ---
+migrate:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+
+# --- OPA sidecar, co-located in every api/worker Pod ---
+opa:
+  image:
+    repository: openpolicyagent/opa
+    tag: "0.68.0-static"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+probes:
+  path: /healthz
+  port: 8000
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    periodSeconds: 5
+    failureThreshold: 24  # up to 2 minutes for a cold start (model load, DB pool warmup)
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m  # PDF uploads, bounded separately by max_upload_mb
+  host: regengine.example.com
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: regengine-ai-tls
+
+# --- Non-secret application configuration -> rendered into a ConfigMap and
+# consumed via envFrom by every role (api/worker/beat). Mirrors app/config.py
+# field names in SCREAMING_SNAKE_CASE (pydantic-settings' default env
+# mapping); anything sensitive belongs in `secrets`, never here. ---
+config:
+  SERVICE_NAME: "sebi-circular-parser"
+  MAX_UPLOAD_MB: "50"
+  PARSE_TIMEOUT_SECONDS: "180"
+  PARSE_CONCURRENCY: "4"
+  EXTRACTION_BACKEND: "unstructured"
+  UNSTRUCTURED_STRATEGY: "hi_res"
+  CHUNK_MAX_CHARS: "2400"
+  CHUNK_OVERLAP_CHARS: "200"
+  CHUNK_MIN_CHARS: "40"
+  EMBEDDING_MODEL_NAME: "BAAI/bge-large-en-v1.5"
+  EMBEDDING_DIM: "1024"
+  EMBEDDING_BATCH_SIZE: "16"
+  QDRANT_COLLECTION: "sebi_master_circulars"
+  QDRANT_UPSERT_BATCH_SIZE: "64"
+  # OPA is a same-Pod sidecar in both api and worker Deployments -- always
+  # loopback, never the K8s Service DNS name (see templates/deployment.yaml
+  # and templates/worker-deployment.yaml).
+  OPA_SERVER_URL: "http://localhost:8181"
+  OPA_REQUEST_TIMEOUT_SECONDS: "2.0"
+  POLICY_REGISTRY_KEY: "regengine:policy_registry"
+  HITL_KEY_PREFIX: "regengine:hitl"
+  CELERY_TASK_DEFAULT_QUEUE: "regengine_default"
+  CELERY_BATCH_QUEUE: "regengine_batch"
+  CELERY_CDC_QUEUE: "regengine_cdc"
+  CELERY_WEBHOOK_QUEUE: "regengine_webhooks"
+  CELERY_INGESTION_QUEUE: "regengine_ingestion"
+  WEBHOOK_TIMEOUT_SECONDS: "5.0"
+  WEBHOOK_MAX_RETRIES: "5"
+  DATABASE_POOL_SIZE: "10"
+  LEDGER_POOL_SIZE: "10"
+  INGESTION_POLL_INTERVAL_SECONDS: "900"
+  INGESTION_RESPECT_ROBOTS_TXT: "true"
+
+# --- Secrets: connection strings and credentials. Production default is
+# `existingSecret` pointing at a Secret you manage out-of-band (sealed-secrets,
+# External Secrets Operator, Vault, ...). `create: true` + inline `values`
+# is a dev/demo convenience ONLY -- values there land in `helm get values`
+# / `.Release` history in plaintext. Never commit real secrets into a
+# values file. ---
+secrets:
+  create: false
+  existingSecretName: "regengine-ai-secrets"
+  # Keys the Deployments expect on either the created or existing Secret:
+  #   DATABASE_URL, LEDGER_DATABASE_URL, REDIS_URL, QDRANT_URL,
+  #   QDRANT_API_KEY, ANTHROPIC_API_KEY, WEBHOOK_HMAC_SECRET
+  values: {}
+  #   DATABASE_URL: "postgresql+asyncpg://regengine_app:...@postgres.internal:5432/regengine"
+  #   LEDGER_DATABASE_URL: "postgresql+asyncpg://regengine_ledger_writer:...@postgres.internal:5432/regengine"
+  #   REDIS_URL: "redis://:...@redis.internal:6379/0"
+  #   QDRANT_URL: "https://qdrant.internal:6333"
+  #   QDRANT_API_KEY: ""
+  #   ANTHROPIC_API_KEY: ""
+  #   WEBHOOK_HMAC_SECRET: ""
+
+extraEnv: []
+# - name: LOG_LEVEL
+#   value: "info"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Leave affinity empty to accept the topologySpreadConstraints default in
+# templates/deployment.yaml (spread across nodes/zones); set this instead
+# of that if you need custom scheduling.

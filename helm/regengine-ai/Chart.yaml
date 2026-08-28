@@ -1,0 +1,17 @@
+apiVersion: v2
+name: regengine-ai
+description: >-
+  RegEngine AI -- SEBI Master Circular compliance engine. FastAPI execution
+  API and Celery workers, each with a co-located OPA sidecar for compiled
+  Rego policy evaluation.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - compliance
+  - opa
+  - fastapi
+  - celery
+home: https://github.com/your-org/regengine-ai
+maintainers:
+  - name: RegEngine AI
