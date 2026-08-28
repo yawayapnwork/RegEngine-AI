@@ -139,7 +139,7 @@ services:
     environment:
       <<: *app-env
       SERVICE_ROLE: worker
-      CELERY_QUEUES: regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion
+      CELERY_QUEUES: regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion,regengine_agents,regengine_compiler,regengine_vectorstore
       CELERY_CONCURRENCY: "4"
     env_file: [.env]
     depends_on:

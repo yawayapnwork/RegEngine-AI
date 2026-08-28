@@ -20,7 +20,7 @@ case "$ROLE" in
     # Queue list intentionally excludes regengine_default (no task is ever
     # routed there) unless the operator opts in via CELERY_QUEUES.
     exec celery -A app.execution.celery_app worker \
-      -Q "${CELERY_QUEUES:-regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion}" \
+      -Q "${CELERY_QUEUES:-regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion,regengine_agents,regengine_compiler,regengine_vectorstore}" \
       -l "${CELERY_LOG_LEVEL:-info}" \
       --concurrency "${CELERY_CONCURRENCY:-4}"
     ;;

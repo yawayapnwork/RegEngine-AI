@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.requests import Request
 
 from app.api.auth_routes import router as auth_router
+from app.api.dlq_routes import router as dlq_router
 from app.api.execution_routes import router as execution_router
 from app.api.hitl_review_routes import router as hitl_review_router
 from app.api.ingestion_routes import router as ingestion_router
@@ -115,6 +116,7 @@ app.include_router(execution_router)
 app.include_router(ingestion_router)
 app.include_router(auth_router)
 app.include_router(hitl_review_router)
+app.include_router(dlq_router)
 
 
 @app.exception_handler(ParsingError)

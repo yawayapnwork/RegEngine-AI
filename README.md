@@ -31,6 +31,7 @@ flowchart LR
 - [Configuration](#configuration)
 - [API surface](#api-surface)
 - [Security](#security)
+- [Resiliency](#resiliency)
 - [Frontend dashboard](#frontend-dashboard)
 - [Testing](#testing)
 - [Production notes](#production-notes)
@@ -157,6 +158,9 @@ a working local-dev default — nothing is required to boot the service against 
 | `otel_enabled` / `otel_exporter_otlp_endpoint` | `True` / — | Distributed tracing (`app/observability/tracing.py`); unset endpoint falls back to stdout (`ConsoleSpanExporter`) |
 | `metrics_enabled` | `True` | Prometheus scrape endpoint at `GET /metrics` (`app/observability/metrics.py`) |
 | `celery_batch_queue` / `celery_cdc_queue` / `celery_webhook_queue` | `regengine_batch` / `regengine_cdc` / `regengine_webhooks` | Queue names, scaled independently |
+| `celery_agents_queue` / `celery_compiler_queue` / `celery_vectorstore_queue` | `regengine_agents` / `regengine_compiler` / `regengine_vectorstore` | LLM extraction, compilation, and vector-DB indexing background tasks (`app/agents/tasks.py`, `app/compiler/tasks.py`, `app/vectorstore/tasks.py`) |
+| `dlq_key_prefix` | `regengine:dlq` | Dead-Letter Queue storage (`app/resilience/dead_letter_queue.py`) |
+| `retry_max_attempts_network` / `retry_max_attempts_pipeline` | `5` / `3` | Attempt budget before a transient failure gives up and routes to the DLQ (`app/resilience/retry_policy.py`) |
 | `webhook_hmac_secret` | — | Signs outbound OMS/RMS/broker webhooks (`X-RegEngine-Signature-256`) |
 | `webhook_timeout_seconds` / `webhook_max_retries` | `5.0` / `5` | Outbound delivery tuning |
 | `ledger_database_url` | `postgresql+asyncpg://...@localhost:5432/regengine` | Audit ledger connection (use the least-privilege `regengine_ledger_writer` role — see `sql/ledger_schema.sql`) |
@@ -210,6 +214,18 @@ a *compiled policy version*, distinct from `/v1/execution/hitl/cases` which reso
 | `POST` | `/{review_id}/approve` | Activate the compiled policy — `Compliance_Officer` only |
 | `POST` | `/{review_id}/reject` | Refuse it — `Compliance_Officer` only |
 
+**Dead-Letter Queue admin** (`app/api/dlq_routes.py`, prefix `/v1/admin/dlq`) — `System_Admin` only (see that
+module's docstring on why "compliance engineer" maps to this role, not `Compliance_Officer`)
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | List DLQ entries, filterable by `category`/`status_filter`, paginated |
+| `GET` | `/stats` | Counts by category/status |
+| `GET` | `/{entry_id}` | Inspect one failed item's payload/error/traceback |
+| `PATCH` | `/{entry_id}` | Edit the failing parameters before requeueing |
+| `POST` | `/{entry_id}/requeue` | Re-dispatch the (possibly edited) item back into its originating Celery task |
+| `POST` | `/{entry_id}/discard` | Mark not worth reprocessing (e.g. a duplicate) |
+| `POST` | `/{entry_id}/resolve` | Mark confirmed fixed |
+
 Interactive docs: `http://localhost:8000/docs` once the service is running.
 
 **Audit ledger verification** (CLI, not HTTP — designed for scheduled compliance jobs):
@@ -245,6 +261,30 @@ in via `X-Encrypted: true`). Actual 401/403 enforcement is per-route via `app.se
 material resolve through `SECRETS_BACKEND` (`env` for local dev, `aws` for AWS Secrets Manager, `vault` for
 HashiCorp Vault KV v2) rather than being read as plain settings in production — swap the backend, no other code
 changes.
+
+## Resiliency
+
+Automated failure recovery for the pipeline's edge cases (`app/resilience/`) — see that package's module
+docstrings for full design rationale.
+
+**Classification, not just detection**: every failure is classified via `is_transient(exc)`
+(`app/resilience/retry_policy.py`), which walks the exception's `__cause__` chain looking for a
+network/connectivity type (`httpx.TransportError`, `ConnectionError`, `TimeoutError`, ...). Transient failures
+are retried with Celery's native exponential-backoff-with-full-jitter (`retry_backoff`/`retry_backoff_max`/
+`retry_jitter` task options), bounded by `retry_max_attempts_network` (RSS polling, vector DB ingestion) or
+`retry_max_attempts_pipeline` (PDF parsing, LLM extraction). Non-transient failures — a genuinely unparseable
+PDF, a clause the LLM agent cannot structure, a malformed JSON-Logic AST — go straight to the DLQ with zero
+retries spent, since a retry cannot fix them.
+
+**DLQ-integrated Celery tasks**: `app/ingestion/tasks.py` (PDF parsing, RSS polling), `app/agents/tasks.py` (LLM
+extraction), `app/compiler/tasks.py` (compilation — the JSON-Logic AST is structurally validated in
+`app/compiler/jsonlogic_validator.py`, called from `app.compiler.pipeline.compile_audited_rule` itself so the
+guarantee holds regardless of caller), and `app/vectorstore/tasks.py` (Qdrant indexing). Each isolated onto its
+own Celery queue so a slow LLM call can never block ingestion or compilation.
+
+**Admin API**: see [DLQ admin](#api-surface) above — inspect a failed item's payload/traceback, edit its failing
+parameters, and requeue it back into the exact task it fell out of (`celery_app.send_task` by name, so one
+generic endpoint handles every DLQ-routed task type).
 
 ## Frontend dashboard
 

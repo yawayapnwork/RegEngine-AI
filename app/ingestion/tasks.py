@@ -14,6 +14,15 @@ to run every `ingestion_poll_interval_seconds`. Each run:
 
 Celery tasks run outside an asyncio event loop; each task opens exactly one
 event loop for its unit of work via `asyncio.run`.
+
+Resiliency (app.resilience): both tasks classify a failure via
+`is_transient(exc)` before deciding what to do with it --
+  - transient (network/connectivity)  -> `self.retry()` with Celery's
+    native exponential-backoff-with-jitter (`retry_backoff`/`retry_jitter`
+    task options), bounded by `settings.retry_max_attempts_network`.
+  - not transient (a genuinely unparseable PDF, a parser/logic bug, a
+    permanently broken feed URL) -> routed straight to the DLQ
+    (`app.resilience.dead_letter_queue`), zero retries wasted.
 """
 from __future__ import annotations
 
@@ -29,7 +38,10 @@ from app.ingestion.feed_monitor import discover_all
 from app.ingestion.http_client import SebiHttpClient
 from app.ingestion.models import ChangeKind, DiscoveredDocument, IngestionRunResult
 from app.ingestion.pipeline_trigger import download_document, process_discovered_document
-from app.parsing.exceptions import ParsingError
+from app.parsing.exceptions import ChunkingError, EmbeddingError, IndexingError, UnsupportedFileError
+from app.resilience.celery_helpers import route_to_dlq_sync
+from app.resilience.models import FailureCategory
+from app.resilience.retry_policy import is_transient
 
 logger = logging.getLogger(__name__)
 
@@ -99,19 +111,32 @@ async def _run_poll_cycle() -> IngestionRunResult:
 @celery_app.task(
     name="app.ingestion.tasks.poll_sebi_sources_task",
     bind=True,
-    max_retries=3,
-    default_retry_delay=60,
+    max_retries=None,  # enforced manually below via settings.retry_max_attempts_network; see the retry() call
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
 )
 def poll_sebi_sources_task(self) -> dict:
     """Beat-scheduled entry point: one full poll cycle across all sources."""
+    settings = get_settings()
     try:
         result = asyncio.run(_run_poll_cycle())
-    except IngestionError as exc:
-        logger.error("Poll cycle failed: %s", exc)
-        raise self.retry(exc=exc) from exc
-    except Exception as exc:  # noqa: BLE001 - never let an unexpected error kill the beat schedule silently
-        logger.exception("Unexpected error in poll cycle")
-        raise self.retry(exc=exc) from exc
+    except Exception as exc:  # noqa: BLE001 - classify every failure explicitly below (transient vs. DLQ)
+        attempt = self.request.retries + 1
+        if is_transient(exc) and attempt < settings.retry_max_attempts_network:
+            logger.warning("Transient poll-cycle failure (attempt %d/%d): %s -- retrying with backoff.", attempt, settings.retry_max_attempts_network, exc)
+            raise self.retry(exc=exc) from exc
+
+        logger.error("Poll cycle failed after %d attempt(s), not retrying further: %s", attempt, exc)
+        route_to_dlq_sync(
+            category=FailureCategory.RSS_POLLING,
+            task_name="app.ingestion.tasks.poll_sebi_sources_task",
+            payload={},  # this task takes no arguments -- requeue is simply "run it again"
+            exc=exc,
+            original_task_id=self.request.id,
+            attempt_count=attempt,
+        )
+        raise
 
     logger.info(
         "Poll cycle complete: %d discovered, %d new, %d amended, %d failed",
@@ -138,20 +163,73 @@ async def _process_one(discovered: DiscoveredDocument, change_kind: ChangeKind, 
         await redis_client.aclose()
 
 
+# Exceptions that mean "this exact PDF will never parse, no matter how
+# many times we try" -- routed to the DLQ immediately, retry attempts
+# never spent on them. ExtractionBackendError/ParseTimeoutError are
+# deliberately NOT here: an extraction backend being briefly unreachable,
+# or a slow document tripping the timeout under load, both plausibly
+# succeed on a retry -- classified via is_transient() instead, below.
+_PERMANENT_PARSING_ERRORS = (UnsupportedFileError, ChunkingError)
+
+
 @celery_app.task(
     name="app.ingestion.tasks.process_discovered_document_task",
     bind=True,
-    max_retries=3,
-    default_retry_delay=30,
+    max_retries=None,  # enforced manually below; see the retry() call
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
 )
 def process_discovered_document_task(self, discovered_dict: dict, change_kind: str, content_hex: str, content_sha256: str) -> dict:
+    settings = get_settings()
     discovered = DiscoveredDocument.model_validate(discovered_dict)
     content = bytes.fromhex(content_hex)
+    payload = {
+        "discovered_dict": discovered_dict,
+        "change_kind": change_kind,
+        "content_hex": content_hex,
+        "content_sha256": content_sha256,
+    }
+
     try:
         return asyncio.run(_process_one(discovered, ChangeKind(change_kind), content, content_sha256))
-    except ParsingError as exc:
-        logger.error("Ingestion pipeline failed for %s: %s", discovered.source_url, exc)
-        raise self.retry(exc=exc) from exc
-    except Exception as exc:  # noqa: BLE001 - retry unexpected failures too, bounded by max_retries
-        logger.exception("Unexpected error ingesting %s", discovered.source_url)
-        raise self.retry(exc=exc) from exc
+    except Exception as exc:  # noqa: BLE001 - classify every failure explicitly below (permanent / transient / DLQ)
+        attempt = self.request.retries + 1
+
+        if isinstance(exc, _PERMANENT_PARSING_ERRORS):
+            logger.error("Unparseable PDF for %s (attempt %d, not retrying): %s", discovered.source_url, attempt, exc)
+            route_to_dlq_sync(
+                category=FailureCategory.PDF_PARSING,
+                task_name="app.ingestion.tasks.process_discovered_document_task",
+                payload=payload,
+                exc=exc,
+                original_task_id=self.request.id,
+                attempt_count=attempt,
+            )
+            raise
+
+        # Everything else (vector-DB indexing failures inside
+        # process_discovered_document, a transiently-unreachable
+        # extraction backend, an unexpected bug) is classified by
+        # transience rather than exception type -- category is chosen
+        # from what actually raised it so a compliance engineer sees the
+        # right DLQ bucket regardless.
+        max_attempts = settings.retry_max_attempts_network  # only reached below when is_transient(exc) is True
+        if is_transient(exc) and attempt < max_attempts:
+            logger.warning(
+                "Transient failure processing %s (attempt %d/%d): %s -- retrying with backoff.",
+                discovered.source_url, attempt, max_attempts, exc,
+            )
+            raise self.retry(exc=exc) from exc
+
+        category = FailureCategory.VECTOR_INGESTION if isinstance(exc, (EmbeddingError, IndexingError)) else FailureCategory.PDF_PARSING
+        logger.error("Ingestion pipeline failed for %s after %d attempt(s), not retrying further: %s", discovered.source_url, attempt, exc)
+        route_to_dlq_sync(
+            category=category,
+            task_name="app.ingestion.tasks.process_discovered_document_task",
+            payload=payload,
+            exc=exc,
+            original_task_id=self.request.id,
+            attempt_count=attempt,
+        )
+        raise

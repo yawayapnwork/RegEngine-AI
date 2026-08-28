@@ -8,7 +8,12 @@ SFTP batch workers independently from latency-sensitive webhook delivery
 workers, and stop either from starving the other.
 
 Run with, e.g.:
-    celery -A app.execution.celery_app worker -Q regengine_batch,regengine_cdc,regengine_webhooks -l info
+    celery -A app.execution.celery_app worker \
+        -Q regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion,regengine_agents,regengine_compiler,regengine_vectorstore \
+        -l info
+Or scale each workload's worker pool independently -- `-Q regengine_agents`
+alone for a pool sized to Anthropic's rate limit, separate from a
+CPU-bound `-Q regengine_compiler` pool.
 """
 from __future__ import annotations
 
@@ -32,6 +37,9 @@ celery_app.conf.update(
         "app.execution.tasks.dispatch_webhook_task": {"queue": settings.celery_webhook_queue},
         "app.ingestion.tasks.poll_sebi_sources_task": {"queue": settings.celery_ingestion_queue},
         "app.ingestion.tasks.process_discovered_document_task": {"queue": settings.celery_ingestion_queue},
+        "app.agents.tasks.extract_and_audit_clause_task": {"queue": settings.celery_agents_queue},
+        "app.compiler.tasks.compile_audited_rule_task": {"queue": settings.celery_compiler_queue},
+        "app.vectorstore.tasks.index_chunks_task": {"queue": settings.celery_vectorstore_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -47,4 +55,4 @@ celery_app.conf.update(
     },
 )
 
-celery_app.autodiscover_tasks(["app.execution", "app.ingestion"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore"])

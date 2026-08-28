@@ -90,7 +90,7 @@ api:
 worker:
   enabled: true
   replicaCount: 2
-  queues: "regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion"
+  queues: "regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion,regengine_agents,regengine_compiler,regengine_vectorstore"
   concurrency: 4
   resources:
     requests:

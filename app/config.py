@@ -186,6 +186,19 @@ class Settings(BaseSettings):
     # incrementally maintained.
     metrics_queue_depth_poll_interval_seconds: float = 15.0
 
+    # --- Resiliency: Dead-Letter Queue + retry policy (app/resilience/) ---
+    dlq_key_prefix: str = "regengine:dlq"
+    celery_agents_queue: str = "regengine_agents"  # LLM extraction/audit -- isolated so a slow LLM call never blocks ingestion/compilation
+    celery_compiler_queue: str = "regengine_compiler"
+    celery_vectorstore_queue: str = "regengine_vectorstore"
+    # Applied via retry_backoff/retry_backoff_max/retry_jitter task options
+    # (native Celery, full-jitter algorithm) on every retryable task -- see
+    # app/resilience/retry_policy.py's module docstring.
+    retry_backoff_base_seconds: int = 2
+    retry_backoff_max_seconds: int = 300
+    retry_max_attempts_network: int = 5  # RSS polling, vector DB ingestion -- transient, worth persisting through
+    retry_max_attempts_pipeline: int = 3  # PDF parsing, LLM extraction -- a couple of attempts, then a human looks
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
