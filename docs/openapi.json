@@ -1,0 +1,4960 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "RegEngine AI \u2014 Regulatory Compliance & Execution API Suite",
+    "description": "\n# RegEngine AI \u2014 Enterprise Regulatory Compliance & Execution API Suite\n\n**RegEngine AI** is a deterministic, layout-aware regulatory parsing and real-time transaction compliance evaluation platform for SEBI (Securities and Exchange Board of India) master circulars.\n\n---\n\n## \ud83c\udfdb\ufe0f Core Architectural Domains\n\n1. **Regulatory Ingestion**: Automated SEBI RSS feed polling, layout-aware PDF parsing, clause chunking, and vector indexation.\n2. **Agent Rules Engine**: Multi-agent extraction (Extraction Agent) and logic auditing (Logic Auditor Agent) compiling compliance obligations into Rego & JSON-Logic ASTs.\n3. **OPA Policy Evaluation**: Sub-millisecond synchronous transaction compliance evaluation against persistent, co-located Open Policy Agent (OPA) policy engines.\n4. **Cryptographic Audit Vault**: Append-only, tamper-evident audit ledger (`compliance_audit_ledger`) backed by monotonic sequence numbers and SHA-256 block hash chains.\n5. **HITL Management**: Human-in-the-Loop review portals, live transaction flagging, and Slack / MS Teams interactive quick-approval webhooks.\n\n---\n\n## \ud83d\udd12 Authentication & Authorization\n\nRegEngine AI uses **OAuth2 with Bearer JWT tokens** (`HS256` / `RS256`).\n\n- **Broker_API_Client**: Used by stockbrokers, AMCs, and market intermediaries calling `/v1/execution/*`.\n- **Compliance_Officer**: Required for approving or rejecting compiled policies in `/v1/hitl-reviews/*`.\n- **System_Admin**: Required for infrastructure, queue depth, and DLQ management (`/v1/admin/dlq/*`).\n\n---\n\n## \u26a1 Error Handling Contract\n\nAll non-2xx responses return a standardized JSON error structure:\n\n```json\n{\n  \"detail\": \"Human-readable error explanation\",\n  \"error_code\": \"ERR_SPECIFIC_CATEGORY\",\n  \"timestamp\": \"2026-08-28T23:45:00Z\"\n}\n```\n",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/circulars/parse": {
+      "post": {
+        "summary": "Parse Circular",
+        "description": "Upload a SEBI Master Circular PDF and receive layout-aware,\nclause-hashed chunks ready for indexing.",
+        "operationId": "parse_circular_v1_circulars_parse_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_circular_v1_circulars_parse_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParseResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/circulars/index": {
+      "post": {
+        "summary": "Index Circular",
+        "description": "Embed and upsert a set of previously parsed clause chunks into Qdrant.",
+        "operationId": "index_circular_v1_circulars_index_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/circulars/parse-and-index": {
+      "post": {
+        "summary": "Parse And Index Circular",
+        "description": "Convenience endpoint: parse a PDF and index its chunks in one call.",
+        "operationId": "parse_and_index_circular_v1_circulars_parse_and_index_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recreate_collection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Recreate Collection"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_and_index_circular_v1_circulars_parse_and_index_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Healthz",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/execution/transactions/evaluate": {
+      "post": {
+        "summary": "Evaluate Transaction",
+        "description": "Evaluate a single broker-submitted transaction against compiled Rego\npolicies via the embedded OPA engine and return allow/deny/flagged\nimmediately. FLAGGED responses carry a `hitl_case_id`; the final\ndecision is delivered later to `transaction.callback_url`, if set, once\na human resolves it (see POST /hitl/cases/{case_id}/resolve).\n\nEvery evaluation is also recorded in the tamper-evident audit ledger\n(app.ledger) before the response is returned. A ledger write failure\nis logged but never turns a completed compliance decision into a\n5xx \u2014 see the trade-off note in app.ledger.integration.log_evaluation.",
+        "operationId": "evaluate_transaction_v1_execution_transactions_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransactionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/execution/batches": {
+      "post": {
+        "summary": "Submit Batch",
+        "description": "Enqueue a batch parsed from a legacy SFTP landing-zone file (or any\ncaller with an in-memory batch) for asynchronous processing on the\n`regengine_batch` Celery/Redis queue. Returns immediately with the\nbatch_id; poll GET /batches/{batch_id} or supply result_webhook_url.",
+        "operationId": "submit_batch_v1_execution_batches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Submit Batch V1 Execution Batches Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/execution/batches/{batch_id}": {
+      "get": {
+        "summary": "Get Batch Status",
+        "operationId": "get_batch_status_v1_execution_batches__batch_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJobResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/execution/cdc/events": {
+      "post": {
+        "summary": "Receive Cdc Event",
+        "description": "Receiver for a Debezium/Kafka-Connect HTTP sink (or a direct DB\ntrigger) capturing INSERT/UPDATE on the legacy `transactions` table.\nEnqueues evaluation on the `regengine_cdc` queue and returns\nimmediately so the DB trigger/connector is never blocked on policy\nevaluation latency.",
+        "operationId": "receive_cdc_event_v1_execution_cdc_events_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "oms_webhook_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Oms Webhook Url"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CDCEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Receive Cdc Event V1 Execution Cdc Events Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/execution/hitl/cases": {
+      "get": {
+        "summary": "List Hitl Cases",
+        "operationId": "list_hitl_cases_v1_execution_hitl_cases_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HITLCase"
+                  },
+                  "type": "array",
+                  "title": "Response List Hitl Cases V1 Execution Hitl Cases Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/execution/hitl/cases/{case_id}": {
+      "get": {
+        "summary": "Get Hitl Case",
+        "operationId": "get_hitl_case_v1_execution_hitl_cases__case_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HITLCase"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/execution/hitl/cases/{case_id}/resolve": {
+      "post": {
+        "summary": "Resolve Hitl Case",
+        "description": "A compliance reviewer resolves an ambiguous transaction as ALLOW or\nDENY. If the original transaction carried a `callback_url`, the final\ndecision is dispatched there asynchronously (with retry) via the\n`regengine_webhooks` queue, closing the fallback loop from requirement 3.",
+        "operationId": "resolve_hitl_case_v1_execution_hitl_cases__case_id__resolve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HITLResolutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HITLCase"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingestion/poll": {
+      "post": {
+        "tags": [
+          "ingestion"
+        ],
+        "summary": "Trigger Poll",
+        "description": "Enqueues one ingestion poll cycle immediately instead of waiting for\nthe next `ingestion_poll_interval_seconds` beat tick.",
+        "operationId": "trigger_poll_v1_ingestion_poll_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/ingestion/poll/{task_id}": {
+      "get": {
+        "tags": [
+          "ingestion"
+        ],
+        "summary": "Poll Status",
+        "operationId": "poll_status_v1_ingestion_poll__task_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Issue Token",
+        "description": "RFC 6749 \u00a74.4 client_credentials grant. A broker's system\nauthenticates as its registered `client_id`/`client_secret` (issued\nout-of-band during onboarding -- see app.security.tenant_store's\nmodule docstring: there is deliberately no public self-service\nsignup) and receives a short-lived Broker_API_Client access token\nscoped to its own tenant_id.",
+        "operationId": "issue_token_v1_auth_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Introspect Self",
+        "description": "Returns the caller's own resolved identity -- useful for the HITL\nreview portal frontend to confirm \"am I logged in as a\nCompliance_Officer\" without decoding the JWT client-side, and for\ndebugging a broker integration's token.",
+        "operationId": "introspect_self_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Principal"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/hitl-reviews": {
+      "get": {
+        "tags": [
+          "hitl-review-portal"
+        ],
+        "summary": "List Reviews",
+        "operationId": "list_reviews_v1_hitl_reviews_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status_filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HITLReviewOut"
+                  },
+                  "title": "Response List Reviews V1 Hitl Reviews Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/hitl-reviews/{review_id}": {
+      "get": {
+        "tags": [
+          "hitl-review-portal"
+        ],
+        "summary": "Get Review",
+        "operationId": "get_review_v1_hitl_reviews__review_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HITLReviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/hitl-reviews/{review_id}/approve": {
+      "post": {
+        "tags": [
+          "hitl-review-portal"
+        ],
+        "summary": "Approve Review",
+        "description": "Approves the compiled policy this review concerns: activates its\nCompiledRule version (deactivating any prior active version of the\nsame rule_id, so exactly one version is ever live -- see\napp.db.models.CompiledRule's partial-unique-index comment), marks the\nreview RESOLVED under this officer's identity, and publishes a\nPolicyEvent so every FastAPI worker's PolicyHotReloadSubscriber\nhot-reloads OPA within its next pub/sub poll -- typically low\nmilliseconds, never a restart. Publishing happens AFTER the DB commit\n(not inside the same transaction): a Redis PUBLISH cannot be rolled\nback, so it must only ever fire once the approval it describes is\ndurably true, not before.",
+        "operationId": "approve_review_v1_hitl_reviews__review_id__approve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewResolutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HITLReviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/hitl-reviews/{review_id}/reject": {
+      "post": {
+        "tags": [
+          "hitl-review-portal"
+        ],
+        "summary": "Reject Review",
+        "description": "Rejects the compiled policy: it is never activated. The clause\nstays flagged for re-extraction/manual authoring; this does not delete\nthe CompiledRule row (kept for audit trail of what was proposed and\nwhy it was refused).",
+        "operationId": "reject_review_v1_hitl_reviews__review_id__reject_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewResolutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HITLReviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/dlq": {
+      "get": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "List Dlq Entries",
+        "operationId": "list_dlq_entries_v1_admin_dlq_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FailureCategory"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "name": "status_filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DLQStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DLQEntry"
+                  },
+                  "title": "Response List Dlq Entries V1 Admin Dlq Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/dlq/stats": {
+      "get": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "Dlq Stats",
+        "operationId": "dlq_stats_v1_admin_dlq_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLQStats"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/dlq/{entry_id}": {
+      "get": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "Get Dlq Entry",
+        "operationId": "get_dlq_entry_v1_admin_dlq__entry_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLQEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "Edit Dlq Entry Payload",
+        "description": "A compliance engineer corrects the failing parameters -- e.g. a\nmalformed source URL, an override flag that should have been set --\nbefore requeueing. See app.resilience.models.DLQEntryUpdate's\ndocstring for why this replaces the whole payload rather than merging\na partial one.",
+        "operationId": "edit_dlq_entry_payload_v1_admin_dlq__entry_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DLQEntryUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLQEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/dlq/{entry_id}/requeue": {
+      "post": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "Requeue Dlq Entry",
+        "description": "Re-dispatches `entry.task_name` (whatever it currently is -- edit\nit first via PATCH if the failing parameters need correcting) with\n`entry.payload` as keyword arguments, via `celery_app.send_task` --\ndispatch by name, not by importing the task function, so this one\nendpoint can requeue any DLQ-routed task type without a per-category\nif/elif chain to keep in sync as new task modules are added (see\napp.compiler.tasks / app.agents.tasks / app.vectorstore.tasks /\napp.ingestion.tasks -- every one of them structures its DLQ payload as\na kwargs-shaped dict for exactly this reason).",
+        "operationId": "requeue_dlq_entry_v1_admin_dlq__entry_id__requeue_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLQRequeueResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/dlq/{entry_id}/discard": {
+      "post": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "Discard Dlq Entry",
+        "description": "Marks an entry DISCARDED without reprocessing it -- e.g. a\nduplicate, a spam/junk PDF the RSS feed picked up, a test document.\nDistinct from `/resolve`: discard means \"not worth fixing\", resolve\nmeans \"confirmed fixed\".",
+        "operationId": "discard_dlq_entry_v1_admin_dlq__entry_id__discard_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DLQResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLQEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/dlq/{entry_id}/resolve": {
+      "post": {
+        "tags": [
+          "dlq-admin"
+        ],
+        "summary": "Resolve Dlq Entry",
+        "description": "Marks an entry RESOLVED -- e.g. a requeued item that has now\nsucceeded and no longer needs tracking here, or a failure fixed\nout-of-band. This endpoint does not verify the underlying task\nactually succeeded; it records a human's judgment that this item is\nclosed.",
+        "operationId": "resolve_dlq_entry_v1_admin_dlq__entry_id__resolve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DLQResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DLQEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandbox/evaluate": {
+      "post": {
+        "tags": [
+          "Sandbox"
+        ],
+        "summary": "Dry-run transactions against active compiled rules",
+        "description": "Evaluates one or more transactions against the tenant's currently active OPA policy bundle in a fully isolated, read-only session.  No HITL cases, ledger entries, or webhook events are created.  The session is automatically rolled back after evaluation.",
+        "operationId": "sandbox_evaluate_v1_sandbox_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxEvaluateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxBatchResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sandbox/evaluate/with-overlay": {
+      "post": {
+        "tags": [
+          "Sandbox"
+        ],
+        "summary": "Dry-run transactions with a candidate risk-overlay",
+        "description": "Same as /evaluate but merges a caller-supplied ``candidate_overlay`` dict into the OPA input document under the key ``input.overlay``.  Production OPA state is never mutated. Use this to preview how threshold changes (e.g. raising the upfront margin floor) would alter compliance decisions before submitting the overlay for production approval.",
+        "operationId": "sandbox_evaluate_with_overlay_v1_sandbox_evaluate_with_overlay_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxEvaluateWithOverlayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxBatchResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sandbox/circulars": {
+      "get": {
+        "tags": [
+          "Sandbox"
+        ],
+        "summary": "Browse historical SEBI circulars available in the sandbox",
+        "description": "Returns the circulars the requesting tenant has access to: their own tenant-specific circulars plus all shared SEBI master circulars (``is_shared=True``).  RLS enforces this automatically \u2014 no application-level tenant filter is added.  Supports optional keyword, date-range, and department filtering.",
+        "operationId": "sandbox_list_circulars_v1_sandbox_circulars_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on circular_number or title.",
+              "title": "Keyword"
+            },
+            "description": "Case-insensitive substring match on circular_number or title."
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO-8601 date (YYYY-MM-DD). Filter circulars issued on or after this date.",
+              "title": "Date From"
+            },
+            "description": "ISO-8601 date (YYYY-MM-DD). Filter circulars issued on or after this date."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO-8601 date (YYYY-MM-DD). Filter circulars issued on or before this date.",
+              "title": "Date To"
+            },
+            "description": "ISO-8601 date (YYYY-MM-DD). Filter circulars issued on or before this date."
+          },
+          {
+            "name": "department",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive match on the circular's department field.",
+              "title": "Department"
+            },
+            "description": "Case-insensitive match on the circular's department field."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Maximum number of circulars to return.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Maximum number of circulars to return."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset.",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Pagination offset."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CircularSummary"
+                  },
+                  "title": "Response Sandbox List Circulars V1 Sandbox Circulars Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandbox/rules": {
+      "get": {
+        "tags": [
+          "Sandbox"
+        ],
+        "summary": "List active compiled rules available in the sandbox",
+        "description": "Returns all ``is_active=True`` compiled rules visible to the requesting tenant.  RLS scopes this to the tenant's own rules plus any shared SEBI baseline rules.  The returned ``opa_package_name`` is what you would use in a custom Rego evaluation query against the sandbox.",
+        "operationId": "sandbox_list_rules_v1_sandbox_rules_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the entity type the rule targets (e.g. 'Stockbroker').",
+              "title": "Entity Type"
+            },
+            "description": "Filter by the entity type the rule targets (e.g. 'Stockbroker')."
+          },
+          {
+            "name": "circular_number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the originating SEBI circular number.",
+              "title": "Circular Number"
+            },
+            "description": "Filter by the originating SEBI circular number."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CompiledRuleSummary"
+                  },
+                  "title": "Response Sandbox List Rules V1 Sandbox Rules Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandbox/rules/{rule_id}": {
+      "get": {
+        "tags": [
+          "Sandbox"
+        ],
+        "summary": "Fetch a single compiled rule by rule_id",
+        "description": "Returns the active compiled rule with the given ``rule_id``.  Returns 404 if the rule does not exist or is not visible to the tenant.",
+        "operationId": "sandbox_get_rule_v1_sandbox_rules__rule_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompiledRuleSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/summary": {
+      "get": {
+        "tags": [
+          "Analytics & Reporting"
+        ],
+        "summary": "Build executive compliance summary",
+        "description": "Aggregates rule evaluation telemetry across all broker systems (or a single tenant) for the specified period and returns a structured AggregatedReport including headline KPIs, time-series buckets, broker breakdown, top violations, detected anomalies, and cryptographic chain proof.",
+        "operationId": "get_summary_v1_analytics_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window start date (YYYY-MM-DD, inclusive).",
+              "title": "Date From"
+            },
+            "description": "Report window start date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window end date (YYYY-MM-DD, inclusive).",
+              "title": "Date To"
+            },
+            "description": "Report window end date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Granularity",
+              "description": "Bucket granularity: 'monthly' or 'quarterly'.",
+              "default": "monthly"
+            },
+            "description": "Bucket granularity: 'monthly' or 'quarterly'."
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary.",
+              "title": "Tenant Id"
+            },
+            "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary."
+          },
+          {
+            "name": "skip_chain_verify",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Skip ledger hash-chain verification for faster responses.",
+              "default": false,
+              "title": "Skip Chain Verify"
+            },
+            "description": "Skip ledger hash-chain verification for faster responses."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregatedReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/anomalies": {
+      "get": {
+        "tags": [
+          "Analytics & Reporting"
+        ],
+        "summary": "Get anomaly events for a period",
+        "description": "Lighter-weight endpoint that runs the full aggregation and anomaly detection pipeline but returns only the AnomalyEvent list \u2014 suitable for compliance dashboards polling for alerts without fetching the full report.",
+        "operationId": "get_anomalies_v1_analytics_anomalies_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window start date (YYYY-MM-DD, inclusive).",
+              "title": "Date From"
+            },
+            "description": "Report window start date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window end date (YYYY-MM-DD, inclusive).",
+              "title": "Date To"
+            },
+            "description": "Report window end date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Granularity",
+              "description": "Bucket granularity: 'monthly' or 'quarterly'.",
+              "default": "monthly"
+            },
+            "description": "Bucket granularity: 'monthly' or 'quarterly'."
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary.",
+              "title": "Tenant Id"
+            },
+            "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(high|low)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by severity: 'high' or 'low'.  Omit for all.",
+              "title": "Severity"
+            },
+            "description": "Filter by severity: 'high' or 'low'.  Omit for all."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AnomalyEvent"
+                  },
+                  "title": "Response Get Anomalies V1 Analytics Anomalies Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/audit-trail": {
+      "get": {
+        "tags": [
+          "Analytics & Reporting"
+        ],
+        "summary": "Get paginated SEBI audit trail",
+        "description": "Returns a paginated, cryptographically attested export of the compliance audit ledger for the specified period.  Every entry includes its payload_digest (SHA-256 of business fields) and current_hash (block hash) for independent verification against the production ledger.",
+        "operationId": "get_audit_trail_v1_analytics_audit_trail_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window start date (YYYY-MM-DD, inclusive).",
+              "title": "Date From"
+            },
+            "description": "Report window start date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window end date (YYYY-MM-DD, inclusive).",
+              "title": "Date To"
+            },
+            "description": "Report window end date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary.",
+              "title": "Tenant Id"
+            },
+            "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number (1-indexed).",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number (1-indexed)."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "description": "Entries per page.  Max 2000.",
+              "default": 500,
+              "title": "Page Size"
+            },
+            "description": "Entries per page.  Max 2000."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditTrailReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/reports/executive-pdf": {
+      "post": {
+        "tags": [
+          "Analytics & Reporting"
+        ],
+        "summary": "Generate executive compliance summary PDF",
+        "description": "Runs the full analytics pipeline and renders a multi-section PDF report suitable for board-level review and internal compliance sign-off.  The PDF includes KPI scorecards, trend charts, broker breakdowns, violation tables, anomaly callouts, and a cryptographic chain-proof section.",
+        "operationId": "generate_executive_pdf_v1_analytics_reports_executive_pdf_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window start date (YYYY-MM-DD, inclusive).",
+              "title": "Date From"
+            },
+            "description": "Report window start date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window end date (YYYY-MM-DD, inclusive).",
+              "title": "Date To"
+            },
+            "description": "Report window end date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Granularity",
+              "description": "Bucket granularity: 'monthly' or 'quarterly'.",
+              "default": "monthly"
+            },
+            "description": "Bucket granularity: 'monthly' or 'quarterly'."
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary.",
+              "title": "Tenant Id"
+            },
+            "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary."
+          },
+          {
+            "name": "skip_chain_verify",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Skip Chain Verify"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF binary stream.",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/reports/audit-trail-pdf": {
+      "post": {
+        "tags": [
+          "Analytics & Reporting"
+        ],
+        "summary": "Generate SEBI audit trail PDF",
+        "description": "Produces a regulator-facing PDF containing the full paginated ledger extract with cryptographic proof fields (payload_digest, current_hash) and a chain-integrity attestation block.  Intended for submission to SEBI during regulatory audits or inspections.",
+        "operationId": "generate_audit_trail_pdf_v1_analytics_reports_audit_trail_pdf_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window start date (YYYY-MM-DD, inclusive).",
+              "title": "Date From"
+            },
+            "description": "Report window start date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Report window end date (YYYY-MM-DD, inclusive).",
+              "title": "Date To"
+            },
+            "description": "Report window end date (YYYY-MM-DD, inclusive)."
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary.",
+              "title": "Tenant Id"
+            },
+            "description": "Restrict report to a single tenant_id / broker_id.  Omit for a cross-tenant executive summary."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF binary stream.",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/slack/actions": {
+      "post": {
+        "tags": [
+          "webhooks-callbacks"
+        ],
+        "summary": "Slack Interactive Action Callback",
+        "description": "Handles Slack interactive button clicks (Approve Policy / Modify AST / Reject).\n\nVerifies HMAC-SHA256 signature, updates PostgreSQL `HITLReview` status, records the officer's Slack identity,\nand publishes a `PolicyEvent` so OPA server hot-reloads the policy immediately upon approval.",
+        "operationId": "slack_interactive_action_callback_v1_webhooks_slack_actions_post",
+        "parameters": [
+          {
+            "name": "X-Slack-Request-Timestamp",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Slack-Request-Timestamp"
+            }
+          },
+          {
+            "name": "X-Slack-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Slack-Signature"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_slack_interactive_action_callback_v1_webhooks_slack_actions_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/teams/actions": {
+      "post": {
+        "tags": [
+          "webhooks-callbacks"
+        ],
+        "summary": "Teams Adaptive Card Action Callback",
+        "description": "Handles MS Teams Adaptive Card `Action.Submit` callbacks.",
+        "operationId": "teams_adaptive_card_action_callback_v1_webhooks_teams_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Teams Adaptive Card Action Callback V1 Webhooks Teams Actions Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/trigger-flagged-notification": {
+      "post": {
+        "tags": [
+          "webhooks-callbacks"
+        ],
+        "summary": "Trigger Flagged Rule Notification",
+        "description": "Pipeline trigger endpoint: dispatches real-time Slack and Teams alerts for a flagged compliance rule.",
+        "operationId": "trigger_flagged_rule_notification_v1_webhooks_trigger_flagged_notification_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationTriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Flagged Rule Notification V1 Webhooks Trigger Flagged Notification Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Root  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AggregatedReport": {
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "title": "Report Id",
+            "description": "UUID identifying this report generation run."
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "generated_by": {
+            "type": "string",
+            "title": "Generated By",
+            "description": "Principal subject (compliance officer / admin) who triggered the report."
+          },
+          "period": {
+            "$ref": "#/components/schemas/ReportPeriod"
+          },
+          "tenant_scope": {
+            "type": "string",
+            "title": "Tenant Scope",
+            "description": "'all' for cross-tenant reports; a specific tenant_id for single-tenant views.",
+            "default": "all"
+          },
+          "total_transactions": {
+            "type": "integer",
+            "title": "Total Transactions",
+            "default": 0
+          },
+          "total_passed": {
+            "type": "integer",
+            "title": "Total Passed",
+            "default": 0
+          },
+          "total_failed": {
+            "type": "integer",
+            "title": "Total Failed",
+            "default": 0
+          },
+          "total_hitl_review": {
+            "type": "integer",
+            "title": "Total Hitl Review",
+            "default": 0
+          },
+          "overall_pass_rate_pct": {
+            "type": "number",
+            "title": "Overall Pass Rate Pct",
+            "default": 0.0
+          },
+          "overall_fail_rate_pct": {
+            "type": "number",
+            "title": "Overall Fail Rate Pct",
+            "default": 0.0
+          },
+          "overall_hitl_rate_pct": {
+            "type": "number",
+            "title": "Overall Hitl Rate Pct",
+            "default": 0.0
+          },
+          "unique_brokers_evaluated": {
+            "type": "integer",
+            "title": "Unique Brokers Evaluated",
+            "default": 0
+          },
+          "unique_rules_evaluated": {
+            "type": "integer",
+            "title": "Unique Rules Evaluated",
+            "default": 0
+          },
+          "unique_circulars_referenced": {
+            "type": "integer",
+            "title": "Unique Circulars Referenced",
+            "default": 0
+          },
+          "time_series": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodBucket"
+            },
+            "type": "array",
+            "title": "Time Series"
+          },
+          "broker_stats": {
+            "items": {
+              "$ref": "#/components/schemas/BrokerStats"
+            },
+            "type": "array",
+            "title": "Broker Stats"
+          },
+          "top_violations": {
+            "items": {
+              "$ref": "#/components/schemas/RuleViolationSummary"
+            },
+            "type": "array",
+            "title": "Top Violations",
+            "description": "Top 10 most-violated rules across the period."
+          },
+          "anomalies": {
+            "items": {
+              "$ref": "#/components/schemas/AnomalyEvent"
+            },
+            "type": "array",
+            "title": "Anomalies"
+          },
+          "anomaly_count_high": {
+            "type": "integer",
+            "title": "Anomaly Count High",
+            "default": 0
+          },
+          "anomaly_count_low": {
+            "type": "integer",
+            "title": "Anomaly Count Low",
+            "default": 0
+          },
+          "chain_proof": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChainProofSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "report_id",
+          "generated_by",
+          "period"
+        ],
+        "title": "AggregatedReport",
+        "description": "Complete compliance analytics report for a given period and tenant scope.\n\nThis is the single object that:\n  - analytics_routes returns as JSON from GET /v1/analytics/summary\n  - pdf_report renders into a PDF from POST /v1/analytics/reports/pdf"
+      },
+      "Anom__ySeverity": {
+        "type": "string",
+        "enum": [
+          "low",
+          "high"
+        ],
+        "title": "Anom\u0430\u043bySeverity"
+      },
+      "AnomalyEvent": {
+        "properties": {
+          "anomaly_type": {
+            "$ref": "#/components/schemas/AnomalyType"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Anom__ySeverity"
+          },
+          "broker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Id",
+            "description": "None means a system-wide anomaly."
+          },
+          "period_label": {
+            "type": "string",
+            "title": "Period Label",
+            "description": "The bucket (month/quarter) where the anomaly was detected."
+          },
+          "metric_name": {
+            "type": "string",
+            "title": "Metric Name",
+            "description": "Human-readable metric that spiked, e.g. 'fail_rate_pct'."
+          },
+          "observed_value": {
+            "type": "number",
+            "title": "Observed Value"
+          },
+          "baseline_mean": {
+            "type": "number",
+            "title": "Baseline Mean"
+          },
+          "baseline_std": {
+            "type": "number",
+            "title": "Baseline Std"
+          },
+          "z_score": {
+            "type": "number",
+            "title": "Z Score"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "detected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detected At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "anomaly_type",
+          "severity",
+          "period_label",
+          "metric_name",
+          "observed_value",
+          "baseline_mean",
+          "baseline_std",
+          "z_score",
+          "description"
+        ],
+        "title": "AnomalyEvent",
+        "description": "One detected statistical anomaly in the compliance telemetry."
+      },
+      "AnomalyType": {
+        "type": "string",
+        "enum": [
+          "denial_spike",
+          "hitl_spike",
+          "pass_rate_drop",
+          "volume_spike"
+        ],
+        "title": "AnomalyType"
+      },
+      "AuditTrailEntry": {
+        "properties": {
+          "sequence_num": {
+            "type": "integer",
+            "title": "Sequence Num"
+          },
+          "broker_id": {
+            "type": "string",
+            "title": "Broker Id"
+          },
+          "transaction_id": {
+            "type": "string",
+            "title": "Transaction Id"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Evaluated At"
+          },
+          "circular_id": {
+            "type": "string",
+            "title": "Circular Id"
+          },
+          "section_reference": {
+            "type": "string",
+            "title": "Section Reference"
+          },
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "evaluation_result": {
+            "type": "string",
+            "title": "Evaluation Result"
+          },
+          "hitl_review_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hitl Review Id"
+          },
+          "payload_digest": {
+            "type": "string",
+            "title": "Payload Digest"
+          },
+          "current_hash": {
+            "type": "string",
+            "title": "Current Hash"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence_num",
+          "broker_id",
+          "transaction_id",
+          "evaluated_at",
+          "circular_id",
+          "section_reference",
+          "rule_id",
+          "evaluation_result",
+          "hitl_review_id",
+          "payload_digest",
+          "current_hash"
+        ],
+        "title": "AuditTrailEntry",
+        "description": "One row in the SEBI audit trail report \u2014 maps directly to a ledger row."
+      },
+      "AuditTrailReport": {
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "title": "Report Id"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "generated_by": {
+            "type": "string",
+            "title": "Generated By"
+          },
+          "period": {
+            "$ref": "#/components/schemas/ReportPeriod"
+          },
+          "tenant_scope": {
+            "type": "string",
+            "title": "Tenant Scope"
+          },
+          "total_entries": {
+            "type": "integer",
+            "title": "Total Entries",
+            "default": 0
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AuditTrailEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "chain_proof": {
+            "$ref": "#/components/schemas/ChainProofSummary"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 500
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "default": 1
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "description": "Arbitrary key-value pairs an operator can attach (e.g. auditor_name, submission_reference)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "report_id",
+          "generated_by",
+          "period",
+          "tenant_scope",
+          "chain_proof"
+        ],
+        "title": "AuditTrailReport",
+        "description": "SEBI-facing audit trail: a cryptographically bound, paginated ledger\nextract covering a specified window, with chain-integrity attestation."
+      },
+      "BatchIngestRequest": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
+          },
+          "source_channel": {
+            "$ref": "#/components/schemas/SourceChannel",
+            "default": "sftp_batch"
+          },
+          "transactions": {
+            "items": {
+              "$ref": "#/components/schemas/TransactionPayload"
+            },
+            "type": "array",
+            "title": "Transactions"
+          },
+          "result_webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Webhook Url",
+            "description": "Where to POST the BatchJobResult summary once processing completes."
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_id",
+          "transactions"
+        ],
+        "title": "BatchIngestRequest",
+        "description": "Accepted from the legacy SFTP landing-zone poller once it has parsed\na batch file into rows, or directly from a caller with an in-memory\nbatch. Kept separate from raw file handling so the API layer never\nhas to know about the SFTP filesystem layout."
+      },
+      "BatchJobResult": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BatchJobStatus"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "allowed": {
+            "type": "integer",
+            "title": "Allowed",
+            "default": 0
+          },
+          "denied": {
+            "type": "integer",
+            "title": "Denied",
+            "default": 0
+          },
+          "flagged": {
+            "type": "integer",
+            "title": "Flagged",
+            "default": 0
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_id",
+          "status"
+        ],
+        "title": "BatchJobResult"
+      },
+      "BatchJobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "BatchJobStatus"
+      },
+      "Body_parse_and_index_circular_v1_circulars_parse_and_index_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_parse_and_index_circular_v1_circulars_parse_and_index_post"
+      },
+      "Body_parse_circular_v1_circulars_parse_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_parse_circular_v1_circulars_parse_post"
+      },
+      "Body_slack_interactive_action_callback_v1_webhooks_slack_actions_post": {
+        "properties": {
+          "payload": {
+            "type": "string",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "title": "Body_slack_interactive_action_callback_v1_webhooks_slack_actions_post"
+      },
+      "BrokerStats": {
+        "properties": {
+          "broker_id": {
+            "type": "string",
+            "title": "Broker Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "tenant_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Type"
+          },
+          "total_transactions": {
+            "type": "integer",
+            "title": "Total Transactions",
+            "default": 0
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "hitl_review": {
+            "type": "integer",
+            "title": "Hitl Review",
+            "default": 0
+          },
+          "pass_rate_pct": {
+            "type": "number",
+            "title": "Pass Rate Pct",
+            "default": 0.0
+          },
+          "fail_rate_pct": {
+            "type": "number",
+            "title": "Fail Rate Pct",
+            "default": 0.0
+          },
+          "hitl_rate_pct": {
+            "type": "number",
+            "title": "Hitl Rate Pct",
+            "default": 0.0
+          },
+          "top_violated_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Violated Rules",
+            "description": "Up to 5 rule_ids with the most FAIL outcomes for this broker."
+          },
+          "top_violation_circulars": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Violation Circulars",
+            "description": "Up to 5 circular_ids most frequently cited in violations."
+          },
+          "hitl_pending": {
+            "type": "integer",
+            "title": "Hitl Pending",
+            "default": 0
+          },
+          "hitl_resolved": {
+            "type": "integer",
+            "title": "Hitl Resolved",
+            "default": 0
+          },
+          "hitl_rejected": {
+            "type": "integer",
+            "title": "Hitl Rejected",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "broker_id"
+        ],
+        "title": "BrokerStats",
+        "description": "Compliance metrics for a single broker (tenant) over the full report period."
+      },
+      "CDCEvent": {
+        "properties": {
+          "source_table": {
+            "type": "string",
+            "title": "Source Table"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/CDCOperation"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After",
+            "description": "Row image post-change; required for c/u, absent for d."
+          },
+          "committed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Committed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_table",
+          "operation"
+        ],
+        "title": "CDCEvent",
+        "description": "Minimal envelope compatible with a Debezium/Kafka-Connect HTTP sink\n(or a Postgres/SQL-Server trigger posting directly). Only INSERT/UPDATE\non the legacy `transactions` table are evaluated; DELETE is recorded\nbut never evaluated."
+      },
+      "CDCOperation": {
+        "type": "string",
+        "enum": [
+          "c",
+          "u",
+          "d",
+          "r"
+        ],
+        "title": "CDCOperation"
+      },
+      "ChainProofSummary": {
+        "properties": {
+          "verified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Verified At"
+          },
+          "entries_checked": {
+            "type": "integer",
+            "title": "Entries Checked"
+          },
+          "chain_valid": {
+            "type": "boolean",
+            "title": "Chain Valid"
+          },
+          "break_count": {
+            "type": "integer",
+            "title": "Break Count",
+            "default": 0
+          },
+          "range_start_sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Range Start Sequence"
+          },
+          "range_end_sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Range End Sequence"
+          },
+          "window_seal_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seal Hash",
+            "description": "current_hash of the last ledger row in the report window. An auditor can verify this against their own copy of the ledger to confirm no rows were added, removed, or altered after report generation."
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "Chain integrity is verified by recomputing SHA-256(previous_hash \u2016 payload_digest \u2016 sequence_num \u2016 evaluated_at) for every row and comparing to stored current_hash."
+          }
+        },
+        "type": "object",
+        "required": [
+          "verified_at",
+          "entries_checked",
+          "chain_valid"
+        ],
+        "title": "ChainProofSummary",
+        "description": "Cryptographic integrity summary for the ledger window covered by the report."
+      },
+      "CircularMetadata": {
+        "properties": {
+          "circular_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circular Number"
+          },
+          "issue_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Date"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "source_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Filename"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          }
+        },
+        "type": "object",
+        "title": "CircularMetadata",
+        "description": "Header-level metadata for a SEBI Master Circular, either supplied by the\ncaller or inferred from the first page during extraction."
+      },
+      "CircularSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "circular_number": {
+            "type": "string",
+            "title": "Circular Number"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "issue_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Date"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "is_shared": {
+            "type": "boolean",
+            "title": "Is Shared"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "clause_count": {
+            "type": "integer",
+            "title": "Clause Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "circular_number",
+          "title",
+          "issue_date",
+          "department",
+          "source_url",
+          "is_shared",
+          "tenant_id"
+        ],
+        "title": "CircularSummary",
+        "description": "Minimal read-only view of a historical circular, safe to return to\nthe sandbox caller (no raw text or digest is included)."
+      },
+      "ClauseChunk": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "clause_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause Number"
+          },
+          "section_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Section Path"
+          },
+          "section_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Title"
+          },
+          "page_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Start"
+          },
+          "page_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page End"
+          },
+          "footnotes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Footnotes"
+          },
+          "contains_table": {
+            "type": "boolean",
+            "title": "Contains Table",
+            "default": false
+          },
+          "circular_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circular Number"
+          },
+          "issue_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Date"
+          },
+          "source_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Filename"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Extra"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "sha256",
+          "text"
+        ],
+        "title": "ClauseChunk",
+        "description": "A semantically coherent, self-contained unit of legal text ready for\nembedding and retrieval."
+      },
+      "ClientCredentialsRequest": {
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "pattern": "^client_credentials$",
+            "title": "Grant Type"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant_type",
+          "client_id",
+          "client_secret"
+        ],
+        "title": "ClientCredentialsRequest",
+        "description": "RFC 6749 \u00a74.4 client_credentials grant -- how a broker's system\nauthenticates as its `Broker_API_Client` tenant. Sent as a JSON body\nhere rather than the RFC's application/x-www-form-urlencoded for\nconsistency with the rest of this API's request bodies; the semantics\nare identical."
+      },
+      "CompiledRuleSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "rule_version": {
+            "type": "integer",
+            "title": "Rule Version"
+          },
+          "opa_package_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opa Package Name"
+          },
+          "has_rego": {
+            "type": "boolean",
+            "title": "Has Rego"
+          },
+          "has_jsonlogic": {
+            "type": "boolean",
+            "title": "Has Jsonlogic"
+          },
+          "hitl_status": {
+            "type": "string",
+            "title": "Hitl Status"
+          },
+          "circular_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circular Number"
+          },
+          "clause_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause Number"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "rule_id",
+          "rule_version",
+          "opa_package_name",
+          "has_rego",
+          "has_jsonlogic",
+          "hitl_status"
+        ],
+        "title": "CompiledRuleSummary",
+        "description": "Minimal view of an active compiled rule available in the sandbox."
+      },
+      "DLQEntry": {
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
+          "category": {
+            "$ref": "#/components/schemas/FailureCategory"
+          },
+          "task_name": {
+            "type": "string",
+            "title": "Task Name",
+            "description": "Fully-qualified Celery task name to re-dispatch on requeue, e.g. 'app.agents.tasks.extract_and_audit_clause_task'."
+          },
+          "original_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Task Id",
+            "description": "Celery task id of the run that failed, if available (None for a failure outside any task, e.g. RSS polling's own HTTP client retries)."
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload",
+            "description": "JSON-serializable args/kwargs to re-dispatch task_name with. Editable via PATCH before requeueing."
+          },
+          "error_type": {
+            "type": "string",
+            "title": "Error Type",
+            "description": "The failing exception's class name, e.g. 'UnsupportedFileError'."
+          },
+          "error_message": {
+            "type": "string",
+            "title": "Error Message"
+          },
+          "traceback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceback"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "title": "Attempt Count",
+            "description": "How many attempts (including this one) were made before landing here.",
+            "default": 1
+          },
+          "first_failed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Failed At"
+          },
+          "last_failed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Failed At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DLQStatus",
+            "default": "pending"
+          },
+          "requeued_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requeued At"
+          },
+          "requeued_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requeued By",
+            "description": "Principal.subject of the compliance engineer who requeued this."
+          },
+          "requeued_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requeued Task Id",
+            "description": "Celery task id of the re-dispatched task, once requeued."
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "task_name",
+          "payload",
+          "error_type",
+          "error_message",
+          "first_failed_at",
+          "last_failed_at"
+        ],
+        "title": "DLQEntry",
+        "description": "One failed unit of work, durably parked for human review. `payload`\nis exactly the JSON-serializable args/kwargs the originating Celery\ntask needs to run again -- a compliance engineer edits THIS field\n(e.g. correcting a malformed URL, tweaking an extraction_backend\noverride) and `POST /requeue` re-dispatches the same task with the\nedited payload, unchanged otherwise."
+      },
+      "DLQEntryUpdate": {
+        "properties": {
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "payload"
+        ],
+        "title": "DLQEntryUpdate",
+        "description": "PATCH body: replace the stored payload (a compliance engineer's\nedited failing parameters) before requeueing. Partial -- omitted\nfields in `payload` are NOT merged; the caller sends the full,\ncorrected payload dict, since a partial merge on an arbitrary\ntask-specific dict shape has no safe default (is a missing key\n\"leave as-is\" or \"delete\"?) and this makes the semantics explicit\ninstead of guessed."
+      },
+      "DLQRequeueResponse": {
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/DLQEntry"
+          },
+          "dispatched_task_id": {
+            "type": "string",
+            "title": "Dispatched Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entry",
+          "dispatched_task_id"
+        ],
+        "title": "DLQRequeueResponse"
+      },
+      "DLQResolveRequest": {
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "title": "DLQResolveRequest"
+      },
+      "DLQStats": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Category"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_category",
+          "by_status"
+        ],
+        "title": "DLQStats"
+      },
+      "DLQStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "requeued",
+          "resolved",
+          "discarded"
+        ],
+        "title": "DLQStatus"
+      },
+      "Decision": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "deny",
+          "flagged"
+        ],
+        "title": "Decision"
+      },
+      "EvaluationResult": {
+        "properties": {
+          "transaction_id": {
+            "type": "string",
+            "title": "Transaction Id"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "matched_policies": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyOutcome"
+            },
+            "type": "array",
+            "title": "Matched Policies"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "hitl_case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hitl Case Id",
+            "description": "Set only when decision == FLAGGED."
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Evaluated At"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transaction_id",
+          "decision"
+        ],
+        "title": "EvaluationResult"
+      },
+      "FailureCategory": {
+        "type": "string",
+        "enum": [
+          "pdf_parsing",
+          "llm_extraction",
+          "malformed_ast",
+          "vector_ingestion",
+          "rss_polling",
+          "other"
+        ],
+        "title": "FailureCategory",
+        "description": "WHERE in the pipeline the item failed -- see app.resilience.exceptions'\nmodule docstring for how this differs from retryability."
+      },
+      "Granularity": {
+        "type": "string",
+        "enum": [
+          "monthly",
+          "quarterly"
+        ],
+        "title": "Granularity"
+      },
+      "HITLCase": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/TransactionPayload"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "matched_policies": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyOutcome"
+            },
+            "type": "array",
+            "title": "Matched Policies"
+          },
+          "status": {
+            "$ref": "#/components/schemas/HITLStatus",
+            "default": "pending"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_id",
+          "transaction",
+          "reason"
+        ],
+        "title": "HITLCase",
+        "description": "An execution-time ambiguity escalated to a human reviewer. Distinct\nfrom `app.compiler.models.HITLFlag`, which flags a *policy* as\nunsafe to compile; this flags a *transaction* the compiled policy\ncould not confidently decide."
+      },
+      "HITLResolutionRequest": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/Decision",
+            "description": "Must be ALLOW or DENY; a human cannot re-flag a case as FLAGGED."
+          },
+          "resolved_by": {
+            "type": "string",
+            "title": "Resolved By"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "resolved_by"
+        ],
+        "title": "HITLResolutionRequest"
+      },
+      "HITLReviewOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "review_id": {
+            "type": "string",
+            "title": "Review Id"
+          },
+          "clause_id": {
+            "type": "integer",
+            "title": "Clause Id"
+          },
+          "compiled_rule_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiled Rule Id"
+          },
+          "reason_code": {
+            "type": "string",
+            "title": "Reason Code"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "source_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Excerpt"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "compliance_officer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compliance Officer Id"
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes"
+          },
+          "flagged_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Flagged At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "review_id",
+          "clause_id",
+          "compiled_rule_id",
+          "reason_code",
+          "severity",
+          "description",
+          "source_excerpt",
+          "status",
+          "compliance_officer_id",
+          "resolution_notes",
+          "flagged_at",
+          "resolved_at"
+        ],
+        "title": "HITLReviewOut"
+      },
+      "HITLStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "title": "HITLStatus"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IndexRequest": {
+        "properties": {
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ClauseChunk"
+            },
+            "type": "array",
+            "title": "Chunks"
+          },
+          "recreate_collection": {
+            "type": "boolean",
+            "title": "Recreate Collection",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunks"
+        ],
+        "title": "IndexRequest"
+      },
+      "IndexResponse": {
+        "properties": {
+          "collection": {
+            "type": "string",
+            "title": "Collection"
+          },
+          "upserted": {
+            "type": "integer",
+            "title": "Upserted"
+          },
+          "skipped_duplicates": {
+            "type": "integer",
+            "title": "Skipped Duplicates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "collection",
+          "upserted",
+          "skipped_duplicates"
+        ],
+        "title": "IndexResponse"
+      },
+      "NotificationTriggerRequest": {
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "title": "Review Id"
+          },
+          "circular_name": {
+            "type": "string",
+            "title": "Circular Name"
+          },
+          "clause_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause Number"
+          },
+          "source_excerpt": {
+            "type": "string",
+            "title": "Source Excerpt"
+          },
+          "confidence_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Score"
+          },
+          "reason_code": {
+            "type": "string",
+            "title": "Reason Code",
+            "default": "qualitative_directive"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "default": "blocking"
+          }
+        },
+        "type": "object",
+        "required": [
+          "review_id",
+          "circular_name",
+          "source_excerpt",
+          "confidence_score"
+        ],
+        "title": "NotificationTriggerRequest"
+      },
+      "ParseResult": {
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/CircularMetadata"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ClauseChunk"
+            },
+            "type": "array",
+            "title": "Chunks"
+          },
+          "element_count": {
+            "type": "integer",
+            "title": "Element Count"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metadata",
+          "chunks",
+          "element_count"
+        ],
+        "title": "ParseResult"
+      },
+      "PeriodBucket": {
+        "properties": {
+          "period_label": {
+            "type": "string",
+            "title": "Period Label",
+            "description": "e.g. '2026-08' (monthly) or '2026-Q3' (quarterly)."
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "total_transactions": {
+            "type": "integer",
+            "title": "Total Transactions",
+            "default": 0
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "hitl_review": {
+            "type": "integer",
+            "title": "Hitl Review",
+            "default": 0
+          },
+          "pass_rate_pct": {
+            "type": "number",
+            "title": "Pass Rate Pct",
+            "default": 0.0
+          },
+          "fail_rate_pct": {
+            "type": "number",
+            "title": "Fail Rate Pct",
+            "default": 0.0
+          },
+          "hitl_rate_pct": {
+            "type": "number",
+            "title": "Hitl Rate Pct",
+            "default": 0.0
+          },
+          "unique_rules_triggered": {
+            "type": "integer",
+            "title": "Unique Rules Triggered",
+            "default": 0
+          },
+          "unique_circulars_referenced": {
+            "type": "integer",
+            "title": "Unique Circulars Referenced",
+            "default": 0
+          },
+          "unique_brokers": {
+            "type": "integer",
+            "title": "Unique Brokers",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_label",
+          "period_start",
+          "period_end"
+        ],
+        "title": "PeriodBucket",
+        "description": "Aggregated compliance metrics for a single monthly or quarterly bucket."
+      },
+      "PolicyOutcome": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "package": {
+            "type": "string",
+            "title": "Package"
+          },
+          "allow": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow",
+            "description": "None means OPA returned undefined (missing/insufficient facts)."
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Violations"
+          },
+          "circular_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circular Number",
+            "description": "Echoed from the compiled Rego decision object; feeds the audit ledger's SEBI circular mapping."
+          },
+          "clause_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause Number",
+            "description": "Echoed from the compiled Rego decision object; feeds the audit ledger's section_reference."
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "package"
+        ],
+        "title": "PolicyOutcome",
+        "description": "One compiled policy's raw verdict on a transaction."
+      },
+      "Principal": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "token_id": {
+            "type": "string",
+            "title": "Token Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "roles",
+          "token_id"
+        ],
+        "title": "Principal",
+        "description": "The authenticated identity attached to `request.state.principal` by\n`JWTAuthenticationMiddleware`, and what every `require_roles(...)`\ndependency and route handler actually reads. Deliberately a narrower,\nrequest-scoped view of `TokenPayload` -- handlers should never need to\nreach back into raw JWT claims."
+      },
+      "ReportPeriod": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Inclusive start of the reporting window."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Inclusive end of the reporting window."
+          },
+          "granularity": {
+            "$ref": "#/components/schemas/Granularity",
+            "default": "monthly"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "title": "ReportPeriod",
+        "description": "Specifies the evaluation window for an analytics query or report."
+      },
+      "ReviewResolutionRequest": {
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "title": "ReviewResolutionRequest"
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "Compliance_Officer",
+          "Broker_API_Client",
+          "System_Admin"
+        ],
+        "title": "Role"
+      },
+      "RuleViolationSummary": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "circular_id": {
+            "type": "string",
+            "title": "Circular Id"
+          },
+          "section_reference": {
+            "type": "string",
+            "title": "Section Reference"
+          },
+          "total_failures": {
+            "type": "integer",
+            "title": "Total Failures"
+          },
+          "affected_brokers": {
+            "type": "integer",
+            "title": "Affected Brokers"
+          },
+          "first_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "circular_id",
+          "section_reference",
+          "total_failures",
+          "affected_brokers"
+        ],
+        "title": "RuleViolationSummary"
+      },
+      "SandboxBatchResult": {
+        "properties": {
+          "sandbox_run_id": {
+            "type": "string",
+            "title": "Sandbox Run Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "allowed": {
+            "type": "integer",
+            "title": "Allowed"
+          },
+          "denied": {
+            "type": "integer",
+            "title": "Denied"
+          },
+          "flagged": {
+            "type": "integer",
+            "title": "Flagged"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SandboxEvaluationResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "title": "Evaluated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sandbox_run_id",
+          "tenant_id",
+          "total",
+          "allowed",
+          "denied",
+          "flagged",
+          "results",
+          "evaluated_at"
+        ],
+        "title": "SandboxBatchResult"
+      },
+      "SandboxEvaluateRequest": {
+        "properties": {
+          "transactions": {
+            "items": {
+              "$ref": "#/components/schemas/TransactionPayload"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Transactions",
+            "description": "One or more transactions to evaluate.  Capped at settings.sandbox_max_transactions."
+          }
+        },
+        "type": "object",
+        "required": [
+          "transactions"
+        ],
+        "title": "SandboxEvaluateRequest",
+        "description": "Dry-run evaluation request body.\n\n``transactions`` is evaluated against the tenant's currently active\ncompiled rules (the same set the production evaluator uses) but the\nDB session is always rolled back and no HITL case / ledger entry is\ncreated."
+      },
+      "SandboxEvaluateWithOverlayRequest": {
+        "properties": {
+          "transactions": {
+            "items": {
+              "$ref": "#/components/schemas/TransactionPayload"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Transactions"
+          },
+          "candidate_overlay": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Candidate Overlay",
+            "description": "Candidate threshold overrides, e.g. {\"upfront_margin_pct\": 22.5, \"exposure_limit_cr\": 50}.  Fields present here override the tenant's stored risk_overlay for this evaluation only."
+          }
+        },
+        "type": "object",
+        "required": [
+          "transactions",
+          "candidate_overlay"
+        ],
+        "title": "SandboxEvaluateWithOverlayRequest",
+        "description": "Dry-run evaluation with a candidate risk-overlay override.\n\n``candidate_overlay`` is merged into the OPA ``input`` document under\nthe key ``overlay``, making threshold values available to Rego rules as\n``input.overlay.<field>``.  This does NOT push the overlay to OPA data \u2014\nthe production ``data.tenants.<tenant_id>.overlay`` document is unchanged."
+      },
+      "SandboxEvaluationResult": {
+        "properties": {
+          "sandbox_run_id": {
+            "type": "string",
+            "title": "Sandbox Run Id",
+            "description": "Unique id for this sandbox execution batch (same for all transactions in one request)."
+          },
+          "transaction_id": {
+            "type": "string",
+            "title": "Transaction Id"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "matched_policies": {
+            "items": {
+              "$ref": "#/components/schemas/SandboxPolicyOutcome"
+            },
+            "type": "array",
+            "title": "Matched Policies"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "would_trigger_hitl": {
+            "type": "boolean",
+            "title": "Would Trigger Hitl",
+            "default": false
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "Sandbox dry-run: no ledger entry written, no HITL case created."
+          }
+        },
+        "type": "object",
+        "required": [
+          "sandbox_run_id",
+          "transaction_id",
+          "decision"
+        ],
+        "title": "SandboxEvaluationResult",
+        "description": "Dry-run result for a single transaction."
+      },
+      "SandboxPolicyOutcome": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "package": {
+            "type": "string",
+            "title": "Package"
+          },
+          "allow": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Violations"
+          },
+          "circular_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circular Number"
+          },
+          "clause_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause Number"
+          },
+          "overlay_applied": {
+            "type": "boolean",
+            "title": "Overlay Applied",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "package",
+          "allow"
+        ],
+        "title": "SandboxPolicyOutcome",
+        "description": "Per-policy result enriched with sandbox-specific metadata."
+      },
+      "SourceChannel": {
+        "type": "string",
+        "enum": [
+          "rest_sync",
+          "sftp_batch",
+          "db_cdc",
+          "hitl_resolution"
+        ],
+        "title": "SourceChannel"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "description": "Seconds until expiry, from issuance."
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in"
+        ],
+        "title": "TokenResponse",
+        "description": "RFC 6749 \u00a75.1 access token response, returned by POST /v1/auth/token."
+      },
+      "TransactionPayload": {
+        "properties": {
+          "transaction_id": {
+            "type": "string",
+            "title": "Transaction Id"
+          },
+          "entity_type": {
+            "type": "string",
+            "title": "Entity Type",
+            "description": "e.g. \"Stockbroker\" \u2014 must match ExtractedComplianceRule.target_entities."
+          },
+          "facts": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Facts",
+            "description": "Flat fact map keyed by app.compiler.naming.metric_field_name(...)."
+          },
+          "source_channel": {
+            "$ref": "#/components/schemas/SourceChannel",
+            "default": "rest_sync"
+          },
+          "broker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Id"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url",
+            "description": "Webhook URL to notify with the final decision if this transaction is FLAGGED and later resolved by HITL."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transaction_id",
+          "entity_type",
+          "facts"
+        ],
+        "title": "TransactionPayload",
+        "description": "Normalized shape every producer channel is adapted into before\nevaluation. `entity_type` + `facts` mirror the `input` document\ncontract the Rego compiler already assumes (see\n`app.compiler.rego_compiler` module docstring)."
+      },
+      "TriggerResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "TriggerResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "StandardErrorDetail": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "example": "Invalid or expired JWT token."
+          },
+          "error_code": {
+            "type": "string",
+            "example": "ERR_UNAUTHORIZED"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-28T23:45:00Z"
+          }
+        },
+        "required": [
+          "detail"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "Broker/Compliance Officer/Admin access token (JWT).",
+        "scheme": "bearer"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Provide a valid JWT token obtained from `POST /v1/auth/token`."
+      }
+    }
+  },
+  "x-tagGroups": [
+    {
+      "name": "1. Regulatory Ingestion",
+      "tags": [
+        "ingestion-service",
+        "ingestion-admin"
+      ]
+    },
+    {
+      "name": "2. Agent Rules Engine",
+      "tags": [
+        "sandbox",
+        "compiler"
+      ]
+    },
+    {
+      "name": "3. OPA Evaluation",
+      "tags": [
+        "transaction-evaluator",
+        "cdc-ingestion",
+        "batch-execution"
+      ]
+    },
+    {
+      "name": "4. Cryptographic Audit Vault",
+      "tags": [
+        "compliance-analytics",
+        "dlq-admin"
+      ]
+    },
+    {
+      "name": "5. HITL Management",
+      "tags": [
+        "hitl-review-portal",
+        "webhooks-callbacks"
+      ]
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "ingestion-service",
+      "description": "SEBI RSS feed polling, document ingestion, and PDF parsing."
+    },
+    {
+      "name": "sandbox",
+      "description": "Interactive policy sandbox, AST simulation, and tenant risk overlays."
+    },
+    {
+      "name": "transaction-evaluator",
+      "description": "Synchronous real-time trade evaluation against compiled OPA Rego policies."
+    },
+    {
+      "name": "cdc-ingestion",
+      "description": "Change-Data-Capture event receiver for Debezium / Kafka Connect change streams."
+    },
+    {
+      "name": "batch-execution",
+      "description": "Asynchronous bulk evaluation for legacy SFTP batch files."
+    },
+    {
+      "name": "compliance-analytics",
+      "description": "Cryptographic audit ledger verification and SEBI compliance reporting."
+    },
+    {
+      "name": "dlq-admin",
+      "description": "Dead-Letter Queue administration, item requeueing, and failure inspection."
+    },
+    {
+      "name": "hitl-review-portal",
+      "description": "Clause-level HITL review portal for compliance officer approval sign-offs."
+    },
+    {
+      "name": "webhooks-callbacks",
+      "description": "Slack and MS Teams real-time interactive notification and quick-approval callbacks."
+    }
+  ]
+}

@@ -90,12 +90,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 await task
 
 
+from app.openapi import get_custom_openapi
+
 app = FastAPI(
-    title="SEBI Master Circular Parsing Service",
+    title="RegEngine AI — Regulatory Compliance & Execution API Suite",
     description="Layout-aware, clause-hashed PDF parsing and Qdrant indexing for SEBI regulatory circulars.",
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.openapi = lambda: get_custom_openapi(app)
 
 # Must run before any other instrumentation/middleware touches `app` --
 # FastAPIInstrumentor patches the ASGI app's __call__ to wrap every
