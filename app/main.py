@@ -16,6 +16,7 @@ from app.api.execution_routes import router as execution_router
 from app.api.hitl_review_routes import router as hitl_review_router
 from app.api.ingestion_routes import router as ingestion_router
 from app.api.routes import router
+from app.api.sandbox_routes import router as sandbox_router
 from app.config import get_settings
 from app.db.session import get_session_factory
 from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
@@ -117,6 +118,7 @@ app.include_router(ingestion_router)
 app.include_router(auth_router)
 app.include_router(hitl_review_router)
 app.include_router(dlq_router)
+app.include_router(sandbox_router)
 
 
 @app.exception_handler(ParsingError)

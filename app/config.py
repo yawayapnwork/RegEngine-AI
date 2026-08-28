@@ -199,6 +199,48 @@ class Settings(BaseSettings):
     retry_max_attempts_network: int = 5  # RSS polling, vector DB ingestion -- transient, worth persisting through
     retry_max_attempts_pipeline: int = 3  # PDF parsing, LLM extraction -- a couple of attempts, then a human looks
 
+    # --- Multi-tenant partitioning ---
+    # Namespaced Redis key prefix for per-tenant policy registries.
+    # Each tenant's registry lives at <prefix>:<tenant_id>, e.g.
+    # "regengine:policy_registry:stockbroker_a".  The flat (non-tenant)
+    # policy_registry_key above is retained for backwards compatibility
+    # with the non-tenant-aware PolicyRegistry used in the baseline path.
+    tenant_policy_registry_key_prefix: str = "regengine:policy_registry"
+
+    # PostgreSQL GUC used by RLS policies (must match sql/rls_tenant_partitioning.sql).
+    # Documented here so ops staff can grep a single source of truth.
+    db_tenant_guc: str = "app.current_tenant_id"
+    db_admin_sentinel: str = "__admin__"
+
+    # --- Sandbox rule-testing environment ---
+    # Maximum number of transactions the sandbox dry-run API will evaluate
+    # in a single request (prevents accidental DoS via large batches).
+    sandbox_max_transactions: int = Field(
+        default=50,
+        description="Max transactions per sandbox dry-run request.",
+    )
+    # Maximum number of historical circulars the sandbox will return in a
+    # single listing response (for the circular-browse endpoint).
+    sandbox_max_circulars: int = Field(
+        default=100,
+        description="Max circulars returned by the sandbox circular listing endpoint.",
+    )
+    # Sandbox OPA evaluation timeout -- slightly longer than the production
+    # timeout (opa_request_timeout_seconds) to accommodate un-optimised
+    # test rules that haven't been tuned for latency yet.
+    sandbox_opa_timeout_seconds: float = Field(
+        default=5.0,
+        description="Per-policy OPA timeout for sandbox dry-run evaluations.",
+    )
+    # Sandbox sessions are strictly read-only (always rolled back); this flag
+    # lets operators disable the sandbox entirely without a code deploy if a
+    # compliance concern arises (e.g. an audit period where no speculative
+    # rule changes should be attempted).
+    sandbox_enabled: bool = Field(
+        default=True,
+        description="Set false to disable the sandbox API entirely (returns 503).",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

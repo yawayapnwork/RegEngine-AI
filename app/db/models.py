@@ -11,12 +11,24 @@ defined separately as SQLAlchemy Core -- see that module's docstring for
 why -- but binds to this module's `Base.metadata`, and carries nullable FK
 columns back to `circulars` / `clauses` / `compiled_rules` / `hitl_reviews`
 so the whole schema is one connected graph for reporting joins.
+
+Multi-tenant partitioning
+--------------------------
+Every compliance table now carries a `tenant_id` foreign key to `Tenant`.
+Row-Level Security (RLS) policies in PostgreSQL (see
+`sql/rls_tenant_partitioning.sql`) enforce that a connected session can only
+read/write rows whose `tenant_id` matches the GUC
+`app.current_tenant_id` set by `app.db.tenant_session.get_tenant_db_session`.
+The ORM models reflect the schema truthfully; filtering is done at the DB
+layer, not by adding `.filter(tenant_id=...)` to every query.
 """
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -36,13 +48,11 @@ from sqlalchemy.types import JSON, BigInteger
 from app.db.base import Base
 
 # JSONB on PostgreSQL (indexable, efficient); generic JSON elsewhere (SQLite
-# in tests) via SQLAlchemy's standard cross-dialect variant idiom -- mirrors
-# app/ledger/models.py's _JSON_TYPE.
+# in tests) via SQLAlchemy's standard cross-dialect variant idiom.
 _JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
 
 # SQLite's autoincrement rowid alias requires a column typed exactly
 # INTEGER; production (PostgreSQL) gets a true BIGINT identity column.
-# Mirrors app/ledger/models.py's _ID_TYPE.
 _ID_TYPE = BigInteger().with_variant(Integer, "sqlite")
 
 _ELEMENT_KINDS = (
@@ -67,14 +77,117 @@ _HITL_REASON_CODES = (
 _HITL_SEVERITIES = ("blocking", "advisory")
 _HITL_REVIEW_STATUSES = ("PENDING", "IN_REVIEW", "RESOLVED", "REJECTED")
 _COMPILED_RULE_HITL_STATUSES = ("NONE", "ADVISORY", "BLOCKING", "RESOLVED")
+_TENANT_TYPES = ("stockbroker", "amc", "depository", "other")
 
+
+# ---------------------------------------------------------------------------
+# Tenant registry
+# ---------------------------------------------------------------------------
+
+class Tenant(Base):
+    """Authoritative registry of every SEBI-registered market intermediary
+    that is a tenant in this deployment.
+
+    Design notes
+    ~~~~~~~~~~~~
+    * `tenant_id` is a short, stable business key (e.g. ``"stockbroker_a"``,
+      ``"amc_b"``) that matches the ``tenant_id`` claim in the JWT access
+      token issued to that intermediary's ``Broker_API_Client`` OAuth2
+      client.  It is deliberately *not* a surrogate integer so that audit
+      logs and Redis keys remain human-readable.
+    * ``opa_bundle_prefix`` is the OPA package namespace for this tenant's
+      customised risk-overlay Rego modules, e.g. ``"tenants/stockbroker_a"``.
+      The tenant-aware policy registry (app/execution/tenant_policy_registry.py)
+      uses this when pushing per-tenant bundles to the OPA server.
+    * ``risk_overlay`` stores structured per-tenant overrides (margin
+      thresholds, exposure caps, custom rule weights) as a JSONB document.
+      The sandbox evaluation endpoint reads this to simulate how a tenant's
+      overlay would change a decision before promotion to production.
+    * The ``sebi_baseline`` sentinel tenant is seeded by the migration and
+      owns all shared SEBI master circulars (``is_shared = True`` on
+      ``Circular``).  No real intermediary authenticates as it.
+    """
+
+    __tablename__ = "tenants"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    tenant_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="stockbroker"
+    )
+    sebi_reg_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    contact_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # OPA bundle namespace for this tenant's custom risk-overlay policies.
+    # e.g. "tenants/stockbroker_a"  ->  OPA package data.tenants.stockbroker_a.*
+    opa_bundle_prefix: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Per-tenant risk overlay: margin thresholds, exposure caps, rule weights.
+    # Read by the sandbox evaluator; pushed as OPA bundle data by the compiler.
+    risk_overlay: Mapped[dict[str, Any]] = mapped_column(
+        _JSON_TYPE, nullable=False, server_default=text("'{}'")
+    )
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Back-references for convenient ORM traversal (admin/reporting paths only —
+    # the hot evaluation path never traverses these).
+    circulars: Mapped[list["Circular"]] = relationship(back_populates="tenant")
+    clauses: Mapped[list["Clause"]] = relationship(back_populates="tenant")
+    compiled_rules: Mapped[list["CompiledRule"]] = relationship(back_populates="tenant")
+    hitl_reviews: Mapped[list["HITLReview"]] = relationship(back_populates="tenant")
+
+    __table_args__ = (
+        UniqueConstraint("sebi_reg_number", name="uq_tenants_sebi_reg_number"),
+        Index("ix_tenants_tenant_type", "tenant_type"),
+        Index("ix_tenants_is_active", "is_active"),
+        CheckConstraint(
+            f"tenant_type IN {_TENANT_TYPES!r}", name="tenant_type"
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Circular
+# ---------------------------------------------------------------------------
 
 class Circular(Base):
-    """Raw document metadata for one ingested SEBI circular / master circular."""
+    """Raw document metadata for one ingested SEBI circular / master circular.
+
+    Multi-tenant notes
+    ~~~~~~~~~~~~~~~~~~
+    * ``tenant_id`` references ``Tenant.tenant_id``.  Shared SEBI master
+      circulars are stored under the ``sebi_baseline`` sentinel tenant with
+      ``is_shared = True``; the RLS SELECT policy lets every real tenant read
+      them without the application explicitly joining on ``tenant_id``.
+    * Tenant-specific supplementary circulars (e.g. a broker's own
+      interpretive note) are stored under that tenant's ``tenant_id`` and
+      are *not* visible to other tenants.
+    """
 
     __tablename__ = "circulars"
 
     id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+
+    # Tenant partitioning
+    tenant_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default="sebi_baseline",
+    )
+    # True for SEBI baseline circulars that are readable by every tenant.
+    is_shared: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
     # Business key: SEBI's own reference, e.g. "SEBI/HO/MRD/DP/CIR/P/2026/45".
     circular_number: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -87,24 +200,37 @@ class Circular(Base):
     # of an already-ingested circular short-circuit without re-parsing.
     raw_text_digest: Mapped[str] = mapped_column(String(64), nullable=False)
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    clauses: Mapped[list["Clause"]] = relationship(back_populates="circular", cascade="all, delete-orphan")
+    tenant: Mapped["Tenant"] = relationship(back_populates="circulars")
+    clauses: Mapped[list["Clause"]] = relationship(
+        back_populates="circular", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("circular_number", name="uq_circulars_circular_number"),
         UniqueConstraint("raw_text_digest", name="uq_circulars_raw_text_digest"),
         Index("ix_circulars_issue_date", "issue_date"),
-        # NOTE: CheckConstraint names are the input to the "ck" naming
-        # convention's %(constraint_name)s token (see app/db/base.py), so
-        # these are given WITHOUT the "ck_<table>_" prefix -- the convention
-        # adds it. A name that already included the prefix would be doubled.
+        # Tenant-scoped range scan index (the dominant audit-report query shape).
+        Index("ix_circulars_tenant_id", "tenant_id", "issue_date"),
+        # Partial index: fast lookup of shared circulars visible to all tenants.
+        Index(
+            "ix_circulars_tenant_shared",
+            "is_shared",
+            postgresql_where=text("is_shared = true"),
+        ),
         CheckConstraint("length(raw_text_digest) = 64", name="raw_text_digest_len"),
     )
 
+
+# ---------------------------------------------------------------------------
+# Clause
+# ---------------------------------------------------------------------------
 
 class Clause(Base):
     """One layout-aware, semantically chunked clause block parsed from a circular."""
@@ -116,53 +242,96 @@ class Clause(Base):
         _ID_TYPE, ForeignKey("circulars.id", ondelete="CASCADE"), nullable=False
     )
 
+    # Tenant partitioning — denormalised from the parent circular so RLS can
+    # filter on clauses without a join (a join inside an RLS USING clause
+    # creates a correlated sub-select per row; a direct column predicate is
+    # evaluated once per scan node, orders of magnitude cheaper).
+    tenant_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
     clause_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     section_title: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Layout hierarchy tags: ordered list of ancestor section titles/numbers,
     # e.g. ["Part A", "3", "3.2", "3.2.1"] -- mirrors ClauseChunk.section_path.
-    section_path: Mapped[list[str]] = mapped_column(_JSON_TYPE, nullable=False, server_default="[]")
-    element_kind: Mapped[str] = mapped_column(String(32), nullable=False, server_default="clause")
+    section_path: Mapped[list[str]] = mapped_column(
+        _JSON_TYPE, nullable=False, server_default="[]"
+    )
+    element_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="clause"
+    )
 
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # SHA-256 over the clause's normalized text; the identity a compiled
-    # rule and an audit-ledger entry both bind back to as "the exact source
-    # text that produced this decision" (ExtractedComplianceRule.source_sha256).
+    # rule and an audit-ledger entry both bind back to.
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    contains_table: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    contains_table: Mapped[bool] = mapped_column(
+        nullable=False, server_default=text("false")
+    )
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
+    tenant: Mapped["Tenant"] = relationship(back_populates="clauses")
     circular: Mapped["Circular"] = relationship(back_populates="clauses")
-    compiled_rules: Mapped[list["CompiledRule"]] = relationship(back_populates="clause", cascade="all, delete-orphan")
-    hitl_reviews: Mapped[list["HITLReview"]] = relationship(back_populates="clause", cascade="all, delete-orphan")
+    compiled_rules: Mapped[list["CompiledRule"]] = relationship(
+        back_populates="clause", cascade="all, delete-orphan"
+    )
+    hitl_reviews: Mapped[list["HITLReview"]] = relationship(
+        back_populates="clause", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
-        # A given clause's exact text should appear at most once per circular
-        # (re-parsing an unchanged clause must upsert, not duplicate).
         UniqueConstraint("circular_id", "sha256", name="uq_clauses_circular_id_sha256"),
         Index("ix_clauses_sha256", "sha256"),
         Index("ix_clauses_circular_id_clause_number", "circular_id", "clause_number"),
+        Index("ix_clauses_tenant_id", "tenant_id", "circular_id"),
         CheckConstraint("length(sha256) = 64", name="sha256_len"),
         CheckConstraint(f"element_kind IN {_ELEMENT_KINDS!r}", name="element_kind"),
     )
 
 
+# ---------------------------------------------------------------------------
+# CompiledRule
+# ---------------------------------------------------------------------------
+
 class CompiledRule(Base):
     """One version of a compiled policy (Rego and/or JSON-Logic) produced
-    from a clause's audited, extracted compliance rule."""
+    from a clause's audited, extracted compliance rule.
+
+    Multi-tenant notes
+    ~~~~~~~~~~~~~~~~~~
+    A ``tenant_id`` here means this compiled rule version is scoped to that
+    tenant's risk overlay.  Two tenants may derive *different* compiled rules
+    from the same source clause (different margin thresholds in their
+    ``risk_overlay``), so the tuple ``(clause_id, tenant_id, rule_version)``
+    is what uniquely identifies a compiled policy version rather than just
+    ``(clause_id, rule_version)``.
+    """
 
     __tablename__ = "compiled_rules"
 
     id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
-    clause_id: Mapped[int] = mapped_column(_ID_TYPE, ForeignKey("clauses.id", ondelete="CASCADE"), nullable=False)
+    clause_id: Mapped[int] = mapped_column(
+        _ID_TYPE, ForeignKey("clauses.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Tenant partitioning
+    tenant_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
 
     # Business key: stable across re-compilation of the same logical rule;
-    # rule_version increments each time the source clause or compiler
-    # produces a materially different output (app/ledger's rule_id column
-    # references this, not the surrogate id, for that reason).
+    # rule_version increments each time the source clause or compiler produces
+    # a materially different output.
     rule_id: Mapped[str] = mapped_column(String(256), nullable=False)
     rule_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
@@ -170,20 +339,21 @@ class CompiledRule(Base):
     opa_package_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     jsonlogic_ast: Mapped[dict | None] = mapped_column(_JSON_TYPE, nullable=True)
 
-    is_compiled: Mapped[bool] = mapped_column(nullable=False, server_default="false")
-    # Exactly one version per rule_id may be is_active=true -- see the
-    # partial unique index below -- representing "what execution/OPA
-    # currently enforces" versus superseded/historical versions.
-    is_active: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    is_compiled: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # Exactly one version per (rule_id, tenant_id) may be is_active=true —
+    # see the partial unique index below.
+    is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
 
-    # Coarse HITL gate for this compiled version: NONE (clean compile),
-    # ADVISORY/BLOCKING (see hitl_reviews for the individual flags),
-    # RESOLVED (was BLOCKING, all blocking flags since resolved).
-    hitl_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="NONE")
+    hitl_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="NONE"
+    )
 
     compiler_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
+    tenant: Mapped["Tenant"] = relationship(back_populates="compiled_rules")
     clause: Mapped["Clause"] = relationship(back_populates="compiled_rules")
     hitl_reviews: Mapped[list["HITLReview"]] = relationship(back_populates="compiled_rule")
 
@@ -191,10 +361,10 @@ class CompiledRule(Base):
         UniqueConstraint("rule_id", "rule_version", name="uq_compiled_rules_rule_id_rule_version"),
         Index("ix_compiled_rules_clause_id", "clause_id"),
         Index("ix_compiled_rules_hitl_status", "hitl_status"),
-        # Partial unique index: at most one active version per rule_id.
-        # Declared here for ORM/metadata awareness; see the Alembic
-        # migration for the actual `postgresql_where` DDL (SQLite has no
-        # partial-index equivalent used elsewhere in this codebase either).
+        Index("ix_compiled_rules_tenant_id", "tenant_id", "is_active"),
+        # Partial unique index: at most one active version per (rule_id, tenant_id).
+        # Declared here for ORM/metadata awareness; the Alembic migration carries
+        # the actual `postgresql_where` DDL.
         Index(
             "uq_compiled_rules_one_active_per_rule_id",
             "rule_id",
@@ -205,10 +375,12 @@ class CompiledRule(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# HITLReview
+# ---------------------------------------------------------------------------
+
 class HITLReview(Base):
-    """A human-in-the-loop review case: a clause (and, once compiled, a
-    specific compiled-rule version) that could not be resolved
-    deterministically and was routed to a compliance officer."""
+    """A human-in-the-loop review case scoped to one tenant's compiled rule."""
 
     __tablename__ = "hitl_reviews"
 
@@ -218,9 +390,18 @@ class HITLReview(Base):
     # column, HITLFlag.flag_id) -- a UUID string, not the surrogate id.
     review_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
-    clause_id: Mapped[int] = mapped_column(_ID_TYPE, ForeignKey("clauses.id", ondelete="CASCADE"), nullable=False)
+    clause_id: Mapped[int] = mapped_column(
+        _ID_TYPE, ForeignKey("clauses.id", ondelete="CASCADE"), nullable=False
+    )
     compiled_rule_id: Mapped[int | None] = mapped_column(
         _ID_TYPE, ForeignKey("compiled_rules.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Tenant partitioning
+    tenant_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
     )
 
     reason_code: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -229,14 +410,21 @@ class HITLReview(Base):
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     field_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
-    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="PENDING")
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="PENDING"
+    )
     compliance_officer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    flagged_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    flagged_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
+    tenant: Mapped["Tenant"] = relationship(back_populates="hitl_reviews")
     clause: Mapped["Clause"] = relationship(back_populates="hitl_reviews")
     compiled_rule: Mapped["CompiledRule | None"] = relationship(back_populates="hitl_reviews")
 
@@ -246,6 +434,7 @@ class HITLReview(Base):
         Index("ix_hitl_reviews_clause_id", "clause_id"),
         Index("ix_hitl_reviews_compiled_rule_id", "compiled_rule_id"),
         Index("ix_hitl_reviews_compliance_officer_id", "compliance_officer_id"),
+        Index("ix_hitl_reviews_tenant_id", "tenant_id", "status"),
         CheckConstraint(f"reason_code IN {_HITL_REASON_CODES!r}", name="reason_code"),
         CheckConstraint(f"severity IN {_HITL_SEVERITIES!r}", name="severity"),
         CheckConstraint(f"status IN {_HITL_REVIEW_STATUSES!r}", name="status"),
