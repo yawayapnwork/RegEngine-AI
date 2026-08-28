@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     celery_batch_queue: str = "regengine_batch"
     celery_cdc_queue: str = "regengine_cdc"
     celery_webhook_queue: str = "regengine_webhooks"
+    celery_ingestion_queue: str = "regengine_ingestion"
 
     # --- Execution service: outbound webhooks (OMS/RMS/broker callbacks) ---
     webhook_hmac_secret: str | None = None
@@ -75,6 +76,48 @@ class Settings(BaseSettings):
     # --- Tamper-evident audit ledger (PostgreSQL, SHA-256 hash chain) ---
     ledger_database_url: str = "postgresql+asyncpg://regengine_ledger_writer:changeme@localhost:5432/regengine"
     ledger_pool_size: int = 10
+
+    # --- Regulatory ingestion: SEBI circular monitoring ---
+    sebi_rss_feed_urls: list[str] = Field(
+        default_factory=lambda: [
+            "https://www.sebi.gov.in/sebirss.xml",
+            "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doRss=yes&sectype=Circulars",
+        ],
+        description="RSS/Atom feeds polled for new SEBI circulars/notifications",
+    )
+    sebi_listing_page_urls: list[str] = Field(
+        default_factory=lambda: [
+            "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&ssid=6&smid=0",  # Circulars
+            "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&ssid=7&smid=0",  # Master Circulars
+        ],
+        description="HTML listing pages scraped as a fallback/supplement when the RSS feed lags or omits an item",
+    )
+    ingestion_poll_interval_seconds: int = 900  # 15 min; SEBI publishes intermittently, not real-time
+    ingestion_request_min_interval_seconds: float = 2.0  # min gap between requests to sebi.gov.in
+    ingestion_request_timeout_seconds: float = 20.0
+    ingestion_max_retries: int = 4
+    ingestion_retry_backoff_base_seconds: float = 2.0
+    ingestion_retry_backoff_max_seconds: float = 60.0
+    ingestion_user_agents: list[str] = Field(
+        default_factory=lambda: [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "Version/17.4 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36",
+        ],
+        description="Rotated User-Agent pool; identifies this service as a standard browser client",
+    )
+    ingestion_contact_email: str = "yashikayapsandworks@gmail.com"
+    ingestion_proxy_urls: list[str] = Field(
+        default_factory=list,
+        description="Optional outbound proxy pool (e.g. ['http://user:pass@proxy1:8080', ...]); "
+        "empty means requests go direct. Rotated round-robin per request.",
+    )
+    ingestion_respect_robots_txt: bool = True
+    ingestion_state_key_prefix: str = "regengine:ingestion"
+    ingestion_pdf_download_dir: str = "./data/ingested_pdfs"
 
 
 @lru_cache(maxsize=1)

@@ -30,6 +30,8 @@ celery_app.conf.update(
         "app.execution.tasks.process_batch_task": {"queue": settings.celery_batch_queue},
         "app.execution.tasks.process_cdc_event_task": {"queue": settings.celery_cdc_queue},
         "app.execution.tasks.dispatch_webhook_task": {"queue": settings.celery_webhook_queue},
+        "app.ingestion.tasks.poll_sebi_sources_task": {"queue": settings.celery_ingestion_queue},
+        "app.ingestion.tasks.process_discovered_document_task": {"queue": settings.celery_ingestion_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -37,6 +39,12 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     result_expires=86400,
+    beat_schedule={
+        "poll-sebi-sources": {
+            "task": "app.ingestion.tasks.poll_sebi_sources_task",
+            "schedule": settings.ingestion_poll_interval_seconds,
+        },
+    },
 )
 
-celery_app.autodiscover_tasks(["app.execution"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion"])

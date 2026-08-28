@@ -29,6 +29,11 @@ celery[redis]>=5.4
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.29
 
+# Regulatory ingestion: SEBI RSS/HTML monitoring
+feedparser>=6.0
+beautifulsoup4>=4.12
+lxml>=5.2
+
 # Testing
 pytest>=8.2
 pytest-asyncio>=0.23
