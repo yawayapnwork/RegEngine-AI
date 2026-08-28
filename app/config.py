@@ -212,6 +212,34 @@ class Settings(BaseSettings):
     db_tenant_guc: str = "app.current_tenant_id"
     db_admin_sentinel: str = "__admin__"
 
+    # --- Analytics & reporting ---
+    # Maximum ledger rows returned in a single audit-trail JSON page.
+    analytics_audit_trail_max_page_size: int = Field(
+        default=2000,
+        description="Hard cap on audit-trail page_size query param.",
+    )
+    # Anomaly detection z-score thresholds (can be tuned without a code deploy).
+    analytics_anomaly_z_high: float = Field(
+        default=3.0,
+        description="Z-score threshold for HIGH-severity anomaly classification.",
+    )
+    analytics_anomaly_z_low: float = Field(
+        default=2.0,
+        description="Z-score threshold for LOW-severity anomaly classification.",
+    )
+    # PDF generation: output directory for locally cached report files.
+    # Set to None to disable on-disk caching (PDFs are streamed directly).
+    analytics_pdf_cache_dir: str | None = Field(
+        default=None,
+        description="Optional filesystem path for caching generated PDF files.",
+    )
+    # Maximum date-range span (in days) a single analytics query may cover.
+    # Prevents accidental full-table scans on a multi-year ledger.
+    analytics_max_range_days: int = Field(
+        default=366,
+        description="Max calendar days a single analytics/reporting query window may span.",
+    )
+
     # --- Sandbox rule-testing environment ---
     # Maximum number of transactions the sandbox dry-run API will evaluate
     # in a single request (prevents accidental DoS via large batches).
