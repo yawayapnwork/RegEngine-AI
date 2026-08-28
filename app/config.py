@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     ingestion_state_key_prefix: str = "regengine:ingestion"
     ingestion_pdf_download_dir: str = "./data/ingested_pdfs"
 
+    # --- Real-Time Compliance Officer Notifications: Slack & MS Teams ---
+    slack_webhook_url: str | None = None
+    teams_webhook_url: str | None = None
+    slack_signing_secret: str | None = None
+
     # --- Security: JWT / OAuth2 ---
     # Self-issued tokens (Broker_API_Client, via POST /v1/auth/token).
     jwt_algorithm: str = "HS256"  # or "RS256"; see app/security/jwt.py

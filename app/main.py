@@ -113,6 +113,8 @@ app.add_middleware(TenantRateLimitMiddleware, settings=settings, redis_client=ge
 app.add_middleware(JWTAuthenticationMiddleware, settings=settings)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
+from app.api.webhook_routes import router as webhook_router
+
 app.include_router(router)
 app.include_router(execution_router)
 app.include_router(ingestion_router)
@@ -121,6 +123,7 @@ app.include_router(hitl_review_router)
 app.include_router(dlq_router)
 app.include_router(sandbox_router)
 app.include_router(analytics_router)
+app.include_router(webhook_router)
 
 
 @app.exception_handler(ParsingError)
