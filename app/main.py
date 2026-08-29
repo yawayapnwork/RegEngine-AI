@@ -16,6 +16,7 @@ from app.api.dlq_routes import router as dlq_router
 from app.api.execution_routes import router as execution_router
 from app.api.hitl_review_routes import router as hitl_review_router
 from app.api.diffing_routes import router as diffing_router
+from app.api.explainability_routes import router as explainability_router
 from app.api.ingestion_routes import router as ingestion_router
 from app.api.llm_cost_routes import router as llm_cost_router
 from app.api.routes import router
@@ -131,6 +132,7 @@ app.include_router(sandbox_router)
 app.include_router(analytics_router)
 app.include_router(llm_cost_router)
 app.include_router(diffing_router)
+app.include_router(explainability_router)
 app.include_router(webhook_router)
 
 

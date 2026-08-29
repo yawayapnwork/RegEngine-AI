@@ -1,0 +1,31 @@
+{
+  "transaction_id": "TXN-2026-08-29-000481",
+  "decision": "deny",
+  "evaluated_at": "2026-08-29T09:14:02.118000Z",
+  "overall_summary": "Trade rejected: 1 compliance violation found.",
+  "explanations": [
+    {
+      "rule_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:4.2.b",
+      "circular_number": "SEBI/HO/MIRSD/DOP/CIR/P/2024/100",
+      "clause_number": "4.2.b",
+      "headline": "Trade rejected: Margin collected (15%) is below the mandatory SEBI threshold (20%) required by SEBI Master Circular Clause 4.2.b (SEBI/HO/MIRSD/DOP/CIR/P/2024/100).",
+      "citation": "SEBI Master Circular Clause 4.2.b (SEBI/HO/MIRSD/DOP/CIR/P/2024/100)",
+      "structured_violation": {
+        "rule_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:4.2.b",
+        "circular_number": "SEBI/HO/MIRSD/DOP/CIR/P/2024/100",
+        "clause_number": "4.2.b",
+        "regulator": "sebi",
+        "metric": "Upfront Margin",
+        "observed_value": 15.0,
+        "unit": "%",
+        "operator": ">=",
+        "required_value": 20.0,
+        "applies_to": null,
+        "raw_violation_text": "Upfront Margin is 15 %, which fails the required condition (>= 20 %, clause 4.2.b)"
+      },
+      "source": "deterministic",
+      "confidence": 1.0
+    }
+  ],
+  "generated_at": "2026-08-29T09:14:02.250000+00:00"
+}

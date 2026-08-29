@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from app.execution.models import EvaluationResult, PolicyOutcome, TransactionPayload
+from app.explainability.explainer import explain_policy_outcome_deterministic
 from app.ledger.models import ComplianceEvaluationEvent, EvaluationOutcome
 from app.ledger.service import LedgerService
 from app.observability.metrics import AUDIT_LEDGER_WRITE_FAILURES_TOTAL
@@ -31,6 +32,21 @@ def _outcome_result(outcome: PolicyOutcome) -> EvaluationOutcome:
     return EvaluationOutcome.PASS if outcome.allow else EvaluationOutcome.FAIL
 
 
+def _explanation_texts(outcome: PolicyOutcome) -> list[str]:
+    """Deterministic-only (see app.explainability.explainer's module
+    docstring) -- this runs inline on the synchronous evaluate path via
+    log_evaluation below, so it must never await an LLM call. The
+    resulting natural-language headline(s) are written into `details`,
+    which `app.ledger.hash_chain.canonical_payload` includes in
+    `payload_digest` -- the explanation is therefore not merely stored
+    "alongside" the block hash but literally bound INTO it: altering the
+    stored explanation after the fact breaks the same recomputable hash
+    chain that protects every other field on this row."""
+    if not outcome.violations:
+        return []
+    return [exp.headline for exp in explain_policy_outcome_deterministic(outcome, regulator="sebi")]
+
+
 def build_ledger_events(transaction: TransactionPayload, result: EvaluationResult) -> list[ComplianceEvaluationEvent]:
     events = []
     for outcome in result.matched_policies:
@@ -46,7 +62,12 @@ def build_ledger_events(transaction: TransactionPayload, result: EvaluationResul
                 rule_id=outcome.rule_id,
                 evaluation_result=evaluation_result,
                 hitl_review_id=result.hitl_case_id if evaluation_result == EvaluationOutcome.HITL_REVIEW else None,
-                details={"violations": outcome.violations, "package": outcome.package, "transaction_decision": result.decision.value},
+                details={
+                    "violations": outcome.violations,
+                    "package": outcome.package,
+                    "transaction_decision": result.decision.value,
+                    "explanation": _explanation_texts(outcome),
+                },
             )
         )
     return events

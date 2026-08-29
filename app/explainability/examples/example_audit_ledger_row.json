@@ -1,0 +1,32 @@
+{
+  "_comment": "One row of compliance_audit_ledger (app.ledger.models) as a SEBI auditor or compliance officer would see it via the audit-trail export (app.analytics.aggregator's AuditTrailEntry). The 'explanation' array inside 'details' is written by app.explainability.explainer.explain_policy_outcome_deterministic at the same time as everything else in this row, via app.ledger.integration.build_ledger_events -- it is therefore covered by payload_digest (see app.ledger.hash_chain.canonical_payload) exactly like every other field here: altering the explanation text after the fact breaks the recomputable hash chain the same way altering the violation text or the clause_hash would.",
+
+  "id": 48213,
+  "sequence_num": 48213,
+  "broker_id": "INZ0001001",
+  "transaction_id": "TXN-2026-08-29-000481",
+  "evaluated_at": "2026-08-29T09:14:02.118000+00:00",
+
+  "circular_id": "SEBI/HO/MIRSD/DOP/CIR/P/2024/100",
+  "clause_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "section_reference": "4.2.b",
+  "rule_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:4.2.b",
+  "evaluation_result": "FAIL",
+  "hitl_review_id": null,
+
+  "details": {
+    "violations": [
+      "Upfront Margin is 15 %, which fails the required condition (>= 20 %, clause 4.2.b)"
+    ],
+    "package": "sebi.broking.circulars.sebi_ho_mirsd_dop_cir_p_2024_100.clause_4_2_b",
+    "transaction_decision": "deny",
+    "explanation": [
+      "Trade rejected: Margin collected (15%) is below the mandatory SEBI threshold (20%) required by SEBI Master Circular Clause 4.2.b (SEBI/HO/MIRSD/DOP/CIR/P/2024/100)."
+    ]
+  },
+
+  "payload_digest": "3f9a1c2e7b6d4a8f0e1c9b2a5d6f8e3c7a1b4d9e2f6c8a0b3d5e7f9a1c2e4b6d",
+  "previous_hash": "7c2e9a4b1d6f8c0e3a5b7d9f1c4e6a8b0d2f5c7e9a1b3d6f8c0e2a4b6d8f0c1e",
+  "current_hash": "1e4c8a0b2d5f7c9e1a3b5d7f9c1e3a5b7d9f1c3e5a7b9d1f3c5e7a9b1d3f5c7e",
+  "created_at": "2026-08-29T09:14:02.203000+00:00"
+}
