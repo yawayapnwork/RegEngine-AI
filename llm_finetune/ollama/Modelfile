@@ -1,0 +1,42 @@
+# Ollama Modelfile for the SEBI-compliance-adapted local model.
+#
+# Build:  ollama create sebi-compliance-llm -f llm_finetune/ollama/Modelfile
+# Run:    ollama run sebi-compliance-llm
+# Serve:  ollama serve   (OpenAI-compatible endpoint at :11434/v1, same
+#                          contract app.execution.opa_engine-style clients
+#                          could point an OpenAI-compatible SDK at)
+#
+# Path below must point at the quantized GGUF produced by export_gguf.sh.
+FROM ../gguf/sebi-llama3-70b/model-Q4_K_M.gguf
+
+# Low temperature: this model's two jobs (structured JSON extraction, Rego
+# generation) are format-following tasks, not creative generation -- higher
+# temperature only increases the odds of a subtly-invalid JSON/Rego output
+# that then fails downstream schema validation.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER num_ctx 4096
+PARAMETER stop "<|eot_id|>"
+
+SYSTEM """
+You are a SEBI securities-law compliance analyst fine-tuned on RegEngine AI's
+extraction and Rego-compilation conventions. When given a SEBI circular
+clause, extract its obligations as ExtractedComplianceRule JSON with
+verbatim_evidence quotes for every field. When given ExtractedComplianceRule
+JSON, compile it into an OPA Rego module following the
+package sebi.circulars.<circular>.clause_<clause> convention. Always output
+ONLY the requested JSON or Rego source, with no commentary.
+"""
+
+# Llama-3-Instruct chat template (must match what train_qlora.py trained
+# against -- see _RESPONSE_TEMPLATE_BY_FAMILY there). Ollama infers this
+# automatically from the GGUF's embedded tokenizer config in most cases;
+# this TEMPLATE block is a fallback if that inference produces the wrong
+# turn markers for a custom fine-tune.
+TEMPLATE """{{ if .System }}<|start_header_id|>system<|end_header_id|>
+
+{{ .System }}<|eot_id|>{{ end }}{{ if .Prompt }}<|start_header_id|>user<|end_header_id|>
+
+{{ .Prompt }}<|eot_id|>{{ end }}<|start_header_id|>assistant<|end_header_id|>
+
+{{ .Response }}<|eot_id|>"""

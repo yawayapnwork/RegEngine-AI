@@ -1,0 +1,60 @@
+# =============================================================================
+# vLLM Sidecar: OpenAI-compatible low-latency inference for the SEBI-adapted
+# local LLM, serving the LoRA adapter on top of the (unquantized-in-VRAM,
+# vLLM-quantized-at-load) base model.
+# =============================================================================
+# Why vLLM here rather than Ollama in production: vLLM's PagedAttention +
+# continuous batching give materially better throughput/latency under
+# concurrent requests (e.g. multiple compliance-officer HITL review
+# sessions, or a batch re-extraction run) than llama.cpp's single-request-
+# optimized runtime. Ollama (llm_finetune/ollama/) stays the right choice
+# for a single analyst's laptop / air-gapped offline use where GPU VRAM is
+# scarce and only one request is ever in flight.
+#
+# --enable-lora + --lora-modules load the trained adapter without merging
+# it into the base weights, so this same base-model server can multiplex
+# additional adapters later (e.g. a per-tenant risk-overlay fine-tune)
+# without duplicating a 70B model on disk per variant.
+# =============================================================================
+
+version: "3.8"
+
+services:
+  vllm-sebi-compliance:
+    image: vllm/vllm-openai:v0.6.3
+    container_name: vllm-sebi-compliance
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    environment:
+      HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN}"
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ../checkpoints:/adapters:ro
+    command:
+      - "--model=meta-llama/Meta-Llama-3-70B-Instruct"
+      - "--quantization=bitsandbytes"          # 4-bit NF4 load, matching training-time quantization -- keeps a 70B model on a single 80GB GPU
+      - "--load-format=bitsandbytes"
+      - "--dtype=bfloat16"
+      - "--max-model-len=4096"                 # matches train_qlora.py's --max-seq-length
+      - "--gpu-memory-utilization=0.90"
+      - "--enable-lora"
+      - "--lora-modules=sebi-compliance=/adapters/sebi-llama3-70b-qlora"
+      - "--max-lora-rank=64"                   # must be >= LoraConfig.r in train_qlora.py
+      - "--served-model-name=sebi-compliance-llm"
+      - "--enforce-eager=false"                # allow CUDA graph capture; disable only if debugging OOM
+      - "--disable-log-requests"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 300s   # first-load: base weights + adapter compile time
+    restart: unless-stopped
