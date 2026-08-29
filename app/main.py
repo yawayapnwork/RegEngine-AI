@@ -23,6 +23,7 @@ from app.api.explainability_routes import router as explainability_router
 from app.api.incident_routes import router as incident_router
 from app.api.ingestion_routes import router as ingestion_router
 from app.api.llm_cost_routes import router as llm_cost_router
+from app.api.governance_routes import router as governance_router
 from app.api.routes import router
 from app.api.sandbox_routes import router as sandbox_router
 from app.api.zkp_routes import router as zkp_router
@@ -31,6 +32,8 @@ from app.db.session import get_session_factory
 from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
 from app.execution.hitl_queue import HITLQueue
 from app.execution.policy_hot_reload import PolicyHotReloadSubscriber
+from app.governance.kill_switch import KillSwitchStore
+from app.governance.middleware import KillSwitchMiddleware
 from app.incident.dependencies import get_dashboard_connection_manager
 from app.incident.websocket_manager import BreachEventBroadcastSubscriber
 from app.observability.metrics import poll_queue_depths, render_latest
@@ -130,11 +133,17 @@ setup_tracing(app, settings)
 # Starlette runs middleware in the REVERSE of add_middleware() call order
 # (last added = outermost = runs first on the way in). Added here (bottom
 # to top) so the effective request path is:
-#   SecurityHeaders -> JWTAuthentication -> SessionManagement -> TenantRateLimit -> PayloadEncryption -> route
-# See app/security/middleware.py's module docstring for why that order.
+#   SecurityHeaders -> JWTAuthentication -> KillSwitch -> SessionManagement -> TenantRateLimit -> PayloadEncryption -> route
+# See app/security/middleware.py's module docstring for the base rationale.
+# KillSwitchMiddleware (app.governance) is inserted right after
+# JWTAuthentication specifically so it has `request.state.principal`
+# available to resolve a tenant-specific switch, and before everything
+# else so a halted request never consumes rate-limit budget or attempts
+# payload decryption.
 app.add_middleware(PayloadEncryptionMiddleware, settings=settings)
 app.add_middleware(TenantRateLimitMiddleware, settings=settings, redis_client=get_redis_pool())
 app.add_middleware(SessionManagementMiddleware, settings=settings, redis_client=get_redis_pool())
+app.add_middleware(KillSwitchMiddleware, settings=settings, kill_switch_store=KillSwitchStore(get_redis_pool(), settings.governance_key_prefix))
 app.add_middleware(JWTAuthenticationMiddleware, settings=settings)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
@@ -157,6 +166,7 @@ app.include_router(explainability_router)
 app.include_router(incident_router)
 app.include_router(webhook_router)
 app.include_router(zkp_router)
+app.include_router(governance_router)
 
 
 @app.exception_handler(ParsingError)

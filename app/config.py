@@ -525,6 +525,18 @@ class Settings(BaseSettings):
         default_factory=lambda: {"margin_compliance_v1": "zk/build/verification_key.json"}
     )
 
+    # --- Board-level AI governance & kill switch (app.governance) ---
+    # Unlike most optional subsystems in this file, the kill-switch
+    # MIDDLEWARE and EVALUATOR CHECK are always mounted/wired -- there is
+    # no "governance_enabled=False" escape hatch, on purpose: a control
+    # a compliance officer might need in an emergency must not depend on
+    # a deployment having remembered to turn it on. What IS gated is
+    # step-up-MFA enforcement on activating it (default True; disable
+    # only for a local/dev environment with no real MFA configured).
+    governance_key_prefix: str = "regengine:governance"
+    governance_kill_switch_require_step_up_mfa: bool = True
+    governance_report_default_granularity_days: int = 30
+
     # --- AI Red Team / adversarial defense (app.redteam) ---
     # Hardens app.agents' dual-agent extraction/audit pipeline against
     # prompt injection embedded in ingested source documents. Off by

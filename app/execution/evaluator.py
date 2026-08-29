@@ -26,25 +26,63 @@ from app.execution.hitl_queue import HITLQueue
 from app.execution.models import Decision, EvaluationResult, PolicyOutcome, TransactionPayload
 from app.execution.opa_engine import OPAEngine, OPAEngineError
 from app.execution.policy_cache import PolicyLookup
+from app.governance.kill_switch import KillSwitchStore
 from app.observability.metrics import TRANSACTION_EVALUATION_TOTAL
 
 logger = logging.getLogger(__name__)
 
 
 class Evaluator:
-    def __init__(self, opa_engine: OPAEngine, policy_registry: PolicyLookup, hitl_queue: HITLQueue) -> None:
+    def __init__(
+        self,
+        opa_engine: OPAEngine,
+        policy_registry: PolicyLookup,
+        hitl_queue: HITLQueue,
+        kill_switch_store: KillSwitchStore | None = None,
+    ) -> None:
         """`policy_registry` only needs to satisfy `PolicyLookup`
         (`async def policies_for(entity_type) -> list[dict]`) -- production
         wiring (app.execution.dependencies.get_evaluator) passes a
         `PolicyCache` for sub-millisecond lookups on the hot path; a bare
         `PolicyRegistry` (or a test double) works identically, just without
-        the L1 cache in front of it."""
+        the L1 cache in front of it.
+
+        `kill_switch_store`, when given, is Requirement 1's "freezes
+        execution queues... falls back to manual human workflows" applied
+        to the LIVE synchronous evaluation path specifically (distinct
+        from app.governance.middleware.KillSwitchMiddleware, which blocks
+        at the HTTP layer for every route) -- see evaluate_transaction's
+        kill-switch check below. None (the default) preserves this
+        class's exact pre-governance behavior for any caller/test that
+        doesn't pass one."""
         self._opa = opa_engine
         self._registry = policy_registry
         self._hitl = hitl_queue
+        self._kill_switch = kill_switch_store
 
     async def evaluate_transaction(self, transaction: TransactionPayload) -> EvaluationResult:
         started = time.perf_counter()
+
+        if self._kill_switch is not None and await self._kill_switch.is_active_for(transaction.broker_id):
+            # Requirement 1's fallback, applied here rather than only at
+            # the HTTP layer: NO OPA call happens at all while the
+            # switch is on (the "freezes execution queues" half) -- the
+            # transaction goes straight into the existing HITL manual-
+            # review queue (the "falls back to manual human workflows"
+            # half), reusing exactly the same queue an ambiguous OPA
+            # result already routes to, rather than a second mechanism.
+            reason = "Governance kill switch is active; automated evaluation is halted pending manual review."
+            case = await self._hitl.enqueue(transaction=transaction, reason=reason, matched_policies=[])
+            logger.warning("Transaction %s routed to manual review: kill switch active (case_id=%s).", transaction.transaction_id, case.case_id)
+            TRANSACTION_EVALUATION_TOTAL.labels(decision=Decision.FLAGGED.value).inc()
+            return EvaluationResult(
+                transaction_id=transaction.transaction_id,
+                decision=Decision.FLAGGED,
+                reasons=[reason],
+                hitl_case_id=case.case_id,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+
         input_doc = {"entity_type": transaction.entity_type, "facts": transaction.facts}
 
         applicable = await self._registry.policies_for(transaction.entity_type)

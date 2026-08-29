@@ -23,6 +23,7 @@ from app.execution.policy_cache import PolicyCache
 from app.execution.policy_events import PolicyEventPublisher
 from app.execution.policy_publisher import PolicyPublisher
 from app.execution.policy_registry import PolicyRegistry
+from app.governance.kill_switch import KillSwitchStore
 
 
 @lru_cache(maxsize=1)
@@ -54,6 +55,10 @@ def get_hitl_queue(settings: Settings = Depends(get_settings)) -> HITLQueue:
     return HITLQueue(redis_client=get_redis_pool(), key_prefix=settings.hitl_key_prefix)
 
 
+def get_kill_switch_store(settings: Settings = Depends(get_settings)) -> KillSwitchStore:
+    return KillSwitchStore(redis_client=get_redis_pool(), key_prefix=settings.governance_key_prefix)
+
+
 def get_policy_event_publisher() -> PolicyEventPublisher:
     return PolicyEventPublisher(redis_client=get_redis_pool())
 
@@ -68,5 +73,6 @@ def get_evaluator(
     opa_engine: OPAEngine = Depends(get_opa_engine),
     policy_cache: PolicyCache = Depends(get_policy_cache),
     hitl_queue: HITLQueue = Depends(get_hitl_queue),
+    kill_switch_store: KillSwitchStore = Depends(get_kill_switch_store),
 ) -> Evaluator:
-    return Evaluator(opa_engine=opa_engine, policy_registry=policy_cache, hitl_queue=hitl_queue)
+    return Evaluator(opa_engine=opa_engine, policy_registry=policy_cache, hitl_queue=hitl_queue, kill_switch_store=kill_switch_store)

@@ -443,3 +443,94 @@ class HITLReview(Base):
             name="resolved_at_consistency",
         ),
     )
+
+
+# --------------------------------------------------------------------------
+# Board-level AI governance (app.governance) -- SEBI AI/ML Framework's
+# named-owner, model-inventory, and kill-switch requirements.
+# --------------------------------------------------------------------------
+
+_KILL_SWITCH_SCOPES = ("global", "tenant")
+_KILL_SWITCH_ACTIONS = ("activated", "deactivated", "drill")
+
+
+class AgentInventory(Base):
+    """Requirement 2's Named Owner & Inventory Registry: one row per
+    deployed AI/ML agent this platform runs (the CrewAI Extraction
+    Agent, Logic Auditor Agent, Quantitative Parsing Agent, Reference
+    Resolution Agent, and the Policy Repair Agent -- see
+    app.governance.inventory's seed data for the real, current roster),
+    with the SEBI AI/ML Framework's mandated disclosures: which model
+    weight version is running, what business function it performs,
+    whether it participates in a critical/high-impact operation, and a
+    NAMED human compliance officer accountable for it -- never a team
+    alias or role name alone."""
+
+    __tablename__ = "agent_inventory"
+
+    id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+
+    agent_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    model_provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_weight_version: Mapped[str] = mapped_column(
+        String(128), nullable=False, doc="Exact model identifier in production use, e.g. 'anthropic/claude-3-5-sonnet-20241022'."
+    )
+    business_domain: Mapped[str] = mapped_column(Text, nullable=False)
+    is_critical_operation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa_text("false"),
+        doc="SEBI AI/ML Framework disclosure: does this agent's output feed a decision with direct client/market impact (e.g. a compliance PASS/FAIL/DENY) without a mandatory human gate?",
+    )
+
+    owner_name: Mapped[str] = mapped_column(String(200), nullable=False, doc="Named individual, never a team/role alias -- SEBI's accountability requirement is personal, not organizational.")
+    owner_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    owner_role: Mapped[str] = mapped_column(String(100), nullable=False, server_default="Compliance_Officer")
+
+    deployed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa_text("true"))
+    retired_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("agent_key", name="uq_agent_inventory_agent_key"),
+        Index("ix_agent_inventory_is_active", "is_active"),
+        Index("ix_agent_inventory_owner_email", "owner_email"),
+        CheckConstraint("(retired_at IS NOT NULL) = (is_active = false)", name="retired_at_consistency"),
+    )
+
+
+class KillSwitchEvent(Base):
+    """Requirement 1's durable audit record: every activation,
+    deactivation, and drill test of the kill switch, permanently
+    persisted here regardless of what app.governance.kill_switch's
+    Redis-backed LIVE state later does (Redis holds the current on/off
+    state for fast per-request checks; this table is the permanent,
+    queryable record a SEBI governance audit -- Requirement 3 -- reads
+    from, and it must survive a Redis restart/flush intact)."""
+
+    __tablename__ = "kill_switch_events"
+
+    id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    tenant_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("tenants.tenant_id", ondelete="SET NULL"), nullable=True,
+        doc="Null for scope='global'; the affected tenant for scope='tenant'.",
+    )
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False, doc="Principal.subject of the human (or 'system:<detector-name>' for an automated anomaly trigger) who took this action.")
+    is_drill: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa_text("false"))
+    occurred_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    details: Mapped[dict[str, Any]] = mapped_column(_JSON_TYPE, nullable=False, server_default="{}")
+
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_kill_switch_events_event_id"),
+        Index("ix_kill_switch_events_occurred_at", "occurred_at"),
+        Index("ix_kill_switch_events_scope_tenant", "scope", "tenant_id"),
+        Index("ix_kill_switch_events_is_drill", "is_drill"),
+        CheckConstraint(f"scope IN {_KILL_SWITCH_SCOPES!r}", name="scope"),
+        CheckConstraint(f"action IN {_KILL_SWITCH_ACTIONS!r}", name="action"),
+        CheckConstraint("(scope = 'global') = (tenant_id IS NULL)", name="tenant_id_matches_scope"),
+    )
