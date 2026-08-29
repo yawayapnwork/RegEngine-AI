@@ -71,6 +71,16 @@ def build_ledger_events(transaction: TransactionPayload, result: EvaluationResul
                     "package": outcome.package,
                     "transaction_decision": result.decision.value,
                     "explanation": _explanation_texts(outcome),
+                    # Input snapshot -- required for app.backtest to replay
+                    # this exact historical transaction against a NEW
+                    # candidate policy later. Without it, backtesting a
+                    # rule change would have no way to reconstruct what was
+                    # actually evaluated; re-deriving facts from anywhere
+                    # else (the broker's own OMS, a legacy `transactions`
+                    # table) would not be guaranteed to match what OPA
+                    # actually saw at decision time.
+                    "entity_type": transaction.entity_type,
+                    "facts": transaction.facts,
                 },
             )
         )

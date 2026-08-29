@@ -44,6 +44,7 @@ celery_app.conf.update(
         "app.incident.tasks.process_escalation_stage_task": {"queue": settings.celery_incidents_queue},
         "app.incident.tasks.sweep_overdue_escalations_task": {"queue": settings.celery_incidents_queue},
         "app.security.tasks.directory_sync_poll_task": {"queue": settings.celery_security_queue},
+        "app.backtest.tasks.run_backtest_task": {"queue": settings.celery_backtest_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -71,4 +72,4 @@ celery_app.conf.update(
     },
 )
 
-celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security", "app.backtest"])

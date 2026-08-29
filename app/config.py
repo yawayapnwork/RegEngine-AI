@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     opa_server_url: str = "http://localhost:8181"
     opa_request_timeout_seconds: float = 2.0
 
+    # --- Backtesting service (app.backtest) ---
+    # A SEPARATE, isolated OPA instance -- NEVER opa_server_url -- for the
+    # optional OpaCandidateEvaluator path. Publishing a not-yet-approved
+    # candidate policy bundle here must be impossible to confuse with
+    # publishing to production; a distinct setting (rather than a
+    # same-URL-plus-namespace convention) makes that mistake require an
+    # explicit, deliberate misconfiguration rather than a typo.
+    backtest_opa_server_url: str = "http://localhost:8282"
+    backtest_concurrency: int = 32  # bounded replay concurrency; see app.backtest.replay_engine
+    backtest_key_prefix: str = "regengine:backtest"
+    celery_backtest_queue: str = "regengine_backtest"
+
     # --- Execution service: Redis (Celery broker/backend + HITL queue + policy registry) ---
     redis_url: str = "redis://localhost:6379/0"
     policy_registry_key: str = "regengine:policy_registry"
