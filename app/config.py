@@ -525,6 +525,30 @@ class Settings(BaseSettings):
         default_factory=lambda: {"margin_compliance_v1": "zk/build/verification_key.json"}
     )
 
+    # --- Regional-language ingestion (app.localization) ---
+    # OCR (PaddleOCR/Tesseract) + translation (NLLB/IndicTrans2) for
+    # Hindi/Marathi/Gujarati SEBI circulars, gazette notices, and
+    # investor disclosures -- off by default, matching every other
+    # optional subsystem here; a deployment that hasn't reviewed which
+    # translation backend/model to trust for legal text shouldn't have
+    # this silently active.
+    localization_enabled: bool = False
+    localization_translation_backend: str = "nllb"  # "nllb" | "indictrans2" -- see app.localization.translation's module docstring for the tradeoff
+    localization_nllb_model_id: str = "facebook/nllb-200-distilled-600M"
+    localization_indictrans2_model_id: str = "ai4bharat/indictrans2-indic-en-dist-200M"
+    localization_similarity_model_id: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # Empirically calibrated against real SEBI-style Hindi/Marathi/
+    # Gujarati margin-clause translations (see
+    # tests/test_localization.py's TestCrossLingualVerifier) -- a
+    # faithful translation of a short legal clause scored ~0.53-0.80
+    # depending on source language/model coverage; 0.45 catches a
+    # genuinely unrelated/garbled translation (observed ~0.20) without
+    # false-flagging a faithful Gujarati translation (the
+    # lowest-scoring language this pipeline supports against this
+    # particular embedding model).
+    localization_similarity_threshold: float = 0.45
+    localization_tesseract_cmd_path: str | None = None  # path to tesseract.exe/tesseract binary if not on PATH -- see app.localization.ocr
+
     # --- Self-healing policy repair loop (app.healing) ---
     # Intercepts an OPA compile/publish failure or a JSON-Logic runtime
     # crash and attempts automated repair before falling back to the

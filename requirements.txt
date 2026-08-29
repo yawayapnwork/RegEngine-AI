@@ -108,6 +108,19 @@ prometheus-client>=0.20
 # onboards a zk-capable broker doesn't need it.
 py_ecc>=8.0
 
+# Regional-language ingestion (app.localization): Hindi/Marathi/
+# Gujarati OCR + translation for SEBI circulars, gazette notices, and
+# investor disclosures. Only exercised when settings.localization_enabled=True;
+# every heavy backend is deferred-imported (app.localization.ocr,
+# .translation, .verification), so a deployment that never onboards a
+# regional-language source doesn't pay for any of these at import time.
+transformers>=4.40      # NLLB / IndicTrans2 (app.localization.translation)
+pytesseract>=0.3.10      # Tesseract OCR Python binding -- the Tesseract OCR BINARY itself is a separate, OS-level install (see app.localization.ocr's module docstring)
+Pillow>=10.0             # image loading for the OCR path
+langdetect>=1.0.9        # regional-language auto-detection (app.localization.pipeline)
+# paddleocr>=2.7 / paddlepaddle>=2.6   # PaddleOCR (Hindi/Marathi Devanagari OCR) -- large (CUDA-capable) install; uncomment for a deployment that has reviewed it. Tesseract (above) covers every supported language on its own if this is omitted.
+# IndicTransToolkit                    # only if settings.localization_translation_backend="indictrans2" -- see app.localization.translation.IndicTrans2Backend's docstring
+
 # Automated regulatory filing adapter (app.regulatory_filing): SFTP
 # submission to SEBI/MII destinations, and JSON Schema validation of
 # outgoing filings. lxml (already listed above for SEBI RSS/HTML
