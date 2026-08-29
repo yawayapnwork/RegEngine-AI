@@ -525,6 +525,16 @@ class Settings(BaseSettings):
         default_factory=lambda: {"margin_compliance_v1": "zk/build/verification_key.json"}
     )
 
+    # --- Compliance Chaos Monkey (chaos.monkey) ---
+    # A safety rail, not a feature toggle: chaos.monkey.runner.ChaosMonkeyRunner
+    # refuses to inject faults against any real engine/service unless this is
+    # explicitly True, so a staging-only environment file has to opt in on
+    # purpose rather than a chaos run ever being one accidental invocation
+    # away from touching production. False everywhere by default, same as
+    # every other optional subsystem in this file.
+    chaos_monkey_enabled: bool = False
+    chaos_monkey_postmortem_dir: str = "chaos/postmortems"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
