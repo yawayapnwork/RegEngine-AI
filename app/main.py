@@ -26,6 +26,7 @@ from app.api.llm_cost_routes import router as llm_cost_router
 from app.api.governance_routes import router as governance_router
 from app.api.routes import router
 from app.api.sandbox_routes import router as sandbox_router
+from app.api.translation_parity_routes import router as translation_parity_router
 from app.api.zkp_routes import router as zkp_router
 from app.config import get_settings
 from app.db.session import get_session_factory
@@ -167,6 +168,7 @@ app.include_router(incident_router)
 app.include_router(webhook_router)
 app.include_router(zkp_router)
 app.include_router(governance_router)
+app.include_router(translation_parity_router)
 
 
 @app.exception_handler(ParsingError)

@@ -632,6 +632,26 @@ class Settings(BaseSettings):
     localization_similarity_threshold: float = 0.45
     localization_tesseract_cmd_path: str | None = None  # path to tesseract.exe/tesseract binary if not on PATH -- see app.localization.ocr
 
+    # --- Cross-lingual translation parity checker (app.translation_parity) ---
+    # Compares an English SEBI circular against its concurrently-released
+    # Hindi version for numeric/semantic parity BEFORE either is compiled
+    # into policy -- distinct from app.localization (which validates a
+    # MACHINE translation this platform itself produced from a single
+    # regional-language source). Here both language versions are
+    # independently human-authored by SEBI and arrive as separate
+    # documents; the two subsystems intentionally share
+    # localization_similarity_model_id/localization_similarity_threshold
+    # (same cross-lingual embedding technique, same empirically-calibrated
+    # bar) rather than duplicating a parallel setting.
+    translation_parity_enabled: bool = False
+    # Below this similarity a clause pair is SEMANTIC_DRIFT (likely
+    # mistranslated); between this and localization_similarity_threshold
+    # it's AMBIGUOUS_TRANSLATION (worth a human glance, not a hard
+    # failure) -- narrower than a single pass/fail bar since a
+    # legal-translation reviewer cares about the distinction.
+    translation_parity_ambiguous_similarity_threshold: float = 0.60
+    translation_parity_queue_key_prefix: str = "regengine:translation_parity"
+
     # --- Self-healing policy repair loop (app.healing) ---
     # Intercepts an OPA compile/publish failure or a JSON-Logic runtime
     # crash and attempts automated repair before falling back to the
