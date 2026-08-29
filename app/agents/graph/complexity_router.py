@@ -41,7 +41,7 @@ _CROSS_REFERENCE_PHRASE_RE = re.compile(
 # passes that in as `own_clause_number` to exclude it) so a clause
 # doesn't get flagged as "cross-referencing" purely for containing its
 # own number once in a header.
-_CLAUSE_NUMBER_TOKEN_RE = re.compile(r"\b\d+\.\d+(?:\.[a-z\d]{1,3})?\b", re.IGNORECASE)
+CLAUSE_NUMBER_TOKEN_RE = re.compile(r"\b\d+\.\d+(?:\.[a-z\d]{1,3})?\b", re.IGNORECASE)
 
 # 2+ distinct OTHER clause numbers, or an explicit cross-reference phrase,
 # is what actually indicates "nested cross-references" per Requirement 1
@@ -64,7 +64,7 @@ def detect_complexity(text: str, own_clause_number: str | None = None) -> Comple
         cross_reference_signals.append(f"cross-reference phrase: {match.group(0)!r}")
 
     other_clause_numbers = {
-        token for token in _CLAUSE_NUMBER_TOKEN_RE.findall(text) if token != (own_clause_number or "")
+        token for token in CLAUSE_NUMBER_TOKEN_RE.findall(text) if token != (own_clause_number or "")
     }
     if len(other_clause_numbers) >= _MIN_OTHER_CLAUSE_REFERENCES:
         cross_reference_signals.append(f"{len(other_clause_numbers)} distinct other clause number(s) referenced: {sorted(other_clause_numbers)}")

@@ -29,6 +29,35 @@ from app.resilience.models import FailureCategory
 logger = logging.getLogger(__name__)
 
 
+def _sync_to_knowledge_graph(audited: AuditedComplianceRule) -> None:
+    """Populates the Neo4j legal knowledge graph (app.graph) with this
+    rule's Circular/Clause/Entity/Obligation nodes -- fired alongside the
+    INFO breach event below, on the same successful-compile condition.
+    A no-op when settings.neo4j_sync_enabled is False, so a deployment
+    that has never configured Neo4j pays no cost (not even an import)
+    beyond this one settings check."""
+    settings = get_settings()
+    if not settings.neo4j_sync_enabled:
+        return
+    try:
+        from app.graph import client as graph_client
+        from app.graph.sync import sync_audited_rule_to_graph
+
+        async def _run() -> None:
+            async with graph_client.session(settings) as session:
+                # clause_text is unavailable here -- compile_audited_rule_task
+                # only receives the already-extracted AuditedComplianceRule,
+                # not the source ClauseChunk (see app.graph.sync's module
+                # docstring) -- Circular/Clause/Entity/Obligation still sync
+                # fully; only REFERENCES/Penalty enrichment is skipped for
+                # this call site.
+                await sync_audited_rule_to_graph(session, audited)
+
+        asyncio.run(_run())
+    except Exception:  # noqa: BLE001 - a knowledge-graph sync failure must never fail a successful compilation
+        logger.exception("Failed to sync rule_id=%s to the knowledge graph", audited.rule.rule_id)
+
+
 def _raise_policy_compiled_event(audited: AuditedComplianceRule, package: str) -> None:
     """INFO trigger-matrix entry (Requirement 1) -- fired only on a clean
     compile with no blocking HITL flags; a partial/blocked compile is
@@ -72,5 +101,6 @@ def compile_audited_rule_task(self, audited_rule_dict: dict) -> dict:
 
     if result.compiled and result.rego is not None and not result.hitl_flags:
         _raise_policy_compiled_event(audited, result.rego.package)
+        _sync_to_knowledge_graph(audited)
 
     return result.model_dump(mode="json")

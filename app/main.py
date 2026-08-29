@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from app.api.analytics_routes import router as analytics_router
 from app.api.auth_routes import router as auth_router
+from app.api.graph_routes import router as graph_router
 from app.api.backtest_routes import router as backtest_router
 from app.api.saml_routes import router as saml_router
 from app.api.dlq_routes import router as dlq_router
@@ -142,6 +143,7 @@ app.include_router(router)
 app.include_router(execution_router)
 app.include_router(ingestion_router)
 app.include_router(auth_router)
+app.include_router(graph_router)
 app.include_router(backtest_router)
 app.include_router(saml_router)
 app.include_router(hitl_review_router)

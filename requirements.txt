@@ -26,6 +26,12 @@ crewai-tools>=0.12
 # installed.
 langgraph>=0.2.0
 
+# Legal knowledge graph (app.graph) -- only needed when
+# settings.neo4j_sync_enabled=True; deferred-imported (app.compiler.tasks's
+# sync hook, app.api.graph_routes) so a deployment that never enables it
+# needs no Neo4j instance or driver installed.
+neo4j>=5.24
+
 # LLM cost optimization (app.llm_ops): frontier-tier calls outside CrewAI's
 # own Agent/Task machinery (the escalation path in
 # app.llm_ops.cached_extraction) go through litellm directly -- the same

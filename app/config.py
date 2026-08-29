@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     qdrant_upsert_batch_size: int = 64
     qdrant_timeout_seconds: float = 30.0
 
+    # --- Neo4j Legal Knowledge Graph (app.graph) ---
+    # Off by default: a deployment that never enables this needs no Neo4j
+    # instance at all, and app.compiler.tasks's sync hook becomes a no-op
+    # (see that module's _sync_to_knowledge_graph).
+    neo4j_sync_enabled: bool = False
+    neo4j_uri: str = "neo4j://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "changeme-dev-only"
+    neo4j_database: str = "sebiregulations"
+
     # --- Compliance rule extraction (CrewAI dual-agent pipeline) ---
     anthropic_api_key: str | None = None
     agent_verbose: bool = False
