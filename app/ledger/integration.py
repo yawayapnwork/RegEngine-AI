@@ -16,7 +16,7 @@ from app.execution.models import EvaluationResult, PolicyOutcome, TransactionPay
 from app.explainability.explainer import explain_policy_outcome_deterministic
 from app.incident.publisher import raise_breach_event
 from app.incident.trigger_matrix import ambiguous_hitl_event, clause_violation_event
-from app.ledger.models import ComplianceEvaluationEvent, EvaluationOutcome
+from app.ledger.models import ComplianceEvaluationEvent, EvaluationOutcome, LedgerEntry
 from app.ledger.service import LedgerService
 from app.observability.metrics import AUDIT_LEDGER_WRITE_FAILURES_TOTAL
 
@@ -129,7 +129,7 @@ async def log_evaluation(ledger: LedgerService, transaction: TransactionPayload,
 
     for event in build_ledger_events(transaction, result):
         try:
-            await ledger.append_entry(event)
+            entry = await ledger.append_entry(event)
         except Exception:  # noqa: BLE001
             AUDIT_LEDGER_WRITE_FAILURES_TOTAL.inc()
             logger.exception(
@@ -137,3 +137,33 @@ async def log_evaluation(ledger: LedgerService, transaction: TransactionPayload,
                 transaction.transaction_id,
                 event.rule_id,
             )
+            continue
+
+        if event.evaluation_result == EvaluationOutcome.FAIL:
+            await _trigger_grievance_escalation(entry, transaction)
+
+
+async def _trigger_grievance_escalation(entry: LedgerEntry, transaction: TransactionPayload) -> None:
+    """app.grievance_escalation's Requirement 1 hook -- deliberately
+    placed AFTER a successful append (unlike `_raise_breach_events`
+    above, which fires before it): the evidence package
+    app.grievance_escalation.evidence.build_evidence_package assembles
+    needs this transaction's ledger row to already exist to build its
+    chain proof, so this can't run from the same pre-write call site.
+    Best-effort and independently caught, exactly like
+    `_raise_breach_events` -- an escalation-agent failure must never
+    mask the underlying compliance decision or the (already-successful)
+    ledger write."""
+    settings = get_settings()
+    if not settings.grievance_escalation_enabled:
+        return
+    try:
+        from app.grievance_escalation.escalation import evaluate_and_trigger_grievance_escalation
+        from app.ledger.db import get_ledger_engine
+
+        await evaluate_and_trigger_grievance_escalation(
+            entry=entry, transaction=transaction, ledger_engine=get_ledger_engine(),
+            redis_client=get_redis_pool(), settings=settings,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Grievance escalation check failed for transaction_id=%s rule_id=%s", transaction.transaction_id, entry.rule_id)

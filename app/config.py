@@ -770,6 +770,48 @@ class Settings(BaseSettings):
     regulatory_filing_portal_api_base_url: str | None = None
     regulatory_filing_portal_api_key: str | None = None
 
+    # --- Grievance escalation agent (app.grievance_escalation) ---
+    # Files a SEBI SCORES grievance record when a broker's non-compliance
+    # is SYSTEMIC (repeated), not an isolated failure. IMPORTANT: SEBI has
+    # not published a verified, confirmed REST API contract for SCORES
+    # 2.0 that this codebase's author has reliable knowledge of -- see
+    # app.grievance_escalation.schemas's module docstring for the full
+    # disclosure. `scores_api_base_url` is deliberately left unset by
+    # default (None), which app.grievance_escalation.scores_client
+    # treats as "not configured" and refuses to submit against, rather
+    # than silently pointing at a guessed URL.
+    grievance_escalation_enabled: bool = False
+    grievance_escalation_key_prefix: str = "regengine:grievance"
+    # A drafted grievance is held for compliance-officer confirmation
+    # (see app.api.grievance_routes's confirm endpoint) unless this is
+    # True -- auto-filing an actual regulatory complaint against a
+    # broker is consequential enough that this defaults to the more
+    # conservative, HITL-gated behavior, mirroring this codebase's
+    # general "false precision is worse than acknowledged ambiguity"
+    # posture (app.compiler.hitl's module docstring) for every other
+    # externally-visible automated action.
+    grievance_escalation_auto_submit_enabled: bool = False
+    # "Systemic" (Requirement 1) means the SAME broker breaching the SAME
+    # rule at least this many times within the trailing window below --
+    # a single isolated failure never triggers escalation on its own.
+    grievance_escalation_systemic_failure_threshold_count: int = 3
+    grievance_escalation_systemic_failure_window_days: int = 30
+    # SCORES' actual current resolution SLA per grievance category is
+    # published on SEBI's own portal and varies by category -- 21 days
+    # is a commonly-cited general figure for investor grievances, used
+    # here only as a configurable DEFAULT due date for the internal
+    # dashboard's timeline tracking, not asserted as SCORES' authoritative
+    # SLA for every grievance type this agent might ever file.
+    grievance_escalation_sla_response_days: int = 21
+    scores_api_base_url: str | None = None
+    scores_api_key: str | None = None
+    scores_api_timeout_seconds: float = 30.0
+    grievance_escalation_max_submit_retries: int = 5
+    # Status resolution timelines are days, not minutes -- an hourly poll
+    # is more than sufficient and keeps this agent from hammering SCORES.
+    grievance_escalation_poll_interval_seconds: int = 3600
+    celery_grievance_escalation_queue: str = "regengine_grievance_escalation"
+
     # --- Compliance Chaos Monkey (chaos.monkey) ---
     # A safety rail, not a feature toggle: chaos.monkey.runner.ChaosMonkeyRunner
     # refuses to inject faults against any real engine/service unless this is

@@ -49,6 +49,10 @@ celery_app.conf.update(
         "app.regulatory_filing.tasks.submit_pending_filings_task": {"queue": settings.celery_regulatory_filing_queue},
         "app.canary.tasks.evaluate_canary_windows_task": {"queue": settings.celery_canary_queue},
         "app.canary.tasks.promote_canary_task": {"queue": settings.celery_canary_queue},
+        "app.grievance_escalation.tasks.submit_grievance_task": {"queue": settings.celery_grievance_escalation_queue},
+        "app.grievance_escalation.tasks.submit_pending_grievances_task": {"queue": settings.celery_grievance_escalation_queue},
+        "app.grievance_escalation.tasks.poll_grievance_status_task": {"queue": settings.celery_grievance_escalation_queue},
+        "app.grievance_escalation.tasks.poll_pending_grievances_task": {"queue": settings.celery_grievance_escalation_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -81,7 +85,15 @@ celery_app.conf.update(
             "task": "app.canary.tasks.evaluate_canary_windows_task",
             "schedule": settings.canary_evaluation_sweep_interval_seconds,
         },
+        "submit-pending-grievances": {
+            "task": "app.grievance_escalation.tasks.submit_pending_grievances_task",
+            "schedule": settings.grievance_escalation_poll_interval_seconds,
+        },
+        "poll-pending-grievances": {
+            "task": "app.grievance_escalation.tasks.poll_pending_grievances_task",
+            "schedule": settings.grievance_escalation_poll_interval_seconds,
+        },
     },
 )
 
-celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security", "app.backtest", "app.regulatory_filing", "app.canary"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security", "app.backtest", "app.regulatory_filing", "app.canary", "app.grievance_escalation"])

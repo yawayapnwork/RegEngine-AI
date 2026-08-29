@@ -44,6 +44,8 @@ class BreachEventType(str, Enum):
     AMBIGUOUS_HITL = "ambiguous_hitl"                # WARNING: a FLAGGED transaction decision or blocking compiler HITL flag
     POLICY_COMPILED = "policy_compiled"              # INFO: a rule auto-compiled successfully
     FILING_SUBMISSION_FAILED = "filing_submission_failed"  # CRITICAL: app.regulatory_filing exhausted its retry budget submitting a SEBI/MII filing
+    GRIEVANCE_FILED = "grievance_filed"                    # WARNING: app.grievance_escalation detected systemic broker non-compliance and filed/drafted a SCORES grievance
+    GRIEVANCE_STATUS_UPDATE = "grievance_status_update"    # INFO: app.grievance_escalation polled SCORES and the grievance's status changed
 
 
 class AckStatus(str, Enum):
