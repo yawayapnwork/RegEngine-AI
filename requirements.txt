@@ -19,6 +19,13 @@ qdrant-client>=1.10
 crewai>=0.70
 crewai-tools>=0.12
 
+# LLM cost optimization (app.llm_ops): frontier-tier calls outside CrewAI's
+# own Agent/Task machinery (the escalation path in
+# app.llm_ops.cached_extraction) go through litellm directly -- the same
+# library crewai.LLM wraps internally, so this reuses one dependency
+# instead of adding a second Anthropic SDK.
+litellm>=1.44
+
 # Execution service: embedded OPA (co-located `opa run --server`) evaluation,
 # Redis-backed policy registry/HITL queue, and Celery batch/CDC/webhook workers
 httpx>=0.27

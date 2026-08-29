@@ -40,6 +40,7 @@ celery_app.conf.update(
         "app.agents.tasks.extract_and_audit_clause_task": {"queue": settings.celery_agents_queue},
         "app.compiler.tasks.compile_audited_rule_task": {"queue": settings.celery_compiler_queue},
         "app.vectorstore.tasks.index_chunks_task": {"queue": settings.celery_vectorstore_queue},
+        "app.llm_ops.tasks.purge_expired_cache_entries_task": {"queue": settings.celery_llm_ops_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -52,7 +53,11 @@ celery_app.conf.update(
             "task": "app.ingestion.tasks.poll_sebi_sources_task",
             "schedule": settings.ingestion_poll_interval_seconds,
         },
+        "purge-expired-llm-cache-entries": {
+            "task": "app.llm_ops.tasks.purge_expired_cache_entries_task",
+            "schedule": settings.llm_cache_purge_interval_seconds,
+        },
     },
 )
 
-celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops"])

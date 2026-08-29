@@ -274,6 +274,33 @@ class Settings(BaseSettings):
         description="Set false to disable the sandbox API entirely (returns 503).",
     )
 
+    # --- LLM cost optimization: semantic cache + model-tier routing ---
+    # (app.llm_ops) -- separate Qdrant collection from qdrant_collection
+    # (the production clause index) so cache entries never leak into or
+    # get pruned alongside indexed circular content.
+    llm_cache_qdrant_collection: str = "llm_semantic_cache"
+    llm_cache_similarity_threshold: float = Field(
+        default=0.97,
+        description="Cosine similarity above which a cached response is reused instead of re-invoking the LLM. High by design -- a near-miss on legal text can flip an obligation's meaning.",
+    )
+    llm_cache_ttl_seconds: int = Field(
+        default=30 * 24 * 3600,
+        description="Cache entry lifetime. Bounded (not permanent) so a later SEBI circular amendment/rescission eventually invalidates stale cached extractions even if the clause text is byte-identical to a superseded one.",
+    )
+    llm_cache_redis_key_prefix: str = "regengine:llm_cache"
+
+    # Local low-cost tier: the QLoRA-fine-tuned model served by
+    # llm_finetune/vllm (or Ollama) for deterministic/simple clauses.
+    llm_router_cheap_model: str = "sebi-compliance-llm"
+    llm_router_cheap_model_base_url: str = "http://localhost:8000/v1"
+    llm_router_frontier_model: str = "anthropic/claude-3-5-sonnet-20241022"
+    # Below this confidence (or on a schema-validation failure) from the
+    # cheap tier, the router escalates to the frontier model rather than
+    # accepting a low-confidence local-model extraction.
+    llm_router_escalation_confidence_threshold: float = 0.75
+    celery_llm_ops_queue: str = "regengine_llm_ops"
+    llm_cache_purge_interval_seconds: int = 3600  # hourly sweep of expired semantic-cache Qdrant points
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

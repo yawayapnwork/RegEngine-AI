@@ -102,6 +102,41 @@ TRANSACTION_EVALUATION_TOTAL = Counter(
     registry=REGISTRY,
 )
 
+# --- LLM cost-optimization metrics (app.llm_ops) ---
+# tenant_id is deliberately NOT a label here (unbounded-ish cardinality
+# across every SEBI-registered intermediary) -- per-tenant cost breakdown
+# lives in the `llm_usage_events` Postgres table (app.llm_ops.models),
+# which is exactly what it's indexed for. These Prometheus metrics answer
+# the platform-wide "is the cache/router working" question for alerting.
+
+LLM_CACHE_LOOKUP_TOTAL = Counter(
+    "llm_cache_lookup_total",
+    "Semantic prompt cache lookups by layer and outcome (app.llm_ops.semantic_cache.SemanticPromptCache.get).",
+    labelnames=("layer", "hit"),  # layer: "exact" | "semantic" | "none"; hit: "true" | "false"
+    registry=REGISTRY,
+)
+
+LLM_ROUTING_DECISION_TOTAL = Counter(
+    "llm_routing_decision_total",
+    "Model-tier routing decisions (app.llm_ops.router.ModelRouter).",
+    labelnames=("tier", "complexity", "escalated"),  # escalated: "true" | "false"
+    registry=REGISTRY,
+)
+
+LLM_COST_USD_TOTAL = Counter(
+    "llm_cost_usd_total",
+    "Cumulative estimated USD spend on LLM inference, by model tier (app.llm_ops.cost_tracker).",
+    labelnames=("model_tier",),
+    registry=REGISTRY,
+)
+
+LLM_TOKENS_TOTAL = Counter(
+    "llm_tokens_total",
+    "Cumulative LLM tokens consumed, by model tier and direction (app.llm_ops.cost_tracker).",
+    labelnames=("model_tier", "direction"),  # direction: "input" | "output"
+    registry=REGISTRY,
+)
+
 _HALLUCINATION_FINDING_TYPES = frozenset({FindingType.HALLUCINATED_THRESHOLD, FindingType.HALLUCINATED_ENTITY})
 
 
