@@ -137,6 +137,31 @@ LLM_TOKENS_TOTAL = Counter(
     registry=REGISTRY,
 )
 
+# --- Multi-agent negotiation protocol metrics (app.negotiation) ---
+
+NEGOTIATION_ROUNDS_TOTAL = Counter(
+    "negotiation_rounds_total",
+    "Count of consensus-engine negotiation rounds run (app.negotiation.consensus.ConsensusEngine.run), "
+    "by whether that round reached consensus.",
+    labelnames=("consensus_reached",),  # "true" | "false"
+    registry=REGISTRY,
+)
+
+NEGOTIATION_OUTCOME_TOTAL = Counter(
+    "negotiation_outcome_total",
+    "Count of completed negotiations by final outcome (app.negotiation.orchestrator.NegotiationOrchestrator.negotiate).",
+    labelnames=("status",),  # "consensus" | "arbitrated" | "escalated_to_hitl"
+    registry=REGISTRY,
+)
+
+NEGOTIATION_DURATION_SECONDS = Histogram(
+    "negotiation_duration_seconds",
+    "Wall-clock time for one full negotiation (app.negotiation.orchestrator.NegotiationOrchestrator.negotiate), "
+    "from first round to final outcome (consensus, arbitration, or HITL escalation).",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+    registry=REGISTRY,
+)
+
 # --- Load-test / breakpoint-analysis support metrics ---
 # (loadtest/breakpoint_analysis.py's pass/fail gates read these two
 # directly.) Neither existed before load testing needed a concrete signal

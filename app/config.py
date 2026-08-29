@@ -134,6 +134,34 @@ class Settings(BaseSettings):
     # only bounds the staleness window if a pub/sub message is ever dropped.
     policy_cache_ttl_seconds: float = 30.0
 
+    # --- Multi-agent negotiation protocol (app.negotiation) ---
+    # Off by default: a deployment that never enables this keeps
+    # app.execution.evaluator.Evaluator's existing single-pass
+    # most-restrictive-wins reduction unchanged -- negotiation only
+    # engages when a transaction's compiled-policy outcomes span more
+    # than one domain agent's territory AND those agents actually
+    # disagree (see app.negotiation.orchestrator).
+    negotiation_enabled: bool = False
+    # Weighted-vote share (0-1) a decision needs to reach for the
+    # consensus engine to accept it without invoking the arbiter. 0.7
+    # means "more than two-thirds of weighted, confidence-scaled voting
+    # power" -- deliberately not a bare majority, since a transaction
+    # allowed to execute on a narrow majority is a worse failure mode
+    # than one that goes to arbitration unnecessarily.
+    negotiation_consensus_threshold: float = 0.7
+    # Bounded negotiation rounds before declaring deadlock and escalating
+    # to the arbiter -- same "small and explicit" rationale as
+    # hybrid_retrieval_graph_depth in app.config: unbounded negotiation
+    # between two agents that will never agree is just a hang.
+    negotiation_max_rounds: int = 3
+    # The Conflict Arbiter Agent only issues a definitive (non-HITL)
+    # resolution when its winning decision's weight*confidence product
+    # clears this bar -- below it, the arbiter's own docstring requires
+    # it to escalate to HITL rather than guess.
+    negotiation_arbiter_min_confidence: float = 0.75
+    negotiation_state_key_prefix: str = "regengine:negotiation"
+    negotiation_state_ttl_seconds: int = 7 * 24 * 3600
+
     # --- Execution service: Celery ---
     celery_task_default_queue: str = "regengine_default"
     celery_batch_queue: str = "regengine_batch"
