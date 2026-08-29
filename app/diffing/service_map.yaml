@@ -1,0 +1,107 @@
+# Maps a changed clause's OPA/JSON-Logic fact field (or, failing that, its
+# regulatory domain) to the internal broker-side microservices/endpoints
+# that consume that fact -- i.e. whose code likely needs a corresponding
+# update when the field's threshold, presence, or meaning changes.
+#
+# This is intentionally an OPERATOR-MAINTAINED config, not something the
+# LLM infers: which of YOUR OWN internal services calls
+# POST /v1/execution/transactions/evaluate with a given `facts.*` key is
+# an architectural fact about your systems, not something derivable from
+# the regulatory text itself. Keep this file in sync with your service
+# catalog / API gateway route table.
+#
+# Matching is by `field` (exact `input.facts.<field>` key,
+# app.compiler.naming.metric_field_name) first, falling back to `domain`
+# (app.regulatory.taxonomy's Rego namespace domain segment) when no
+# field-level entry exists -- see app.diffing.service_mapping.
+
+by_field:
+  upfront_margin_pct:
+    services:
+      - name: margin-engine-service
+        endpoints: ["POST /v1/margin/calculate", "POST /v1/margin/collect"]
+      - name: risk-management-service
+        endpoints: ["GET /v1/risk/exposure"]
+    reason: "Upfront margin percentage is read directly by the margin calculation and collection flow."
+
+  peak_margin_collected:
+    services:
+      - name: margin-engine-service
+        endpoints: ["POST /v1/margin/peak-reconciliation"]
+    reason: "Peak margin reconciliation job reads this fact nightly."
+
+  settlement_window_days:
+    services:
+      - name: settlement-engine-service
+        endpoints: ["POST /v1/settlement/schedule", "GET /v1/settlement/cycle-config"]
+      - name: clearing-corp-gateway
+        endpoints: ["POST /v1/clearing/submit"]
+    reason: "Settlement cycle (T+n) drives the settlement scheduler and clearing-house submission timing."
+
+  crar_pct:
+    services:
+      - name: capital-adequacy-service
+        endpoints: ["GET /v1/capital/crar", "POST /v1/capital/report"]
+    reason: "CRAR is computed and reported by the capital adequacy reporting job."
+
+  single_borrower_exposure_pct:
+    services:
+      - name: credit-risk-service
+        endpoints: ["POST /v1/credit/exposure-check"]
+    reason: "Single-borrower exposure limit is enforced at loan sanction time."
+
+  solvency_ratio:
+    services:
+      - name: actuarial-reporting-service
+        endpoints: ["GET /v1/solvency/ratio", "POST /v1/solvency/quarterly-report"]
+    reason: "Solvency margin is computed by the actuarial reporting pipeline."
+
+  equity_exposure_pct:
+    services:
+      - name: nps-allocation-service
+        endpoints: ["POST /v1/nps/rebalance", "GET /v1/nps/exposure"]
+    reason: "NPS equity exposure cap is enforced at fund-switch/rebalance time."
+
+by_domain:
+  broking:
+    services:
+      - name: order-management-service
+        endpoints: ["POST /v1/oms/orders"]
+      - name: client-onboarding-service
+        endpoints: ["POST /v1/kyc/verify"]
+    reason: "Fallback: no field-specific mapping found; broking-domain clauses generally touch order flow and onboarding."
+  amc:
+    services:
+      - name: fund-accounting-service
+        endpoints: ["GET /v1/nav/publish"]
+    reason: "Fallback: AMC-domain clauses generally touch NAV/fund-accounting disclosure flows."
+  banking:
+    services:
+      - name: core-banking-gateway
+        endpoints: ["GET /v1/accounts"]
+    reason: "Fallback: banking-domain clauses generally touch core banking reporting."
+  nbfc:
+    services:
+      - name: loan-origination-service
+        endpoints: ["POST /v1/loans/originate"]
+    reason: "Fallback: NBFC-domain clauses generally touch loan origination/underwriting."
+  lending:
+    services:
+      - name: loan-origination-service
+        endpoints: ["POST /v1/loans/originate", "POST /v1/loans/exposure-check"]
+    reason: "Fallback: lending-domain clauses generally touch loan origination and exposure checks."
+  underwriting:
+    services:
+      - name: policy-issuance-service
+        endpoints: ["POST /v1/policy/issue"]
+    reason: "Fallback: underwriting-domain clauses generally touch policy issuance."
+  distribution:
+    services:
+      - name: agent-commission-service
+        endpoints: ["POST /v1/commission/calculate"]
+    reason: "Fallback: distribution-domain clauses generally touch agent/broker commission calculation."
+  pension:
+    services:
+      - name: nps-allocation-service
+        endpoints: ["POST /v1/nps/rebalance"]
+    reason: "Fallback: pension-domain clauses generally touch NPS fund allocation."

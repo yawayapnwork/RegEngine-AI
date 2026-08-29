@@ -4,6 +4,7 @@ pydantic>=2.7
 pydantic-settings>=2.3
 python-multipart>=0.0.9
 python-dateutil>=2.9
+PyYAML>=6.0  # app.diffing.service_mapping's service_map.yaml
 
 # Layout-aware PDF extraction
 unstructured[pdf]>=0.15

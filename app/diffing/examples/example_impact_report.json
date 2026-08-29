@@ -1,0 +1,147 @@
+{
+  "report_id": "92dc2124-993e-44a9-b1a2-b2d29316fa1a",
+  "circular_number": "SEBI/HO/MIRSD/2025/50",
+  "regulator": "sebi",
+  "generated_at": "2026-08-29T07:44:51.412123Z",
+  "total_new_clauses": 3,
+  "change_type_counts": {
+    "threshold_shift": 1,
+    "deadline_amendment": 1,
+    "new_obligation": 1
+  },
+  "severity_counts": {
+    "high": 2,
+    "critical": 1
+  },
+  "overall_risk_level": "critical",
+  "clause_diffs": [
+    {
+      "new_rule_id": "bbbb...bbbb:3.2",
+      "new_clause_number": "3.2",
+      "new_circular_number": "SEBI/HO/MIRSD/2025/50",
+      "matched_historical_chunk_id": "old-chunk-1",
+      "matched_historical_clause_number": "3.2",
+      "matched_historical_circular_number": "SEBI/HO/MIRSD/2024/10",
+      "similarity_score": 0.96,
+      "match_confidence": "near_duplicate",
+      "change_type": "threshold_shift",
+      "severity": "high",
+      "classification_method": "structural",
+      "classification_confidence": 0.95,
+      "threshold_deltas": [
+        {
+          "field": "facts.upfront_margin_pct",
+          "metric": "Upfront Margin",
+          "unit": "%",
+          "old_operator": ">=",
+          "old_value": 20.0,
+          "new_operator": ">=",
+          "new_value": 25.0,
+          "delta_absolute": 5.0,
+          "delta_pct": 25.0,
+          "tightened": true
+        }
+      ],
+      "narrative_summary": "Upfront Margin changed from >= 20.0% to >= 25.0% (+25.0%)",
+      "service_impacts": [
+        {
+          "service_name": "margin-engine-service",
+          "endpoints": ["POST /v1/margin/calculate", "POST /v1/margin/collect"],
+          "reason": "Upfront margin percentage is read directly by the margin calculation and collection flow.",
+          "confidence": 1.0
+        },
+        {
+          "service_name": "risk-management-service",
+          "endpoints": ["GET /v1/risk/exposure"],
+          "reason": "Upfront margin percentage is read directly by the margin calculation and collection flow.",
+          "confidence": 1.0
+        }
+      ],
+      "requires_hitl_review": true
+    },
+    {
+      "new_rule_id": "cccc...cccc:4.1",
+      "new_clause_number": "4.1",
+      "new_circular_number": "SEBI/HO/MIRSD/2025/50",
+      "matched_historical_chunk_id": "old-chunk-2",
+      "matched_historical_clause_number": "4.1",
+      "matched_historical_circular_number": "SEBI/HO/MIRSD/2020/1",
+      "similarity_score": 0.94,
+      "match_confidence": "near_duplicate",
+      "change_type": "deadline_amendment",
+      "severity": "high",
+      "classification_method": "structural",
+      "classification_confidence": 0.95,
+      "threshold_deltas": [
+        {
+          "field": "facts.settlement_window_days",
+          "metric": "Settlement Window",
+          "unit": "days",
+          "old_operator": "<=",
+          "old_value": 1.0,
+          "new_operator": "<=",
+          "new_value": 0.0,
+          "delta_absolute": -1.0,
+          "delta_pct": -100.0,
+          "tightened": true
+        }
+      ],
+      "narrative_summary": "Settlement Window changed from <= 1.0days to <= 0.0days (-100.0%) -- settlement cycle moved from T+1 to T+0.",
+      "service_impacts": [
+        {
+          "service_name": "settlement-engine-service",
+          "endpoints": ["POST /v1/settlement/schedule", "GET /v1/settlement/cycle-config"],
+          "reason": "Settlement cycle (T+n) drives the settlement scheduler and clearing-house submission timing.",
+          "confidence": 1.0
+        },
+        {
+          "service_name": "clearing-corp-gateway",
+          "endpoints": ["POST /v1/clearing/submit"],
+          "reason": "Settlement cycle (T+n) drives the settlement scheduler and clearing-house submission timing.",
+          "confidence": 1.0
+        }
+      ],
+      "requires_hitl_review": true
+    },
+    {
+      "new_rule_id": "eeee...eeee:9.1",
+      "new_clause_number": "9.1",
+      "new_circular_number": "SEBI/HO/MIRSD/2025/50",
+      "matched_historical_chunk_id": null,
+      "matched_historical_clause_number": null,
+      "matched_historical_circular_number": null,
+      "similarity_score": null,
+      "match_confidence": "no_match",
+      "change_type": "new_obligation",
+      "severity": "critical",
+      "classification_method": "structural",
+      "classification_confidence": 1.0,
+      "threshold_deltas": [],
+      "narrative_summary": "No historical clause found with sufficient semantic similarity; treated as a wholly new compliance obligation. New clause requires appointment of a dedicated cybersecurity officer -- no prior circular imposed this.",
+      "service_impacts": [
+        {
+          "service_name": "order-management-service",
+          "endpoints": ["POST /v1/oms/orders"],
+          "reason": "Fallback: no field-specific mapping found; broking-domain clauses generally touch order flow and onboarding.",
+          "confidence": 0.4
+        },
+        {
+          "service_name": "client-onboarding-service",
+          "endpoints": ["POST /v1/kyc/verify"],
+          "reason": "Fallback: no field-specific mapping found; broking-domain clauses generally touch order flow and onboarding.",
+          "confidence": 0.4
+        }
+      ],
+      "requires_hitl_review": true
+    }
+  ],
+  "affected_services": [
+    "clearing-corp-gateway",
+    "client-onboarding-service",
+    "margin-engine-service",
+    "order-management-service",
+    "risk-management-service",
+    "settlement-engine-service"
+  ],
+  "obligations_removed": []
+}
