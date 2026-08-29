@@ -46,12 +46,20 @@ MAX_REVISION_ROUNDS = 2
 # --------------------------------------------------------------------------
 
 
-def _build_llm(settings: Settings, *, temperature: float):
-    """Claude 3.5 Sonnet via CrewAI's LiteLLM-backed LLM wrapper."""
+def _build_llm(settings: Settings, *, temperature: float, model_override: str | None = None):
+    """Claude 3.5 Sonnet via CrewAI's LiteLLM-backed LLM wrapper, by
+    default. `model_override` is how app.agents.graph's fallback node
+    escalates to a secondary model (settings.agent_fallback_model) when
+    the primary extraction's confidence falls below
+    settings.agent_confidence_threshold -- a distinct model family/
+    checkpoint, not just a retried call to the same one, on the theory
+    that a low-confidence result from one model is more likely to be
+    resolved by a genuinely different model's reasoning than by asking
+    the same model again with nothing new to go on."""
     from crewai import LLM  # deferred heavy import
 
     return LLM(
-        model="anthropic/claude-3-5-sonnet-20241022",
+        model=model_override or "anthropic/claude-3-5-sonnet-20241022",
         api_key=settings.anthropic_api_key,
         temperature=temperature,
         max_tokens=4096,
@@ -63,7 +71,7 @@ def _build_llm(settings: Settings, *, temperature: float):
 # --------------------------------------------------------------------------
 
 
-def build_extraction_agent(settings: Settings, regulator: Regulator = Regulator.SEBI):
+def build_extraction_agent(settings: Settings, regulator: Regulator = Regulator.SEBI, model_override: str | None = None):
     from crewai import Agent  # deferred heavy import
 
     from app.agents.prompts import EXTRACTION_AGENT_SYSTEM_PROMPT
@@ -85,10 +93,78 @@ def build_extraction_agent(settings: Settings, regulator: Regulator = Regulator.
         # hint changes.
         backstory=f"{EXTRACTION_AGENT_SYSTEM_PROMPT}\n\n{profile.agent_persona_hint}",
         tools=[t for t in tools if t.name in ("verify_quotes", "scan_numeric_tokens", "lookup_entity")],
-        llm=_build_llm(settings, temperature=0.0),
+        llm=_build_llm(settings, temperature=0.0, model_override=model_override),
         allow_delegation=False,
         verbose=settings.agent_verbose,
         max_iter=8,
+        respect_context_window=True,
+    )
+
+
+def build_quantitative_parsing_agent(settings: Settings, regulator: Regulator = Regulator.SEBI, model_override: str | None = None):
+    """Specialized extraction agent for clauses containing mathematical
+    formulas (VaR/CRAR-style computations, weighted averages, standard
+    deviation/variance formulas) -- app.agents.graph.complexity_router
+    routes to this agent instead of the general Extraction Agent when
+    app.agents.graph.complexity_router.detect_complexity flags
+    `has_math_formulas`. Produces the SAME ExtractedComplianceRule schema
+    (build_extraction_task is reused unchanged) -- only the agent's own
+    reasoning approach to formula variables differs."""
+    from crewai import Agent  # deferred heavy import
+
+    from app.agents.prompts import QUANTITATIVE_PARSING_AGENT_SYSTEM_PROMPT
+    from app.agents.tools import build_crewai_tools
+
+    profile = REGULATOR_PROFILES[regulator]
+    tools = build_crewai_tools()
+    return Agent(
+        role=f"{profile.display_name} Quantitative Formula Parsing Specialist",
+        goal=(
+            "Decompose a mathematical/computational compliance formula into its constituent "
+            "variables, each captured as its own NumericalThreshold where the formula fixes a "
+            "numeric constant or bound, with the overall computation preserved in extraction_notes "
+            "so a human reviewer can see how the pieces combine."
+        ),
+        backstory=f"{QUANTITATIVE_PARSING_AGENT_SYSTEM_PROMPT}\n\n{profile.agent_persona_hint}",
+        tools=[t for t in tools if t.name in ("verify_quotes", "scan_numeric_tokens", "lookup_entity")],
+        llm=_build_llm(settings, temperature=0.0, model_override=model_override),
+        allow_delegation=False,
+        verbose=settings.agent_verbose,
+        max_iter=10,  # formula decomposition typically needs more tool-call rounds than a plain threshold
+        respect_context_window=True,
+    )
+
+
+def build_reference_resolution_agent(settings: Settings, regulator: Regulator = Regulator.SEBI, model_override: str | None = None):
+    """Specialized extraction agent for clauses with nested cross-references
+    to other clauses/circulars/annexures -- routed to when
+    complexity_router flags `has_cross_references`. Given the full
+    sibling-chunk set up front (via build_clause_context, same tool the
+    Logic Auditor already uses) so it can actually resolve a reference
+    like "as specified in clause 3.2.1" against real sibling text instead
+    of extracting the clause in isolation and leaving the reference
+    unresolved."""
+    from crewai import Agent  # deferred heavy import
+
+    from app.agents.prompts import REFERENCE_RESOLUTION_AGENT_SYSTEM_PROMPT
+    from app.agents.tools import build_crewai_tools
+
+    profile = REGULATOR_PROFILES[regulator]
+    tools = build_crewai_tools()
+    return Agent(
+        role=f"{profile.display_name} Cross-Reference Resolution Specialist",
+        goal=(
+            "Resolve every cross-reference to another clause, annexure, or circular in the source "
+            "text against the provided sibling chunks BEFORE extracting the compliance rule, so the "
+            "resulting ExtractedComplianceRule reflects the referenced content's actual effect, not "
+            "just the referring clause's literal (and incomplete) wording."
+        ),
+        backstory=f"{REFERENCE_RESOLUTION_AGENT_SYSTEM_PROMPT}\n\n{profile.agent_persona_hint}",
+        tools=[t for t in tools if t.name in ("verify_quotes", "scan_numeric_tokens", "lookup_entity", "build_clause_context")],
+        llm=_build_llm(settings, temperature=0.0, model_override=model_override),
+        allow_delegation=False,
+        verbose=settings.agent_verbose,
+        max_iter=10,
         respect_context_window=True,
     )
 

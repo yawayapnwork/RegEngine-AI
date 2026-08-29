@@ -20,6 +20,12 @@ qdrant-client>=1.10
 crewai>=0.70
 crewai-tools>=0.12
 
+# Dynamic agent graph orchestration (app.agents.graph) -- only needed when
+# settings.agent_graph_orchestration_enabled=True; deferred-imported so a
+# deployment running the original fixed CrewAI pipeline never needs this
+# installed.
+langgraph>=0.2.0
+
 # LLM cost optimization (app.llm_ops): frontier-tier calls outside CrewAI's
 # own Agent/Task machinery (the escalation path in
 # app.llm_ops.cached_extraction) go through litellm directly -- the same

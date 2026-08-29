@@ -24,14 +24,31 @@ async def extract_and_audit_clause(
     through regardless of caller (a lone clause via this function directly,
     or a whole circular via extract_and_audit_circular below), so it's
     where LLM agent latency and hallucination-detection metrics are
-    recorded -- see app.observability.metrics's module docstring."""
-    from app.agents.crew import run_dual_validation  # deferred heavy import
+    recorded -- see app.observability.metrics's module docstring.
 
+    Dispatches to one of two implementations of the same contract,
+    controlled by `settings.agent_graph_orchestration_enabled`:
+      - False (default): app.agents.crew.run_dual_validation -- the
+        original fixed two-agent sequential CrewAI pipeline, run via
+        asyncio.to_thread since crew.kickoff() is synchronous.
+      - True: app.agents.graph.run_graph_pipeline -- the dynamic
+        LangGraph state machine (Requirement 1's complexity-based
+        routing, Requirement 3's confidence-gated fallback). Natively
+        async already (its own CrewAI calls are individually
+        to_thread-wrapped inside each node), so it is awaited directly.
+    """
     settings = settings or get_settings()
     started = time.perf_counter()
 
     with traced_span("agents.extract_and_audit_clause", chunk_id=chunk.chunk_id, clause_number=chunk.clause_number):
-        audited = await asyncio.to_thread(run_dual_validation, chunk, sibling_chunks, settings)
+        if settings.agent_graph_orchestration_enabled:
+            from app.agents.graph.graph import run_graph_pipeline  # deferred: pulls in langgraph
+
+            audited = await run_graph_pipeline(chunk, sibling_chunks, settings)
+        else:
+            from app.agents.crew import run_dual_validation  # deferred heavy import
+
+            audited = await asyncio.to_thread(run_dual_validation, chunk, sibling_chunks, settings)
 
     LLM_AGENT_TASK_DURATION.labels(audit_verdict=audited.audit.verdict.value).observe(time.perf_counter() - started)
     record_hallucination_findings(audited.audit.findings)

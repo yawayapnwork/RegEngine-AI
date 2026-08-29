@@ -48,6 +48,27 @@ class Settings(BaseSettings):
     agent_verbose: bool = False
     agent_max_rpm: int = 20
 
+    # --- Dynamic agent graph orchestration (app.agents.graph) ---
+    # Opt-in: False preserves the original fixed two-agent CrewAI
+    # sequential pipeline (app.agents.crew.run_dual_validation) exactly as
+    # it behaved before dynamic routing existed. True routes
+    # app.agents.pipeline.extract_and_audit_clause through the LangGraph
+    # state machine instead -- see app.agents.graph's module docstring.
+    agent_graph_orchestration_enabled: bool = False
+    # Below this extraction_confidence, app.agents.graph's confidence gate
+    # routes to the fallback node (a secondary model) instead of
+    # proceeding straight to audit -- Requirement 3's "confidence scores
+    # below 85%".
+    agent_confidence_threshold: float = 0.85
+    agent_max_fallback_attempts: int = 2
+    # A genuinely different model/checkpoint from the primary
+    # (anthropic/claude-3-5-sonnet-20241022, hardcoded in
+    # app.agents.crew._build_llm's default) -- see that function's
+    # docstring for why a different model, not a retry of the same one.
+    agent_fallback_model: str = "anthropic/claude-3-opus-20240229"
+    agent_graph_state_key_prefix: str = "regengine:agent_graph"
+    agent_graph_state_ttl_seconds: int = 7 * 24 * 3600
+
     # --- Execution service: embedded OPA engine ---
     # OPA runs as a local/sidecar `opa run --server` process. Policies are
     # pushed via its REST Policy API (PUT /v1/policies/{id}) for hot reload
