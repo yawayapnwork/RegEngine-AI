@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="urn:regengine:sebi-filing:v1"
+           targetNamespace="urn:regengine:sebi-filing:v1"
+           elementFormDefault="qualified">
+
+  <xs:simpleType name="Sha256Hex">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-f]{64}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="HeaderType">
+    <xs:sequence>
+      <xs:element name="FilingId" type="xs:string"/>
+      <xs:element name="ReportingEntityCode" type="xs:string"/>
+      <xs:element name="Target" type="xs:string"/>
+      <xs:element name="PeriodStart" type="xs:date"/>
+      <xs:element name="PeriodEnd" type="xs:date"/>
+      <xs:element name="GeneratedAt" type="xs:dateTime"/>
+      <xs:element name="RecordCount" type="xs:nonNegativeInteger"/>
+      <xs:element name="ContentSHA256" type="tns:Sha256Hex"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ComplianceLogRecordType">
+    <xs:sequence>
+      <xs:element name="SequenceNum" type="xs:nonNegativeInteger"/>
+      <xs:element name="BrokerId" type="xs:string"/>
+      <xs:element name="TransactionId" type="xs:string"/>
+      <xs:element name="EvaluatedAt" type="xs:dateTime"/>
+      <xs:element name="CircularId" type="xs:string"/>
+      <xs:element name="ClauseHash" type="xs:string"/>
+      <xs:element name="SectionReference" type="xs:string"/>
+      <xs:element name="RuleId" type="xs:string"/>
+      <xs:element name="EvaluationResult">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="PASS"/>
+            <xs:enumeration value="FAIL"/>
+            <xs:enumeration value="HITL_REVIEW"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="LedgerCurrentHash" type="tns:Sha256Hex"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="RegulatoryFiling">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Header" type="tns:HeaderType"/>
+        <xs:element name="ComplianceLogRecords">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Record" type="tns:ComplianceLogRecordType" minOccurs="0" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="filingType" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

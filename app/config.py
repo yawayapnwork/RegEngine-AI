@@ -538,6 +538,52 @@ class Settings(BaseSettings):
     policy_self_healing_max_retries: int = 3
     policy_self_healing_key_prefix: str = "regengine:policy_healing"
 
+    # --- Regulatory filing adapter (app.regulatory_filing) ---
+    # Packages compliance-log/daily-collateral evidence into SEBI/MII
+    # e-filing schemas, signs it (X.509/PKCS#7), and submits it via SFTP
+    # or a regulatory portal API. Off by default like every other
+    # optional subsystem here -- a deployment that hasn't onboarded a
+    # specific MII's filing schedule shouldn't have a Celery beat entry
+    # silently trying to submit anything.
+    regulatory_filing_enabled: bool = False
+    regulatory_filing_reporting_entity_code: str = "INZ000000000"  # SEBI broker registration number; placeholder default
+    regulatory_filing_key_prefix: str = "regengine:regulatory_filing"
+    regulatory_filing_max_retries: int = 5
+    regulatory_filing_submit_interval_seconds: int = 300
+    celery_regulatory_filing_queue: str = "regengine_regulatory_filing"
+
+    # PKI signing backend: "software" (private key + X.509 cert held in
+    # this process/secrets backend -- see app.regulatory_filing.signing)
+    # or "hsm" (PKCS#11 token via an OpenSSL engine -- see that module's
+    # HSMSigningBackend docstring for why HSM signing shells out to the
+    # openssl CLI rather than calling a PKCS#11 library directly for the
+    # PKCS#7/CMS envelope itself).
+    regulatory_filing_signing_backend: str = "software"
+    regulatory_filing_signing_cert_pem: str | None = None
+    regulatory_filing_signing_private_key_pem: str | None = None
+    regulatory_filing_hsm_pkcs11_module_path: str | None = None
+    regulatory_filing_hsm_key_uri: str | None = Field(
+        None, description='RFC 7512 PKCS#11 URI identifying the HSM-resident signing key, e.g. "pkcs11:token=RegEngineHSM;object=sebi-filing-key;type=private".'
+    )
+    regulatory_filing_hsm_engine_id: str = "pkcs11"  # OpenSSL engine id -- "pkcs11" (the standard OpenSC engine) unless the HSM vendor ships its own
+
+    # SFTP submission target (NSDL/CDSL/NSE/BSE each publish their own
+    # SFTP host/path conventions per MII -- these are per-deployment).
+    regulatory_filing_sftp_host: str | None = None
+    regulatory_filing_sftp_port: int = 22
+    regulatory_filing_sftp_username: str | None = None
+    regulatory_filing_sftp_private_key_pem: str | None = None
+    regulatory_filing_sftp_password: str | None = None  # only if the MII's SFTP endpoint doesn't support key auth
+    regulatory_filing_sftp_remote_dir: str = "/incoming"
+    regulatory_filing_sftp_known_host_key: str | None = Field(
+        None, description="The MII SFTP host's public key (OpenSSH 'known_hosts' line format) -- required in production; connecting with host-key checking disabled is a submission-integrity risk for a regulatory filing."
+    )
+
+    # SEBI regulatory portal API (REST) submission target, as an
+    # alternative to SFTP for MIIs/regulators that publish an API instead.
+    regulatory_filing_portal_api_base_url: str | None = None
+    regulatory_filing_portal_api_key: str | None = None
+
     # --- Compliance Chaos Monkey (chaos.monkey) ---
     # A safety rail, not a feature toggle: chaos.monkey.runner.ChaosMonkeyRunner
     # refuses to inject faults against any real engine/service unless this is

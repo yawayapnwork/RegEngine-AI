@@ -108,6 +108,14 @@ prometheus-client>=0.20
 # onboards a zk-capable broker doesn't need it.
 py_ecc>=8.0
 
+# Automated regulatory filing adapter (app.regulatory_filing): SFTP
+# submission to SEBI/MII destinations, and JSON Schema validation of
+# outgoing filings. lxml (already listed above for SEBI RSS/HTML
+# ingestion) provides the matching XSD validation for the XML filing
+# path -- no separate XML dependency needed.
+paramiko>=3.4
+jsonschema>=4.22
+
 # Testing
 pytest>=8.2
 pytest-asyncio>=0.23

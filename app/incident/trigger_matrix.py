@@ -80,3 +80,19 @@ def policy_compiled_event(rule_id: str, circular_number: str | None, clause_numb
         clause_number=clause_number,
         metadata={"package": package},
     )
+
+
+def filing_submission_failed_event(filing_id: str, filing_type: str, destination: str, attempt_count: int, last_error: str) -> BreachEvent:
+    """CRITICAL: called from app.regulatory_filing.tasks once a filing's
+    submission retry budget is exhausted -- a SEBI/MII regulatory filing
+    that never reached its destination is a direct compliance-deadline
+    risk, the same severity tier as a live clause violation actually
+    enforced (app.incident.trigger_matrix.clause_violation_event), not a
+    routine infrastructure hiccup."""
+    return BreachEvent(
+        severity=Severity.CRITICAL,
+        event_type=BreachEventType.FILING_SUBMISSION_FAILED,
+        title=f"Regulatory filing submission failed: {filing_type} to {destination}",
+        description=f"Filing {filing_id} ({filing_type}) failed to submit to {destination} after {attempt_count} attempt(s). Last error: {last_error}",
+        metadata={"filing_id": filing_id, "filing_type": filing_type, "destination": destination, "attempt_count": attempt_count},
+    )

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:regengine:sebi-filing:daily-collateral:v1",
+  "title": "RegEngine AI SEBI Daily Collateral Reporting Filing",
+  "type": "object",
+  "required": ["header", "records"],
+  "additionalProperties": false,
+  "properties": {
+    "header": {
+      "type": "object",
+      "required": ["filing_id", "filing_type", "target", "reporting_entity_code", "period_start", "period_end", "generated_at", "record_count", "content_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "filing_id": {"type": "string"},
+        "filing_type": {"const": "daily_collateral"},
+        "target": {"enum": ["SEBI", "NSE", "BSE", "NSDL", "CDSL"]},
+        "reporting_entity_code": {"type": "string"},
+        "period_start": {"type": "string", "format": "date"},
+        "period_end": {"type": "string", "format": "date"},
+        "generated_at": {"type": "string", "format": "date-time"},
+        "record_count": {"type": "integer", "minimum": 0},
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["report_date", "broker_id", "transactions_evaluated", "transactions_passed", "transactions_failed", "transactions_flagged_hitl", "shortfall_count"],
+        "additionalProperties": false,
+        "properties": {
+          "report_date": {"type": "string", "format": "date"},
+          "broker_id": {"type": "string"},
+          "transactions_evaluated": {"type": "integer", "minimum": 0},
+          "transactions_passed": {"type": "integer", "minimum": 0},
+          "transactions_failed": {"type": "integer", "minimum": 0},
+          "transactions_flagged_hitl": {"type": "integer", "minimum": 0},
+          "avg_upfront_margin_pct": {"type": ["number", "null"]},
+          "min_upfront_margin_pct": {"type": ["number", "null"]},
+          "shortfall_count": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

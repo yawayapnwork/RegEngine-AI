@@ -43,6 +43,7 @@ class BreachEventType(str, Enum):
     CLAUSE_VIOLATION = "clause_violation"          # CRITICAL: a DENY decision on a production transaction
     AMBIGUOUS_HITL = "ambiguous_hitl"                # WARNING: a FLAGGED transaction decision or blocking compiler HITL flag
     POLICY_COMPILED = "policy_compiled"              # INFO: a rule auto-compiled successfully
+    FILING_SUBMISSION_FAILED = "filing_submission_failed"  # CRITICAL: app.regulatory_filing exhausted its retry budget submitting a SEBI/MII filing
 
 
 class AckStatus(str, Enum):

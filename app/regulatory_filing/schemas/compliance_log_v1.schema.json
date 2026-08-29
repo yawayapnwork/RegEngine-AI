@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:regengine:sebi-filing:compliance-log:v1",
+  "title": "RegEngine AI SEBI Compliance Log Filing",
+  "type": "object",
+  "required": ["header", "records"],
+  "additionalProperties": false,
+  "properties": {
+    "header": {
+      "type": "object",
+      "required": ["filing_id", "filing_type", "target", "reporting_entity_code", "period_start", "period_end", "generated_at", "record_count", "content_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "filing_id": {"type": "string"},
+        "filing_type": {"const": "compliance_log"},
+        "target": {"enum": ["SEBI", "NSE", "BSE", "NSDL", "CDSL"]},
+        "reporting_entity_code": {"type": "string"},
+        "period_start": {"type": "string", "format": "date"},
+        "period_end": {"type": "string", "format": "date"},
+        "generated_at": {"type": "string", "format": "date-time"},
+        "record_count": {"type": "integer", "minimum": 0},
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sequence_num", "broker_id", "transaction_id", "evaluated_at", "circular_id", "clause_hash", "section_reference", "rule_id", "evaluation_result", "ledger_current_hash"],
+        "additionalProperties": false,
+        "properties": {
+          "sequence_num": {"type": "integer", "minimum": 0},
+          "broker_id": {"type": "string"},
+          "transaction_id": {"type": "string"},
+          "evaluated_at": {"type": "string", "format": "date-time"},
+          "circular_id": {"type": "string"},
+          "clause_hash": {"type": "string"},
+          "section_reference": {"type": "string"},
+          "rule_id": {"type": "string"},
+          "evaluation_result": {"enum": ["PASS", "FAIL", "HITL_REVIEW"]},
+          "ledger_current_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}
