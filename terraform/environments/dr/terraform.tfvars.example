@@ -1,0 +1,24 @@
+name_prefix    = "regengine-prod"
+primary_region = "ap-south-1"
+dr_region      = "ap-south-2"
+
+vpc_id_primary = "vpc-xxxxxxxx"
+vpc_id_dr      = "vpc-yyyyyyyy"
+
+subnet_ids_primary = ["subnet-aaa1", "subnet-aaa2", "subnet-aaa3"]
+subnet_ids_dr      = ["subnet-bbb1", "subnet-bbb2", "subnet-bbb3"]
+
+app_security_group_ids_primary = ["sg-app-primary"]
+app_security_group_ids_dr      = ["sg-app-dr"]
+
+kms_key_arn_primary = "arn:aws:kms:ap-south-1:123456789012:key/xxxx"
+kms_key_arn_dr      = "arn:aws:kms:ap-south-2:123456789012:key/yyyy"
+
+dns_provider    = "route53"
+route53_zone_id = "Z0123456789ABCDEF"
+api_fqdn        = "api.regengine.ai"
+
+primary_alb_dns_name = "regengine-primary-alb-123456.ap-south-1.elb.amazonaws.com"
+primary_alb_zone_id  = "ZP97RAFLXTNZK"
+dr_alb_dns_name      = "regengine-dr-alb-654321.ap-south-2.elb.amazonaws.com"
+dr_alb_zone_id       = "Z18NTBI3Y7N9YO"
