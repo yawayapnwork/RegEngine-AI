@@ -1,0 +1,5 @@
+apache-flink>=1.19.0
+confluent-kafka>=2.4.0
+httpx>=0.27.0
+pydantic>=2.7.0
+structlog>=24.1.0
