@@ -162,6 +162,33 @@ NEGOTIATION_DURATION_SECONDS = Histogram(
     registry=REGISTRY,
 )
 
+# --- FIX Protocol gateway metrics (app.fix_gateway) ---
+# Bucketed in MICROSECONDS-equivalent seconds (1e-6 to 1e-2) since this
+# path's whole point is sub-500-microsecond validation -- the default
+# millisecond-scale buckets used elsewhere in this file (e.g.
+# OPA_POLICY_EVALUATION_DURATION's 1ms-1s range) would put every real
+# sample from this path in the same bottom bucket, useless for judging
+# whether the 500-microsecond target is actually being met in
+# production. Only the QuickFIX/Python integration
+# (app.fix_gateway.gateway_application) records into this -- the raw
+# C++ hot path (native/include/regengine/fix_gateway.h) has no Python
+# runtime to report a Prometheus metric from at all; its own latency
+# evidence is native/benchmarks/bench_fix_gateway.cpp's recorded numbers.
+FIX_GATEWAY_VALIDATION_DURATION = Histogram(
+    "fix_gateway_validation_duration_seconds",
+    "Wall-clock time for one New Order Single's validate_new_order call, Python/QuickFIX integration "
+    "(app.fix_gateway.evaluator.validate_new_order) -- NOT the C++ hot path, see this metric's module comment.",
+    buckets=(0.000001, 0.000005, 0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01),
+    registry=REGISTRY,
+)
+
+FIX_GATEWAY_ORDERS_TOTAL = Counter(
+    "fix_gateway_orders_total",
+    "Count of FIX New Order Single messages processed by app.fix_gateway, by outcome.",
+    labelnames=("outcome",),  # "accepted" | "rejected" | "malformed"
+    registry=REGISTRY,
+)
+
 # --- Load-test / breakpoint-analysis support metrics ---
 # (loadtest/breakpoint_analysis.py's pass/fail gates read these two
 # directly.) Neither existed before load testing needed a concrete signal

@@ -1,0 +1,855 @@
+<title>Custody Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<style>
+  :root {
+    --bg: #eef1f4;
+    --surface: #ffffff;
+    --surface-2: #e3e8ee;
+    --ink: #101823;
+    --ink-dim: #4c5a6b;
+    --ink-faint: #7c8896;
+    --line: #ccd5de;
+    --accent: #2f5f8f;
+    --accent-strong: #1f4066;
+    --accent-tint: #dbe7f1;
+    --good: #197a49;
+    --good-strong: #0f5c37;
+    --good-tint: #dcf1e5;
+    --bad: #b7332f;
+    --bad-strong: #8f2420;
+    --bad-tint: #fbe2e0;
+    --warn: #92640a;
+    --warn-strong: #6e4a04;
+    --warn-tint: #f7ecd2;
+    --shadow: 0 1px 2px rgba(16, 24, 35, 0.06), 0 8px 24px -12px rgba(16, 24, 35, 0.18);
+    --radius: 10px;
+    --font-display: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0a0f16;
+      --surface: #121a24;
+      --surface-2: #1a2432;
+      --ink: #e7edf4;
+      --ink-dim: #9aa9ba;
+      --ink-faint: #64748a;
+      --line: #263241;
+      --accent: #7aade0;
+      --accent-strong: #a9cdf0;
+      --accent-tint: #16283b;
+      --good: #4fbf85;
+      --good-strong: #7fd6a6;
+      --good-tint: #10301f;
+      --bad: #e2827b;
+      --bad-strong: #f0a49e;
+      --bad-tint: #391513;
+      --warn: #dcb35d;
+      --warn-strong: #edc987;
+      --warn-tint: #382a0c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -14px rgba(0, 0, 0, 0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a0f16;
+    --surface: #121a24;
+    --surface-2: #1a2432;
+    --ink: #e7edf4;
+    --ink-dim: #9aa9ba;
+    --ink-faint: #64748a;
+    --line: #263241;
+    --accent: #7aade0;
+    --accent-strong: #a9cdf0;
+    --accent-tint: #16283b;
+    --good: #4fbf85;
+    --good-strong: #7fd6a6;
+    --good-tint: #10301f;
+    --bad: #e2827b;
+    --bad-strong: #f0a49e;
+    --bad-tint: #391513;
+    --warn: #dcb35d;
+    --warn-strong: #edc987;
+    --warn-tint: #382a0c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -14px rgba(0, 0, 0, 0.6);
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-tint); color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* ---------- Header ---------- */
+  .masthead { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+  .mark { flex: none; width: 34px; height: 34px; color: var(--accent); }
+  .masthead h1 {
+    font-size: clamp(22px, 3vw, 28px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .tagline { color: var(--ink-dim); margin: 4px 0 0 48px; font-size: 14.5px; max-width: 62ch; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 18px 0 0 48px; font-size: 12.5px; color: var(--ink-faint); font-family: var(--font-mono); }
+  .meta-row span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  hr.rule { border: none; border-top: 1px solid var(--line); margin: 32px 0; }
+
+  /* ---------- Dropzone ---------- */
+  .dropzone {
+    border: 1.5px dashed var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 46px 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .dropzone:hover { border-color: var(--accent); }
+  .dropzone.active { border-color: var(--accent); background: var(--accent-tint); }
+  .dropzone.busy { cursor: progress; }
+  .dz-icon { color: var(--accent); margin-bottom: 14px; }
+  .dz-title { font-weight: 600; font-size: 16.5px; margin: 0 0 4px; }
+  .dz-sub { color: var(--ink-dim); font-size: 13.5px; margin: 0; }
+  .dz-formats { margin-top: 14px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; color: var(--ink-faint); text-transform: uppercase; }
+  .dz-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .dz-browse { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
+
+  .loaded-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  .loaded-file .name { font-family: var(--font-mono); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .loaded-file button { border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 12.5px; text-decoration: underline; }
+
+  /* ---------- Progress ---------- */
+  .progress-list { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+  .progress-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-dim); font-family: var(--font-mono); }
+  .spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin 700ms linear infinite; flex: none; }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1600ms; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- Verdict stamp ---------- */
+  .verdict {
+    display: flex; align-items: center; gap: 20px;
+    padding: 26px 28px; border-radius: var(--radius);
+    border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow);
+  }
+  .verdict.pass { border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+  .verdict.fail { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+  .verdict.warn { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+  .verdict-badge {
+    flex: none; width: 64px; height: 64px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .verdict.pass .verdict-badge { background: var(--good-tint); color: var(--good-strong); }
+  .verdict.fail .verdict-badge { background: var(--bad-tint); color: var(--bad-strong); }
+  .verdict.warn .verdict-badge { background: var(--warn-tint); color: var(--warn-strong); }
+  .verdict-title { font-size: 19px; font-weight: 700; margin: 0 0 3px; letter-spacing: -0.01em; }
+  .verdict.pass .verdict-title { color: var(--good-strong); }
+  .verdict.fail .verdict-title { color: var(--bad-strong); }
+  .verdict.warn .verdict-title { color: var(--warn-strong); }
+  .verdict-sub { margin: 0; color: var(--ink-dim); font-size: 13.5px; }
+
+  /* ---------- Tier cards ---------- */
+  .tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 20px; }
+  .tier-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 18px 16px; }
+  .tier-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .tier-name { font-weight: 600; font-size: 13.5px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; border-radius: 100px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; font-family: var(--font-mono); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pill.pass { background: var(--good-tint); color: var(--good-strong); }
+  .pill.fail { background: var(--bad-tint); color: var(--bad-strong); }
+  .pill.warn { background: var(--warn-tint); color: var(--warn-strong); }
+  .pill.skip { background: var(--surface-2); color: var(--ink-faint); }
+  .tier-detail { font-size: 12.5px; color: var(--ink-dim); margin: 0; }
+  .tier-detail + .tier-detail { margin-top: 4px; }
+  .tier-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 500; }
+
+  /* ---------- Proof tree ---------- */
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 40px 0 14px; flex-wrap: wrap; }
+  .section-head h2 { font-size: 16.5px; margin: 0; font-weight: 700; }
+  .section-head .count { font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); margin-bottom: 14px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 9px; height: 9px; border-radius: 2px; }
+
+  .tree-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .tree-scroll { max-height: 520px; overflow-y: auto; }
+  .tree-node { display: grid; grid-template-columns: 20px 90px 1fr auto; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 12.5px; cursor: pointer; }
+  .tree-node:last-child { border-bottom: none; }
+  .tree-node:hover { background: var(--surface-2); }
+  .tree-node.expanded { background: var(--surface-2); }
+  .link-stripe { width: 8px; height: 8px; border-radius: 50%; position: relative; }
+  .link-stripe::before { content: ""; position: absolute; top: -14px; left: 3px; width: 2px; height: 14px; background: var(--line); }
+  .tree-node:first-child .link-stripe::before { display: none; }
+  .link-stripe.pass { background: var(--good); }
+  .link-stripe.fail { background: var(--bad); }
+  .link-stripe.warn { background: var(--warn); }
+  .tn-seq { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-faint); }
+  .tn-body { min-width: 0; display: flex; gap: 10px; align-items: baseline; }
+  .tn-txn { font-family: var(--font-mono); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tn-rule { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+  .tn-status { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+  .tn-status.pass { color: var(--good-strong); }
+  .tn-status.fail { color: var(--bad-strong); }
+  .tn-status.warn { color: var(--warn-strong); }
+
+  .tn-expand { padding: 4px 18px 16px 48px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; font-size: 12px; }
+  .kv dt { color: var(--ink-faint); }
+  .kv dd { margin: 0; font-family: var(--font-mono); word-break: break-all; }
+  .kv dd.mismatch { color: var(--bad-strong); font-weight: 600; }
+  .kv dd.match { color: var(--good-strong); }
+  .kv-note { grid-column: 1 / -1; color: var(--ink-faint); font-family: var(--font-display); font-size: 11.5px; margin-top: 4px; }
+
+  .empty-tree { padding: 34px 18px; text-align: center; color: var(--ink-faint); font-size: 13px; }
+
+  /* ---------- Manifest / clause tables ---------- */
+  .flat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .flat-table th { text-align: left; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  .flat-table td { padding: 9px 14px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); vertical-align: top; }
+  .flat-table tr:last-child td { border-bottom: none; }
+  .flat-table .path { word-break: break-all; }
+  .table-scroll { overflow-x: auto; }
+
+  .callout { display: flex; gap: 12px; padding: 14px 16px; border-radius: 8px; background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); font-size: 12.5px; color: var(--ink-dim); margin-top: 14px; }
+  .callout b { color: var(--ink); }
+
+  /* ---------- Methodology ---------- */
+  .method { columns: 2; column-gap: 40px; }
+  .method article { break-inside: avoid; margin-bottom: 22px; }
+  .method h3 { font-size: 13.5px; margin: 0 0 6px; font-weight: 600; color: var(--accent-strong); }
+  .method p { margin: 0; font-size: 13px; color: var(--ink-dim); max-width: 46ch; }
+  @media (max-width: 720px) { .method { columns: 1; } }
+
+  footer { margin-top: 56px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-faint); font-family: var(--font-mono); display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
+
+  code.inline { font-family: var(--font-mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
+
+  button.reset-btn {
+    font-family: var(--font-display); font-size: 12.5px; font-weight: 600; color: var(--accent-strong);
+    background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    border-radius: 7px; padding: 7px 14px; cursor: pointer;
+  }
+  button.reset-btn:hover { filter: brightness(0.97); }
+</style>
+
+<div id="root"></div>
+
+<script id="wasm-b64" type="text/plain">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</script>
+
+<script>
+"use strict";
+const h = React.createElement;
+const { useState, useCallback, useMemo, useRef, useEffect } = React;
+
+/* =========================================================================
+   Byte / encoding helpers
+   ========================================================================= */
+function bytesToHex(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, "0");
+  return s;
+}
+function base64ToBytes(b64) {
+  const clean = b64.replace(/\s+/g, "");
+  const bin = atob(clean);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function pemToDer(pem) {
+  const body = pem
+    .replace(/-----BEGIN [^-]+-----/g, "")
+    .replace(/-----END [^-]+-----/g, "")
+    .replace(/\s+/g, "");
+  return base64ToBytes(body);
+}
+
+/* =========================================================================
+   Minimal DER/ASN.1 reader -- just enough to walk an RSA SubjectPublicKeyInfo
+   and find the modulus length, which RSA-PSS verification needs to compute
+   PSS's MAX_LENGTH salt length (see the "RSA-PSS salt length" methodology
+   note rendered in the UI for why this can't be hardcoded to one constant).
+   ========================================================================= */
+function derReadTLV(bytes, offset) {
+  const tag = bytes[offset];
+  let lenByte = bytes[offset + 1];
+  let length, headerLen;
+  if (lenByte < 0x80) {
+    length = lenByte;
+    headerLen = 2;
+  } else {
+    const numLenBytes = lenByte & 0x7f;
+    length = 0;
+    for (let i = 0; i < numLenBytes; i++) length = (length << 8) | bytes[offset + 2 + i];
+    headerLen = 2 + numLenBytes;
+  }
+  return { tag, length, valueStart: offset + headerLen, nextOffset: offset + headerLen + length };
+}
+function rsaModulusByteLengthFromSpki(spkiDer) {
+  // SEQUENCE { AlgorithmIdentifier SEQUENCE, subjectPublicKey BIT STRING { SEQUENCE { INTEGER modulus, INTEGER exponent } } }
+  const outer = derReadTLV(spkiDer, 0); // top-level SEQUENCE
+  const algId = derReadTLV(spkiDer, outer.valueStart); // AlgorithmIdentifier SEQUENCE
+  const bitString = derReadTLV(spkiDer, algId.nextOffset); // BIT STRING
+  const rsaPubKeySeqStart = bitString.valueStart + 1; // skip the "unused bits" byte
+  const rsaPubKeySeq = derReadTLV(spkiDer, rsaPubKeySeqStart); // inner SEQUENCE
+  const modulusInt = derReadTLV(spkiDer, rsaPubKeySeq.valueStart); // INTEGER modulus
+  let modLen = modulusInt.length;
+  // A DER INTEGER prefixes a 0x00 sign-padding byte when the high bit of
+  // the first real byte would otherwise be mistaken for a negative sign --
+  // that byte is not part of the key's actual byte length.
+  if (bytes_at(spkiDer, modulusInt.valueStart) === 0x00) modLen -= 1;
+  return modLen;
+}
+function bytes_at(bytes, i) { return bytes[i]; }
+
+/* =========================================================================
+   WebAssembly SHA-256 -- see the "Why WebAssembly, not a JS one-liner"
+   methodology note in the rendered page. Compiled from a hand-written
+   FIPS 180-4 implementation (source available on request from RegEngine
+   AI engineering); verified byte-for-byte against Python's hashlib.sha256
+   across boundary-length inputs (0, 55, 56, 57, 63, 64, 65 bytes and a
+   1MB random payload) before being embedded here.
+   ========================================================================= */
+class WasmSha256 {
+  static async create(base64Module) {
+    const bytes = base64ToBytes(base64Module);
+    const { instance } = await WebAssembly.instantiate(bytes, {});
+    return new WasmSha256(instance);
+  }
+  constructor(instance) {
+    this.instance = instance;
+    this.exports = instance.exports;
+    this.memory = this.exports.memory;
+    this.INPUT_PTR = this.exports.INPUT_PTR.value;
+    this.OUT_PTR = this.exports.OUT_PTR.value;
+  }
+  _ensureCapacity(len) {
+    const needed = this.INPUT_PTR + len + 9 + 63; // input + 0x80 + up to 63 zero pad bytes + 8-byte length
+    const have = this.memory.buffer.byteLength;
+    if (needed > have) {
+      const pages = Math.ceil((needed - have) / 65536);
+      this.memory.grow(pages);
+    }
+  }
+  hash(bytes) {
+    this._ensureCapacity(bytes.length);
+    const mem = new Uint8Array(this.memory.buffer);
+    mem.set(bytes, this.INPUT_PTR);
+    const paddedLen = this.exports.pad(bytes.length);
+    this.exports.hash(paddedLen);
+    return new Uint8Array(this.memory.buffer, this.OUT_PTR, 32).slice();
+  }
+  hex(bytes) { return bytesToHex(this.hash(bytes)); }
+  hexOfUtf8(str) { return this.hex(new TextEncoder().encode(str)); }
+}
+
+/* =========================================================================
+   Ledger hash-chain re-derivation -- a direct JS port of
+   app.ledger.hash_chain.compute_block_hash, the exact function RegEngine's
+   signer uses server-side (see the methodology section for the source
+   reference). GENESIS_HASH matches app.ledger.hash_chain.GENESIS_HASH.
+   ========================================================================= */
+const GENESIS_HASH = "0".repeat(64);
+
+function computeBlockHash(sha256, previousHash, payloadDigest, sequenceNum, evaluatedAt) {
+  const material = `${previousHash}|${payloadDigest}|${sequenceNum}|${evaluatedAt}`;
+  return sha256.hexOfUtf8(material);
+}
+
+function verifyLedgerChain(sha256, rawEntries) {
+  const entries = [...rawEntries].sort((a, b) => a.sequence_num - b.sequence_num);
+  const nodes = [];
+  let previousHash = null;
+
+  entries.forEach((entry, i) => {
+    const seq = entry.sequence_num;
+    const evaluatedAt = entry.evaluated_at;
+    const payloadDigest = entry.payload_digest;
+    const statedHash = entry.current_hash;
+
+    let gap = false;
+    if (i === 0) {
+      previousHash = seq === 0 ? GENESIS_HASH : null; // null = "anchor unknown from this export alone"
+    } else {
+      const prevSeq = entries[i - 1].sequence_num;
+      if (seq !== prevSeq + 1) gap = true;
+    }
+
+    let recomputedHash = null;
+    let hashMatches = null;
+    if (previousHash !== null) {
+      recomputedHash = computeBlockHash(sha256, previousHash, payloadDigest, seq, evaluatedAt);
+      hashMatches = recomputedHash === statedHash;
+    }
+
+    let status;
+    if (gap) status = "warn";
+    else if (previousHash === null) status = "warn"; // can't anchor -- predecessor row missing from this export
+    else if (!hashMatches) status = "fail";
+    else status = "pass";
+
+    nodes.push({
+      ...entry,
+      gap,
+      previousHashUsed: previousHash,
+      recomputedHash,
+      hashMatches,
+      status,
+    });
+
+    previousHash = statedHash;
+  });
+
+  return nodes;
+}
+
+/* =========================================================================
+   RSA-PSS signature verification via Web Crypto -- reproduces
+   app.reporting.signing's exact scheme: RSASSA-PSS, MGF1(SHA-256),
+   hash=SHA-256, salt length = PSS.MAX_LENGTH (modulusBytes - hLen - 2).
+   ========================================================================= */
+async function verifyManifestSignature(manifestBytes, signatureJson) {
+  if (signatureJson.algorithm !== "RSA-PSS-SHA256") {
+    return { ok: false, reason: `Unrecognized signature algorithm "${signatureJson.algorithm}" -- expected RSA-PSS-SHA256.` };
+  }
+  let spkiDer;
+  try {
+    spkiDer = pemToDer(signatureJson.public_key_pem);
+  } catch (e) {
+    return { ok: false, reason: "Could not parse the embedded public key PEM." };
+  }
+  let saltLength;
+  try {
+    const modLen = rsaModulusByteLengthFromSpki(spkiDer);
+    saltLength = modLen - 32 - 2; // PSS.MAX_LENGTH for a SHA-256 digest
+  } catch (e) {
+    return { ok: false, reason: "Could not determine the RSA key size from the embedded public key." };
+  }
+  let cryptoKey;
+  try {
+    cryptoKey = await crypto.subtle.importKey("spki", spkiDer, { name: "RSA-PSS", hash: "SHA-256" }, false, ["verify"]);
+  } catch (e) {
+    return { ok: false, reason: "The embedded public key could not be imported by the browser's WebCrypto engine." };
+  }
+  const signatureBytes = base64ToBytes(signatureJson.signature_b64);
+  try {
+    const valid = await crypto.subtle.verify({ name: "RSA-PSS", saltLength }, cryptoKey, signatureBytes, manifestBytes);
+    return { ok: valid, reason: valid ? null : "The signature does not match manifest.json's current bytes.", saltLength };
+  } catch (e) {
+    return { ok: false, reason: "WebCrypto rejected the signature verification: " + e.message };
+  }
+}
+
+/* =========================================================================
+   Package loading: accepts a .zip (full audit binder) or a bare .json
+   (audit_binder.json / ledger_proof.json alone -- chain-only verification).
+   ========================================================================= */
+async function loadPackage(file, sha256) {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".zip")) return loadZipPackage(file, sha256);
+  if (lower.endsWith(".json")) return loadJsonPackage(file);
+  throw new Error("Unrecognized file type -- expected a .zip audit binder or a .json ledger export.");
+}
+
+async function loadJsonPackage(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+  const entries = data.ledger_entries || data.entries || null;
+  if (!entries) throw new Error('No "ledger_entries" or "entries" array found in this JSON file.');
+  return { kind: "json", fileName: file.name, ledgerEntries: entries, manifest: null, signature: null, manifestFiles: null, clauseHashes: null };
+}
+
+async function loadZipPackage(file, sha256) {
+  const zip = await JSZip.loadAsync(file);
+  const manifestEntry = zip.file("manifest.json");
+  if (!manifestEntry) throw new Error('This ZIP has no "manifest.json" at its root -- not a recognized RegEngine audit binder.');
+
+  const manifestBytes = await manifestEntry.async("uint8array");
+  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
+
+  const fileResults = [];
+  for (const entry of manifest.files || []) {
+    const zObj = zip.file(entry.path);
+    if (!zObj) {
+      fileResults.push({ path: entry.path, expected: entry.sha256, actual: null, status: "fail", note: "File listed in the manifest is missing from the package." });
+      continue;
+    }
+    const content = await zObj.async("uint8array");
+    const actual = sha256.hex(content);
+    fileResults.push({ path: entry.path, expected: entry.sha256, actual, status: actual === entry.sha256 ? "pass" : "fail" });
+  }
+
+  let signature = null;
+  const sigEntry = zip.file("digital_signature.json");
+  if (sigEntry) {
+    signature = JSON.parse(await sigEntry.async("string"));
+  }
+
+  let ledgerEntries = null;
+  for (const candidate of ["ledger_proof.json", "audit_binder.json"]) {
+    const f = zip.file(candidate);
+    if (!f) continue;
+    const parsed = JSON.parse(await f.async("string"));
+    ledgerEntries = parsed.ledger_entries || parsed.entries || null;
+    if (ledgerEntries) break;
+  }
+
+  let clauseHashes = null;
+  const clauseFile = zip.file("source_circulars/clause_hashes.json");
+  if (clauseFile) clauseHashes = JSON.parse(await clauseFile.async("string"));
+
+  return { kind: "zip", fileName: file.name, manifest, manifestBytes, manifestFiles: fileResults, signature, ledgerEntries, clauseHashes };
+}
+
+/* =========================================================================
+   Icons (inline SVG -- no icon font/library)
+   ========================================================================= */
+function IconChain(props) {
+  return h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", ...props },
+    h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+    h("rect", { x: 13, y: 13, width: 8, height: 8, rx: 2 }),
+    h("path", { d: "M9 11 L9 13 Q9 15 11 15 L13 15" })
+  );
+}
+function IconCheck(props) { return h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round", width: 26, height: 26, ...props }, h("path", { d: "M4 12.5 L9.5 18 L20 6" })); }
+function IconCross(props) { return h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round", width: 26, height: 26, ...props }, h("path", { d: "M5 5 L19 19 M19 5 L5 19" })); }
+function IconGap(props) { return h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round", width: 26, height: 26, ...props }, h("path", { d: "M12 7 L12 14" }), h("circle", { cx: 12, cy: 17.5, r: 0.6, fill: "currentColor", stroke: "none" })); }
+function IconUpload(props) {
+  return h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", width: 34, height: 34, ...props },
+    h("path", { d: "M12 15 V4 M8 8 L12 4 L16 8" }),
+    h("path", { d: "M4 15 V18 Q4 20 6 20 H18 Q20 20 20 18 V15" })
+  );
+}
+
+/* =========================================================================
+   Pill + tier card
+   ========================================================================= */
+function Pill({ status, children }) {
+  return h("span", { className: `pill ${status}` }, h("span", { className: "dot" }), children);
+}
+const STATUS_LABEL = { pass: "Verified", fail: "Failed", warn: "Attention", skip: "Not present" };
+
+function TierCard({ name, status, children }) {
+  return h("div", { className: "tier-card" },
+    h("div", { className: "tier-head" },
+      h("span", { className: "tier-name" }, name),
+      h(Pill, { status }, STATUS_LABEL[status])
+    ),
+    children
+  );
+}
+
+/* =========================================================================
+   Proof tree node
+   ========================================================================= */
+function ProofNode({ node, expanded, onToggle }) {
+  const statusLabel = node.status === "pass" ? "Linked" : node.status === "fail" ? "Broken link" : "Gap";
+  return h(React.Fragment, null,
+    h("div", { className: `tree-node ${expanded ? "expanded" : ""}`, onClick: onToggle, role: "button", tabIndex: 0, "aria-expanded": expanded },
+      h("span", { className: `link-stripe ${node.status}` }),
+      h("span", { className: "tn-seq" }, "#" + node.sequence_num),
+      h("span", { className: "tn-body" },
+        h("span", { className: "tn-txn" }, node.transaction_id || "—"),
+        h("span", { className: "tn-rule" }, node.rule_id || "")
+      ),
+      h("span", { className: `tn-status ${node.status}` }, statusLabel)
+    ),
+    expanded && h("div", { className: "tn-expand" },
+      h("dl", { className: "kv" },
+        h("dt", null, "Broker"), h("dd", null, node.broker_id || "—"),
+        h("dt", null, "Evaluated at"), h("dd", null, node.evaluated_at || "—"),
+        h("dt", null, "Evaluation result"), h("dd", null, node.evaluation_result || "—"),
+        h("dt", null, "Section reference"), h("dd", null, node.section_reference || "—"),
+        h("dt", null, "Payload digest (from export)"), h("dd", null, node.payload_digest || "—"),
+        h("dt", null, "Previous hash used"), h("dd", null, node.previousHashUsed || "not available from this export"),
+        h("dt", null, "Stated current_hash"), h("dd", null, node.current_hash || "—"),
+        node.recomputedHash && h("dt", null, "Recomputed current_hash"),
+        node.recomputedHash && h("dd", { className: node.hashMatches ? "match" : "mismatch" }, node.recomputedHash),
+        h("div", { className: "kv-note" },
+          node.gap
+            ? "Sequence gap: this entry's sequence_num does not immediately follow the previous one -- one or more blocks between them are missing from this export."
+            : node.previousHashUsed === null
+            ? "This is the first entry in the export and its sequence_num is not 0, so its predecessor's current_hash isn't available here to anchor the chain -- linkage from this row backward can't be confirmed offline."
+            : node.hashMatches
+            ? "Recomputed current_hash matches the value stated in the export -- this block's position, timestamp, and digest are internally consistent with its neighbor."
+            : "Recomputed current_hash does NOT match the value stated in the export. Either this row or its stated predecessor hash has been altered since the ledger produced it."
+        )
+      )
+    )
+  );
+}
+
+function ProofTree({ nodes }) {
+  const [expandedSeq, setExpandedSeq] = useState(null);
+  const CAP = 400;
+  const shown = nodes.slice(0, CAP);
+  if (nodes.length === 0) {
+    return h("div", { className: "tree-card" }, h("div", { className: "empty-tree" }, "No ledger entries found in this package."));
+  }
+  return h("div", { className: "tree-card" },
+    h("div", { className: "tree-scroll" },
+      shown.map((n) => h(ProofNode, { key: n.sequence_num, node: n, expanded: expandedSeq === n.sequence_num, onToggle: () => setExpandedSeq(expandedSeq === n.sequence_num ? null : n.sequence_num) }))
+    ),
+    nodes.length > CAP && h("div", { className: "callout", style: { margin: "0", borderRadius: 0, borderLeft: "none", borderRight: "none", borderBottom: "none" } },
+      `Showing the first ${CAP.toLocaleString()} of ${nodes.length.toLocaleString()} entries. All ${nodes.length.toLocaleString()} were included in the counts above.`)
+  );
+}
+
+/* =========================================================================
+   Root application
+   ========================================================================= */
+function App() {
+  const [sha256, setSha256] = useState(null);
+  const [wasmError, setWasmError] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState([]);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const b64 = document.getElementById("wasm-b64").textContent.trim();
+    WasmSha256.create(b64).then(setSha256).catch((e) => setWasmError(String(e)));
+  }, []);
+
+  const pushStep = useCallback((label) => setSteps((s) => [...s, label]), []);
+
+  const handleFile = useCallback(async (file) => {
+    if (!sha256) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    setSteps([]);
+    try {
+      pushStep(`Reading ${file.name}…`);
+      const pkg = await loadPackage(file, sha256);
+
+      let manifestOk = null, manifestFiles = null;
+      if (pkg.kind === "zip") {
+        pushStep(`Recomputing SHA-256 over ${pkg.manifestFiles.length} manifest file(s)…`);
+        manifestFiles = pkg.manifestFiles;
+        manifestOk = manifestFiles.every((f) => f.status === "pass");
+      }
+
+      let signatureResult = null;
+      if (pkg.signature) {
+        pushStep("Verifying RSA-PSS digital signature over manifest.json…");
+        signatureResult = await verifyManifestSignature(pkg.manifestBytes, pkg.signature);
+      }
+
+      let chainNodes = [];
+      if (pkg.ledgerEntries) {
+        pushStep(`Re-deriving the SHA-256 block hash chain across ${pkg.ledgerEntries.length} ledger entr${pkg.ledgerEntries.length === 1 ? "y" : "ies"}…`);
+        chainNodes = verifyLedgerChain(sha256, pkg.ledgerEntries);
+      }
+
+      setResult({ pkg, manifestOk, manifestFiles, signatureResult, chainNodes });
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [sha256, pushStep]);
+
+  const onDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (busy) return;
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, [handleFile, busy]);
+
+  const onBrowsePick = useCallback((e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) handleFile(file);
+    e.target.value = "";
+  }, [handleFile]);
+
+  const reset = useCallback(() => { setResult(null); setError(null); setSteps([]); }, []);
+
+  const chainStats = useMemo(() => {
+    if (!result) return null;
+    const nodes = result.chainNodes;
+    const failCount = nodes.filter((n) => n.status === "fail").length;
+    const gapCount = nodes.filter((n) => n.status === "warn").length;
+    const passCount = nodes.filter((n) => n.status === "pass").length;
+    return { total: nodes.length, failCount, gapCount, passCount };
+  }, [result]);
+
+  const overallStatus = useMemo(() => {
+    if (!result) return null;
+    const manifestFail = result.manifestOk === false;
+    const signatureFail = result.signatureResult && !result.signatureResult.ok;
+    const chainFail = chainStats && chainStats.failCount > 0;
+    const chainGap = chainStats && chainStats.gapCount > 0;
+    if (manifestFail || signatureFail || chainFail) return "fail";
+    if (chainGap) return "warn";
+    return "pass";
+  }, [result, chainStats]);
+
+  return h("div", { className: "wrap" },
+    h("header", { className: "masthead" },
+      h(IconChain, { className: "mark" }),
+      h("h1", null, "Custody Chain")
+    ),
+    h("p", { className: "tagline" }, "Independent, offline re-verification of RegEngine AI audit-log packages — every file hash, digital signature, and ledger block re-derived in this browser tab. Nothing you load here is uploaded anywhere."),
+    h("div", { className: "meta-row" },
+      h("span", null, h("span", { className: "dot" }), sha256 ? "WASM SHA-256 engine ready" : wasmError ? "WASM engine failed to load" : "Loading WASM SHA-256 engine…"),
+      h("span", null, h("span", { className: "dot" }), "No network calls during verification"),
+      h("span", null, h("span", { className: "dot" }), "Nothing is stored between sessions")
+    ),
+
+    h("hr", { className: "rule" }),
+
+    !result && h("div", {
+      className: `dropzone ${dragActive ? "active" : ""} ${busy ? "busy" : ""}`,
+      onDragOver: (e) => { e.preventDefault(); if (!busy) setDragActive(true); },
+      onDragLeave: () => setDragActive(false),
+      onDrop,
+      onClick: () => !busy && inputRef.current && inputRef.current.click(),
+    },
+      h("input", { ref: inputRef, type: "file", accept: ".zip,.json", className: "dz-file-input", onChange: onBrowsePick }),
+      h(IconUpload, { className: "dz-icon" }),
+      h("p", { className: "dz-title" }, busy ? "Verifying…" : "Drop an audit binder here"),
+      h("p", { className: "dz-sub" }, busy ? "Recomputing hashes locally — this never leaves your browser." : h(React.Fragment, null, "or ", h("span", { className: "dz-browse" }, "browse your files"))),
+      h("p", { className: "dz-formats" }, "regengine_audit_binder_*.zip · ledger_proof.json · audit_binder.json")
+    ),
+
+    busy && steps.length > 0 && h("div", { className: "progress-list" },
+      steps.map((s, i) => h("div", { className: "progress-row", key: i }, i === steps.length - 1 ? h("span", { className: "spinner" }) : h(IconCheck, { width: 13, height: 13, style: { color: "var(--good)" } }), s))
+    ),
+
+    error && h("div", { className: "verdict fail", style: { marginTop: 20 } },
+      h("div", { className: "verdict-badge" }, h(IconCross, null)),
+      h("div", null, h("p", { className: "verdict-title" }, "Could not verify this package"), h("p", { className: "verdict-sub" }, error))
+    ),
+
+    result && h(React.Fragment, null,
+      h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+        h("span", { style: { fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--ink-faint)" } }, result.pkg.fileName),
+        h("button", { className: "reset-btn", onClick: reset }, "Verify another package")
+      ),
+
+      h("div", { className: `verdict ${overallStatus}`, style: { marginTop: 14 } },
+        h("div", { className: "verdict-badge" }, overallStatus === "pass" ? h(IconCheck, null) : overallStatus === "fail" ? h(IconCross, null) : h(IconGap, null)),
+        h("div", null,
+          h("p", { className: "verdict-title" },
+            overallStatus === "pass" ? "Chain intact — no tampering detected" :
+            overallStatus === "fail" ? "Tampering detected" :
+            "Incomplete — missing block sequence"),
+          h("p", { className: "verdict-sub" },
+            overallStatus === "pass" ? "Every file hash, signature, and ledger block re-derived in this tab matches the values stated in the package." :
+            overallStatus === "fail" ? "One or more re-derived hashes did not match the values stated in the package — see the failing rows below." :
+            "The chain that IS present is internally consistent, but one or more sequence numbers are missing from this export.")
+        )
+      ),
+
+      h("div", { className: "tier-grid" },
+        h(TierCard, { name: "Package file integrity", status: result.pkg.kind !== "zip" ? "skip" : result.manifestOk ? "pass" : "fail" },
+          result.pkg.kind !== "zip"
+            ? h("p", { className: "tier-detail" }, "A bare JSON file has no manifest to check — only its ledger chain (below) was verified.")
+            : h(React.Fragment, null,
+                h("p", { className: "tier-detail" }, h("span", { className: "tier-num" }, result.manifestFiles.filter((f) => f.status === "pass").length), " / ", h("span", { className: "tier-num" }, result.manifestFiles.length), " files match their manifest hash"),
+                result.manifestFiles.some((f) => f.status === "fail") && h("p", { className: "tier-detail" }, result.manifestFiles.filter((f) => f.status === "fail").length, " file(s) altered or missing")
+              )
+        ),
+        h(TierCard, { name: "Digital signature (RSA-PSS)", status: !result.signatureResult ? "skip" : result.signatureResult.ok ? "pass" : "fail" },
+          !result.signatureResult
+            ? h("p", { className: "tier-detail" }, "No digital_signature.json in this package — signature could not be checked.")
+            : h(React.Fragment, null,
+                h("p", { className: "tier-detail" }, "Signer: ", h("span", { className: "tier-num" }, result.pkg.signature.signer_id || "unknown")),
+                h("p", { className: "tier-detail" }, result.signatureResult.ok ? "Signature verified against the embedded public key." : result.signatureResult.reason)
+              )
+        ),
+        h(TierCard, { name: "Ledger hash chain", status: !chainStats || chainStats.total === 0 ? "skip" : chainStats.failCount > 0 ? "fail" : chainStats.gapCount > 0 ? "warn" : "pass" },
+          !chainStats || chainStats.total === 0
+            ? h("p", { className: "tier-detail" }, "No ledger entries found in this package.")
+            : h(React.Fragment, null,
+                h("p", { className: "tier-detail" }, h("span", { className: "tier-num" }, chainStats.passCount), " / ", h("span", { className: "tier-num" }, chainStats.total), " blocks linked correctly"),
+                chainStats.failCount > 0 && h("p", { className: "tier-detail" }, h("span", { className: "tier-num" }, chainStats.failCount), " broken link(s)"),
+                chainStats.gapCount > 0 && h("p", { className: "tier-detail" }, h("span", { className: "tier-num" }, chainStats.gapCount), " sequence gap(s)")
+              )
+        )
+      ),
+
+      result.pkg.kind === "zip" && h(React.Fragment, null,
+        h("div", { className: "section-head" }, h("h2", null, "Package manifest"), h("span", { className: "count" }, result.manifestFiles.length, " file(s)")),
+        h("div", { className: "tree-card table-scroll" },
+          h("table", { className: "flat-table" },
+            h("thead", null, h("tr", null, h("th", null, "Path"), h("th", null, "Status"), h("th", null, "SHA-256"))),
+            h("tbody", null, result.manifestFiles.map((f) => h("tr", { key: f.path },
+              h("td", { className: "path" }, f.path),
+              h("td", null, h(Pill, { status: f.status }, f.status === "pass" ? "Match" : f.note || "Mismatch")),
+              h("td", { className: "path" }, f.actual || "—")
+            )))
+          )
+        )
+      ),
+
+      h("div", { className: "section-head" }, h("h2", null, "Proof tree"), h("span", { className: "count" }, (chainStats ? chainStats.total : 0), " block(s)")),
+      h("div", { className: "legend" },
+        h("span", null, h("span", { className: "sw", style: { background: "var(--good)" } }), "Valid chain"),
+        h("span", null, h("span", { className: "sw", style: { background: "var(--bad)" } }), "Tampered block"),
+        h("span", null, h("span", { className: "sw", style: { background: "var(--warn)" } }), "Missing block sequence")
+      ),
+      h(ProofTree, { nodes: result.chainNodes }),
+
+      result.pkg.clauseHashes && h(React.Fragment, null,
+        h("div", { className: "section-head" }, h("h2", null, "Source clause hashes")),
+        h("div", { className: "callout" }, h("b", "Read from the package, not independently recomputed."), " Re-deriving these from the raw source PDFs would require reproducing RegEngine's exact layout-aware text extraction pipeline; that's outside what a generic browser tool can do reliably, and a subtly different extraction would produce a false tamper alert on an untouched file. The listed values' own file integrity ", h("code", { className: "inline" }, "source_circulars/clause_hashes.json"), " IS covered by the manifest check above."),
+        h("div", { className: "tree-card table-scroll", style: { marginTop: 14 } },
+          h("table", { className: "flat-table" },
+            h("thead", null, h("tr", null, h("th", null, "Circular"), h("th", null, "Clause"), h("th", null, "SHA-256"))),
+            h("tbody", null, Object.entries(result.pkg.clauseHashes).flatMap(([circular, clauses]) =>
+              Object.entries(clauses).map(([clause, hash]) => h("tr", { key: circular + clause },
+                h("td", { className: "path" }, circular), h("td", { className: "path" }, clause), h("td", { className: "path" }, hash)
+              ))
+            ))
+          )
+        )
+      )
+    ),
+
+    h("hr", { className: "rule" }),
+
+    h("div", { className: "section-head", style: { marginTop: 0 } }, h("h2", null, "How this works")),
+    h("div", { className: "method" },
+      h("article", null, h("h3", null, "Why WebAssembly, not a JS one-liner"), h("p", null, "Every hash in this tool is computed by a compact, hand-written FIPS 180-4 SHA-256 module compiled to WebAssembly and verified byte-for-byte against Python's ", h("code", { className: "inline" }, "hashlib.sha256"), " across boundary-length inputs before being embedded here — the same algorithm RegEngine's own ledger signer runs server-side, executing at native speed on large exports.")),
+      h("article", null, h("h3", null, "File integrity"), h("p", null, "Every file listed in ", h("code", { className: "inline" }, "manifest.json"), " is re-hashed from the bytes actually inside the ZIP and compared to the hash recorded at export time — a direct port of RegEngine's own ", h("code", { className: "inline" }, "regengine-report.py verify-binder"), " check.")),
+      h("article", null, h("h3", null, "Digital signature"), h("p", null, "The manifest's signature is RSA-PSS over SHA-256 (MGF1-SHA256, ", h("code", { className: "inline" }, "PSS.MAX_LENGTH"), " salt) — verified here with the browser's own WebCrypto engine against the public key embedded in ", h("code", { className: "inline" }, "digital_signature.json"), ", so no key ever needs to be fetched from RegEngine.")),
+      h("article", null, h("h3", null, "Ledger hash chain"), h("p", null, "Each block's ", h("code", { className: "inline" }, "current_hash"), " is re-derived as ", h("code", { className: "inline" }, "SHA256(previous_hash|payload_digest|sequence_num|evaluated_at)"), " and compared to the stated value — altering any entry, its position, or its neighbor breaks this recomputation.")),
+      h("article", null, h("h3", null, "What isn't independently recomputed"), h("p", null, "The export format doesn't include every raw field (", h("code", { className: "inline" }, "clause_hash"), ", ", h("code", { className: "inline" }, "details"), ") that feeds ", h("code", { className: "inline" }, "payload_digest"), " — this tool trusts that value as given and verifies its ", h("i", null, "position in the chain"), ", not its full derivation from source.")),
+      h("article", null, h("h3", null, "Nothing leaves this tab"), h("p", null, "There is no upload step. Once this page and its WebAssembly module have loaded, verifying a package makes zero network requests — confirm this yourself in your browser's network panel."))
+    ),
+
+    h("footer", null,
+      h("span", null, "Custody Chain — offline verification tool"),
+      h("span", null, "SHA-256: WebAssembly"),
+      h("span", null, "Signature: RSA-PSS / WebCrypto"),
+      h("span", null, "No telemetry")
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>

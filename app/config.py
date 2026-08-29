@@ -161,6 +161,28 @@ class Settings(BaseSettings):
     canary_evaluation_sweep_interval_seconds: int = 300
     celery_canary_queue: str = "regengine_canary"
 
+    # --- FIX Protocol gateway (app.fix_gateway) ---
+    # A sub-500-microsecond order-validation target is NOT achievable
+    # through app.execution.opa_engine (that module's own docstring:
+    # "low single-digit milliseconds" over even a loopback HTTP call) --
+    # this gateway instead loads compiled policy directly into
+    # native/'s pre-existing allocation-free C++ kernel. See
+    # app.fix_gateway's module docstring for the full architecture and
+    # native/benchmarks/bench_fix_gateway.cpp for real measured numbers.
+    fix_gateway_enabled: bool = False
+    # This gateway's own FIX CompID, used as SenderCompID on every
+    # Execution Report it sends.
+    fix_gateway_sender_comp_id: str = "REGENGINE"
+    # Which RegEngine entity_type (e.g. "Stockbroker") this gateway
+    # instance's connecting counterparties represent -- a NewOrderSingle
+    # carries no such tag; one gateway process/port conventionally
+    # serves one counterparty type (see app.fix_gateway.gateway_application.PolicyProvider).
+    fix_gateway_entity_type: str = "Stockbroker"
+    # Path to the QuickFIX session configuration file (SessionSettings
+    # INI format) -- only read if settings.fix_gateway_enabled and the
+    # `quickfix` package is installed; see app/fix_gateway/gateway_application.py.
+    fix_gateway_session_config_path: str | None = None
+
     # --- Execution service: Redis (Celery broker/backend + HITL queue + policy registry) ---
     redis_url: str = "redis://localhost:6379/0"
     policy_registry_key: str = "regengine:policy_registry"

@@ -59,6 +59,14 @@ if(REGENGINE_BUILD_TESTS)
   target_include_directories(regengine_policy_test PRIVATE include)
   enable_testing()
   add_test(NAME regengine_policy_test COMMAND regengine_policy_test)
+
+  # FIX gateway layer (tag scanning, execution report construction,
+  # end-to-end validate_new_order) -- header-only, so this only needs
+  # the same include path, not a link against regengine_policy_static's
+  # object code (policy_loader.h's load_policy() is header-only too).
+  add_executable(regengine_fix_gateway_test tests/test_fix_gateway.cpp)
+  target_include_directories(regengine_fix_gateway_test PRIVATE include)
+  add_test(NAME regengine_fix_gateway_test COMMAND regengine_fix_gateway_test)
 endif()
 
 # --------------------------------------------------------------------------

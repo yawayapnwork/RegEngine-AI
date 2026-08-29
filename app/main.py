@@ -100,6 +100,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     )
     breach_broadcast_task = asyncio.create_task(breach_subscriber.run(), name="breach-event-broadcast-subscriber")
 
+    # FIX gateway's native-policy-set hot-reload -- same per-process
+    # rationale as PolicyHotReloadSubscriber above (each process owns its
+    # own in-memory FixPolicyStore, which only that process's own
+    # subscriber can keep current). A no-op unless settings.fix_gateway_enabled,
+    # since a deployment that never enables the gateway has no
+    # FixPolicyStore for anything to read.
+    fix_gateway_task = None
+    fix_gateway_subscriber = None
+    if settings.fix_gateway_enabled:
+        from app.fix_gateway.hot_reload import FixGatewayHotReloadSubscriber, FixPolicyStore
+
+        fix_gateway_subscriber = FixGatewayHotReloadSubscriber(
+            redis_client=get_redis_pool(),
+            session_factory=get_session_factory(),
+            store=FixPolicyStore(),
+        )
+        fix_gateway_task = asyncio.create_task(fix_gateway_subscriber.run(), name="fix-gateway-policy-hot-reload-subscriber")
+
     try:
         yield
     finally:
@@ -109,7 +127,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         queue_depth_task.cancel()
         breach_subscriber.stop()
         breach_broadcast_task.cancel()
-        for task in (hot_reload_task, queue_depth_task, breach_broadcast_task):
+        background_tasks = [hot_reload_task, queue_depth_task, breach_broadcast_task]
+        if fix_gateway_subscriber is not None:
+            fix_gateway_subscriber.stop()
+            fix_gateway_task.cancel()
+            background_tasks.append(fix_gateway_task)
+        for task in background_tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
