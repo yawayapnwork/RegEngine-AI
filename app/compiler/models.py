@@ -46,6 +46,7 @@ class HITLReasonCode(str, Enum):
     NO_DETERMINISTIC_LOGIC = "no_deterministic_logic"       # mandatory/prohibited obligation but zero thresholds
     CONFLICTING_THRESHOLDS = "conflicting_thresholds"       # two thresholds on the same field are contradictory
     UNRESOLVED_ENTITY = "unresolved_entity"                 # entity could not be normalized to the taxonomy
+    SELF_HEALED_REQUIRES_REVIEW = "self_healed_requires_review"  # app.healing repaired this rule automatically -- a human must confirm the repair before it is trusted (see app/healing/orchestrator.py). NOTE: no HITLFlag -> HITLReview persistence path exists in this codebase yet (nothing currently constructs a HITLReview row), so this value is not yet in app.db.models._HITL_REASON_CODES' CheckConstraint -- add it there (+ a migration) when that persistence layer is built.
 
 
 class HITLSeverity(str, Enum):

@@ -525,6 +525,19 @@ class Settings(BaseSettings):
         default_factory=lambda: {"margin_compliance_v1": "zk/build/verification_key.json"}
     )
 
+    # --- Self-healing policy repair loop (app.healing) ---
+    # Intercepts an OPA compile/publish failure or a JSON-Logic runtime
+    # crash and attempts automated repair before falling back to the
+    # existing DLQ/HITL escalation paths -- see app/healing/orchestrator.py's
+    # module docstring for how this composes with (not replaces)
+    # app.resilience.exceptions.MalformedASTError's existing
+    # non-retryable-by-design DLQ routing. Off by default: a deployment
+    # that hasn't reviewed the repair agent's prompt/behavior should keep
+    # getting today's "straight to DLQ" behavior unchanged.
+    policy_self_healing_enabled: bool = False
+    policy_self_healing_max_retries: int = 3
+    policy_self_healing_key_prefix: str = "regengine:policy_healing"
+
     # --- Compliance Chaos Monkey (chaos.monkey) ---
     # A safety rail, not a feature toggle: chaos.monkey.runner.ChaosMonkeyRunner
     # refuses to inject faults against any real engine/service unless this is

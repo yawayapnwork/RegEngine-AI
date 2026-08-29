@@ -20,6 +20,7 @@ class FailureCategory(str, Enum):
     MALFORMED_AST = "malformed_ast"  # invalid JSON-Logic AST produced by the compiler (app.compiler)
     VECTOR_INGESTION = "vector_ingestion"  # Qdrant embedding/upsert failure (app.vectorstore)
     RSS_POLLING = "rss_polling"  # SEBI RSS/HTML source polling exhausted its retries (app.ingestion)
+    POLICY_SELF_HEAL_EXHAUSTED = "policy_self_heal_exhausted"  # app.healing's repair loop ran out of retries (app.healing)
     OTHER = "other"
 
 
