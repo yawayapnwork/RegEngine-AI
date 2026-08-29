@@ -303,6 +303,18 @@ class Settings(BaseSettings):
     saml_sp_private_key: str | None = None
     saml_group_attribute_name: str = "http://schemas.xmlsoap.org/claims/Group"  # ADFS/AD FS default; override per IdP
 
+    # --- Audit binder digital signature (app.reporting.signing) ---
+    # RSA-PSS/SHA-256 over the audit binder's manifest -- a real
+    # asymmetric signature (not an HMAC) deliberately, so a SEBI auditor
+    # can verify authenticity with only the PUBLIC key, years later, with
+    # no shared secret ever having left this service. Distinct key pair
+    # from jwt_private_key_pem/jwt_public_key_pem: a token-signing key and
+    # a document-signing key are different trust boundaries with
+    # different rotation schedules, and must never be the same key.
+    audit_binder_signing_private_key_pem: str | None = None
+    audit_binder_signing_public_key_pem: str | None = None
+    audit_binder_signer_id: str = "RegEngine AI Compliance Reporting Service"
+
     # --- Security: secrets management backend ---
     secrets_backend: str = "env"  # "env" | "aws" | "vault" -- see app/security/secrets.py
     secrets_cache_ttl_seconds: float = 300.0

@@ -65,6 +65,16 @@ bcrypt>=4.1
 click>=8.1
 rich>=13.7
 
+# regengine-report.py: audit binder / compliance export CLI (app/reporting/,
+# app/analytics/pdf_report.py). typer wraps click (already a dependency
+# above) with typed options + Rich-formatted help; pandas backs
+# app.analytics.aggregator's DataFrame-based ledger aggregation.
+typer>=0.12
+pandas>=2.2
+reportlab>=4.2
+openpyxl>=3.1
+pypdf>=4.3
+
 # Observability: OpenTelemetry distributed tracing + Prometheus metrics
 # (see app/observability/) -- opentelemetry-api/-sdk/-proto are already
 # transitive deps of other packages above; pinned explicitly here since
