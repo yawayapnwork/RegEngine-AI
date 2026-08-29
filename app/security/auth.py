@@ -13,10 +13,35 @@ import logging
 
 from app.config import Settings
 from app.security.jwt import TokenError, decode_access_token
-from app.security.models import Principal
+from app.security.models import Principal, Role
 from app.security.secrets import resolve_secret
 
 logger = logging.getLogger(__name__)
+
+
+async def _directory_sync_override(subject: str, settings: Settings) -> list[Role] | None:
+    """Consults the proactive-revocation cache app.security.directory_sync_job
+    writes (Automated Directory Sync's continuous half -- see that
+    module's docstring). Returns None (no override, use the token's own
+    claims-derived roles unchanged) whenever Redis is unreachable or no
+    override is cached for this subject -- a cache-layer outage must
+    degrade to "trust the token's claims as issued," never to "deny
+    everyone" or block login entirely."""
+    from app.execution.dependencies import get_redis_pool  # deferred: avoids a hard app.execution import for callers (e.g. unit tests) that never exercise the SSO/directory-sync path
+
+    try:
+        raw = await asyncio.wait_for(get_redis_pool().get(f"{settings.directory_sync_override_key_prefix}:{subject}"), timeout=0.5)
+    except Exception:  # noqa: BLE001 - see docstring: a cache outage must not block authentication
+        logger.warning("Directory-sync override lookup failed for subject=%s; using token-claimed roles as-is.", subject, exc_info=True)
+        return None
+
+    if raw is None:
+        return None
+    try:
+        return [Role(v) for v in raw.split(",") if v]
+    except ValueError:
+        logger.error("Malformed directory-sync override cached for subject=%s: %r", subject, raw)
+        return None
 
 
 async def _local_verification_key(settings: Settings) -> str:
@@ -47,9 +72,20 @@ async def authenticate_token(token: str, settings: Settings) -> Principal | None
         logger.info("Token rejected: %s", exc)
         return None
 
+    roles = payload.roles
+    if payload.tenant_id is None:  # only external SSO / human principals go through directory sync
+        override = await _directory_sync_override(payload.sub, settings)
+        if override is not None:
+            if not override:
+                logger.warning("Directory-sync override for subject=%s revokes all roles; rejecting token.", payload.sub)
+                return None
+            roles = override
+
     return Principal(
         subject=payload.sub,
-        roles=payload.roles,
+        roles=roles,
         tenant_id=payload.tenant_id,
         token_id=payload.jti,
+        auth_time=payload.auth_time,
+        amr=payload.amr,
     )

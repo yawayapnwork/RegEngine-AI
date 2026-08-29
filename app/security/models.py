@@ -59,6 +59,14 @@ class TokenPayload(BaseModel):
     exp: dt.datetime
     jti: str = Field(..., description="Unique token id; enables server-side revocation lookups if ever needed.")
 
+    # OIDC step-up MFA support (app.security.step_up) -- populated for
+    # external SSO tokens (app.security.jwt._normalize_external_claims);
+    # absent/empty for self-issued Broker_API_Client tokens, which never
+    # go through step-up (machine credentials have no "MFA prompt" to
+    # step up to).
+    auth_time: dt.datetime | None = Field(None, description="OIDC `auth_time`: when the end-user last actively authenticated at the IdP.")
+    amr: list[str] = Field(default_factory=list, description="OIDC `amr` (RFC 8176): authentication methods used, e.g. ['pwd','otp'].")
+
     @field_validator("tenant_id")
     @classmethod
     def _tenant_id_required_for_broker(cls, v: str | None, info) -> str | None:
@@ -79,6 +87,8 @@ class Principal(BaseModel):
     roles: list[Role]
     tenant_id: str | None = None
     token_id: str
+    auth_time: dt.datetime | None = None
+    amr: list[str] = Field(default_factory=list)
 
     def has_role(self, *roles: Role) -> bool:
         return any(r in self.roles for r in roles)

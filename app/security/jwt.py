@@ -1,28 +1,36 @@
 """JWT issuance and validation.
 
-Two trusted issuers, by design:
+Trusted issuers, by design:
 
   1. Self-issued (`settings.jwt_issuer`) -- tokens this service itself
      mints for Broker_API_Client tenants via POST /v1/auth/token
-     (client_credentials grant). Signed with `jwt_algorithm` +
+     (client_credentials grant), and for human sessions bridged in from a
+     SAML assertion (app.api.saml_routes). Signed with `jwt_algorithm` +
      `jwt_secret_key` (HS256) or `jwt_private_key_pem` (RS256), both
      resolved through `app.security.secrets` (see that module) rather than
      read as plain settings in production.
-  2. External SSO (`settings.jwt_external_issuer`) -- tokens issued by the
-     enterprise identity provider (Okta/Azure AD/Keycloak/...) for human
-     Compliance_Officer / System_Admin users. Verified via that IdP's JWKS
-     endpoint (`settings.jwt_jwks_url`), never a locally-held secret --
-     this service never sees, and could not forge, a human's credentials.
+  2. External SSO -- one or more enterprise OIDC identity providers
+     (Okta, Azure AD / Microsoft Entra ID, PingIdentity; registry built by
+     app.security.sso_providers.build_sso_provider_registry) for human
+     Compliance_Officer / System_Admin users. Verified via each IdP's own
+     JWKS endpoint, never a locally-held secret -- this service never
+     sees, and could not forge, a human's credentials. The IdP's `groups`
+     claim is mapped to internal RBAC roles via
+     app.security.directory_sync (Automated Directory Sync) BEFORE the
+     claims are validated as a `TokenPayload` -- the roles a Principal
+     ends up with are this service's own mapping decision, never the raw
+     (and vocabulary-incompatible) claim an IdP happens to send.
 
 `decode_access_token` picks the verification path from the token's `iss`
 claim (checked BEFORE trusting anything else in it) and rejects any other
-issuer outright. A token that claims to be from neither issuer is not
-"maybe still valid" -- it is a forgery attempt or a misconfiguration, and
-both must fail closed.
+issuer outright. A token that claims to be from none of the configured
+issuers is not "maybe still valid" -- it is a forgery attempt or a
+misconfiguration, and both must fail closed.
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import logging
 import uuid
 from functools import lru_cache
@@ -31,7 +39,9 @@ import jwt
 from jwt import PyJWKClient
 
 from app.config import Settings
+from app.security.directory_sync import resolve_roles_from_groups
 from app.security.models import Role, TokenPayload
+from app.security.sso_providers import SSOProviderConfig, build_sso_provider_registry
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +119,59 @@ def create_access_token(
     return encoded, payload
 
 
+def _normalize_external_claims(claims: dict, provider: SSOProviderConfig, settings: Settings) -> dict:
+    """Transforms a verified-but-raw external IdP claim set into
+    something `TokenPayload` will accept, applying Automated Directory
+    Sync (Requirement 2) along the way. This is where an Okta/Azure AD/
+    PingIdentity token's IdP-specific shape gets reconciled with this
+    service's internal contract:
+
+      - `roles`: computed from the IdP's group claim via
+        app.security.directory_sync, NOT read from any `roles` claim the
+        IdP might happen to send (an IdP has no concept of this
+        application's RBAC vocabulary; trusting a claim named "roles"
+        from it would mean trusting whatever arbitrary string a
+        misconfigured app registration attached).
+      - `aud`: normalized to a single string -- some IdPs (Azure AD v1
+        tokens especially) can emit `aud` as a single-element list.
+      - `jti`: many IdPs' ID tokens omit a `jti` claim entirely (it is not
+        mandated by OIDC Core); synthesized deterministically from
+        `sub`+`iat`+`iss` when absent so `Principal.token_id` is always
+        populated for session/audit correlation, without ever inventing a
+        value that could collide with the IdP's own `jti` if it later
+        adds one.
+    """
+    groups = claims.get(provider.group_claim, []) or []
+    if isinstance(groups, str):
+        groups = [groups]
+    roles = resolve_roles_from_groups(groups, settings.sso_directory_group_role_map)
+
+    aud = claims.get("aud")
+    if isinstance(aud, list):
+        aud = aud[0] if aud else None
+
+    jti = claims.get("jti")
+    if not jti:
+        jti = hashlib.sha256(f"{claims.get('iss')}|{claims.get('sub')}|{claims.get('iat')}".encode()).hexdigest()
+
+    return {
+        "sub": claims.get("sub"),
+        "roles": [r.value for r in roles],
+        "tenant_id": None,  # external SSO principals are always human (Compliance_Officer/System_Admin), never tenant-scoped
+        "scope": claims.get("scope", "").split() if isinstance(claims.get("scope"), str) else (claims.get("scope") or []),
+        "iss": claims.get("iss"),
+        "aud": aud,
+        "iat": claims.get("iat"),
+        "exp": claims.get("exp"),
+        "jti": jti,
+        # Preserved for app.security.step_up's freshness check -- see
+        # that module for why `auth_time`/`amr` (not just token exp) is
+        # what step-up MFA actually gates on.
+        "auth_time": claims.get("auth_time"),
+        "amr": claims.get("amr", []) if isinstance(claims.get("amr"), list) else [],
+    }
+
+
 def decode_access_token(token: str, settings: Settings, *, local_verification_key: str) -> TokenPayload:
     """Validates signature, issuer, audience, and expiry, then parses
     claims through `TokenPayload` (so a structurally-invalid claim set --
@@ -123,6 +186,7 @@ def decode_access_token(token: str, settings: Settings, *, local_verification_ke
         raise TokenInvalidError("Malformed token.") from exc
 
     issuer = unverified.get("iss")
+    provider_registry = build_sso_provider_registry(settings)
 
     try:
         if issuer == settings.jwt_issuer:
@@ -133,15 +197,16 @@ def decode_access_token(token: str, settings: Settings, *, local_verification_ke
                 issuer=settings.jwt_issuer,
                 audience=settings.jwt_audience,
             )
-        elif settings.jwt_jwks_url and issuer == settings.jwt_external_issuer:
-            signing_key = _jwks_client(settings.jwt_jwks_url).get_signing_key_from_jwt(token)
-            claims = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=settings.jwt_external_algorithms,
-                issuer=settings.jwt_external_issuer,
-                audience=settings.jwt_audience,
-            )
+        elif issuer in provider_registry:
+            provider = provider_registry[issuer]
+            signing_key = _jwks_client(provider.jwks_url).get_signing_key_from_jwt(token)
+            decode_kwargs = {"algorithms": list(provider.algorithms), "issuer": provider.issuer}
+            if provider.audience:
+                decode_kwargs["audience"] = provider.audience
+            else:
+                decode_kwargs["options"] = {"verify_aud": False}
+            raw_claims = jwt.decode(token, signing_key.key, **decode_kwargs)
+            claims = _normalize_external_claims(raw_claims, provider, settings)
         else:
             raise TokenInvalidError(f"Unrecognized token issuer: {issuer!r}")
     except jwt.exceptions.ExpiredSignatureError as exc:

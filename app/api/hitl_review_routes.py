@@ -33,6 +33,7 @@ from app.execution.dependencies import get_policy_publisher
 from app.execution.policy_publisher import PolicyPublisher
 from app.security.dependencies import require_roles
 from app.security.models import Principal, Role
+from app.security.step_up import require_step_up_mfa
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/hitl-reviews", tags=["hitl-review-portal"])
@@ -98,6 +99,7 @@ async def approve_review(
     resolution: ReviewResolutionRequest,
     session: AsyncSession = Depends(get_db_session),
     principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER)),
+    _stepped_up: Principal = Depends(require_step_up_mfa),
     policy_publisher: PolicyPublisher = Depends(get_policy_publisher),
 ) -> HITLReview:
     """Approves the compiled policy this review concerns: activates its
@@ -110,7 +112,15 @@ async def approve_review(
     milliseconds, never a restart. Publishing happens AFTER the DB commit
     (not inside the same transaction): a Redis PUBLISH cannot be rolled
     back, so it must only ever fire once the approval it describes is
-    durably true, not before."""
+    durably true, not before.
+
+    Requires step-up MFA (app.security.step_up.require_step_up_mfa): a
+    valid Compliance_Officer token alone is not sufficient here -- the
+    token's underlying authentication event must also be recent and
+    MFA-satisfying (fresh `auth_time` + a qualifying `amr` value), since
+    this action activates a policy that governs live production trade
+    evaluation. `reject_review` below does not require step-up: declining
+    to activate something carries materially lower risk than approving it."""
     review = await _get_review_or_404(session, review_id)
     if review.status != "PENDING":
         raise HTTPException(

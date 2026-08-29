@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from app.api.analytics_routes import router as analytics_router
 from app.api.auth_routes import router as auth_router
+from app.api.saml_routes import router as saml_router
 from app.api.dlq_routes import router as dlq_router
 from app.api.execution_routes import router as execution_router
 from app.api.hitl_review_routes import router as hitl_review_router
@@ -36,6 +37,7 @@ from app.security.middleware import (
     JWTAuthenticationMiddleware,
     PayloadEncryptionMiddleware,
     SecurityHeadersMiddleware,
+    SessionManagementMiddleware,
     TenantRateLimitMiddleware,
 )
 
@@ -125,10 +127,11 @@ setup_tracing(app, settings)
 # Starlette runs middleware in the REVERSE of add_middleware() call order
 # (last added = outermost = runs first on the way in). Added here (bottom
 # to top) so the effective request path is:
-#   SecurityHeaders -> JWTAuthentication -> TenantRateLimit -> PayloadEncryption -> route
+#   SecurityHeaders -> JWTAuthentication -> SessionManagement -> TenantRateLimit -> PayloadEncryption -> route
 # See app/security/middleware.py's module docstring for why that order.
 app.add_middleware(PayloadEncryptionMiddleware, settings=settings)
 app.add_middleware(TenantRateLimitMiddleware, settings=settings, redis_client=get_redis_pool())
+app.add_middleware(SessionManagementMiddleware, settings=settings, redis_client=get_redis_pool())
 app.add_middleware(JWTAuthenticationMiddleware, settings=settings)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
@@ -138,6 +141,7 @@ app.include_router(router)
 app.include_router(execution_router)
 app.include_router(ingestion_router)
 app.include_router(auth_router)
+app.include_router(saml_router)
 app.include_router(hitl_review_router)
 app.include_router(dlq_router)
 app.include_router(sandbox_router)

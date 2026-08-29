@@ -50,6 +50,11 @@ bcrypt>=4.1
 # cryptography is already pulled in by pyjwt[crypto]; used directly by
 # app/security/crypto.py (AES-256-GCM) too.
 
+# Enterprise SSO (app/security/, app/api/saml_routes.py) -- only needed
+# when settings.saml_enabled=True; deferred-imported so a deployment
+# using only Okta/Azure AD/PingIdentity OIDC never needs this installed.
+# python3-saml>=1.16.0   # SAML_ENABLED=true
+
 # Secrets management backends (app/security/secrets.py) -- lazy-imported,
 # only the one selected via SECRETS_BACKEND needs to actually be installed;
 # uncomment whichever this deployment uses (both are harmless to install).

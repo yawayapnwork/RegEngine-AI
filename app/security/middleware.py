@@ -1,22 +1,25 @@
 """FastAPI/Starlette middleware stack: security headers + HTTPS enforcement,
-opportunistic JWT authentication, per-tenant rate limiting, and optional
-application-layer payload encryption.
+opportunistic JWT authentication, session-timeout enforcement, per-tenant
+rate limiting, and optional application-layer payload encryption.
 
 Mount order matters -- Starlette runs middleware in the REVERSE of the
 order passed to `add_middleware` (last added = outermost = runs first on
 the way in). `app/main.py` adds them so the effective request path is:
 
-    SecurityHeaders -> JWTAuthentication -> TenantRateLimit -> PayloadEncryption -> route
+    SecurityHeaders -> JWTAuthentication -> SessionManagement -> TenantRateLimit -> PayloadEncryption -> route
 
-JWTAuthentication runs before TenantRateLimit deliberately:
-`request.state.principal` must already be set (or None, for an
-unauthenticated/invalid-token request, which the limiter then keys by IP
-instead) by the time the rate limiter reads it -- reversing these two
-would make `TenantRateLimitMiddleware` key every request by IP regardless
-of tenant, silently defeating per-tenant isolation. PayloadEncryption runs
-last (closest to the route) since decrypting the body is only meaningful
-once a request has passed authentication and rate limiting; it also needs
-`request.state.principal.tenant_id` to pick the right decryption key,
+JWTAuthentication runs before SessionManagement deliberately: session
+timeout enforcement only makes sense for an already-authenticated human
+principal (`request.state.principal`) -- SessionManagement reads that,
+and downgrades it back to None (ending the request's authentication) if
+the session's idle or absolute timeout has been exceeded, exactly as if
+the token itself were invalid. SessionManagement runs before
+TenantRateLimit for the same reason JWTAuthentication does: a
+session-timed-out request must be keyed by IP for rate-limiting purposes,
+not treated as still-authenticated. PayloadEncryption runs last (closest
+to the route) since decrypting the body is only meaningful once a request
+has passed authentication, session validation, and rate limiting; it also
+needs `request.state.principal.tenant_id` to pick the right decryption key,
 which is available by then too. Security headers wrap everything,
 including error responses from any of the inner three.
 """
@@ -35,6 +38,7 @@ from app.config import Settings
 from app.security.auth import authenticate_token
 from app.security.crypto import PayloadDecryptionError, decrypt_payload, encrypt_payload
 from app.security.secrets import resolve_secret
+from app.security.session_manager import SessionExpiredError, SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +99,48 @@ class JWTAuthenticationMiddleware(BaseHTTPMiddleware):
         if auth_header.lower().startswith("bearer "):
             token = auth_header[len("bearer "):].strip()
             request.state.principal = await authenticate_token(token, self._settings)
+        return await call_next(request)
+
+
+class SessionManagementMiddleware(BaseHTTPMiddleware):
+    """Enforces strict idle + absolute session timeouts (Requirement 3)
+    for human principals, on top of whatever (possibly long) lifetime the
+    IdP issued the underlying token with -- see
+    app.security.session_manager's module docstring for the full design.
+
+    Broker_API_Client (machine) principals are exempt: a tenant_id-scoped
+    token represents a service credential re-authenticated per
+    client_credentials call (see POST /v1/auth/token), not an interactive
+    human session with an "idle browser tab" concept -- applying an idle
+    timeout to machine-to-machine traffic would just be an arbitrary
+    additional token-refresh requirement with no real security benefit
+    for that trust boundary (see app.security.models.Role's module
+    docstring on the three distinct trust boundaries this system has).
+
+    Runs only when `request.state.principal` is already set (by
+    JWTAuthenticationMiddleware, mounted outside this one) -- an
+    unauthenticated request has no session to manage and passes through
+    untouched, exactly as it does today.
+    """
+
+    def __init__(self, app: ASGIApp, settings: Settings, redis_client: redis.Redis) -> None:
+        super().__init__(app)
+        self._settings = settings
+        self._sessions = SessionManager(redis_client, settings.session_key_prefix)
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        principal = getattr(request.state, "principal", None)
+        if principal is not None and principal.tenant_id is None:
+            try:
+                await self._sessions.touch_or_create(principal, self._settings)
+            except SessionExpiredError as exc:
+                logger.info("Session %s expired (%s) for subject=%s.", principal.token_id, exc.reason, principal.subject)
+                request.state.principal = None
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Session expired.", "reason": exc.reason},
+                    headers={"WWW-Authenticate": 'Bearer error="invalid_token", error_description="session_expired"'},
+                )
         return await call_next(request)
 
 

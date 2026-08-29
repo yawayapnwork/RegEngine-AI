@@ -206,10 +206,102 @@ class Settings(BaseSettings):
     jwt_audience: str = "regengine-ai-api"
     jwt_access_token_ttl_seconds: int = 3600
     # External SSO (Compliance_Officer / System_Admin), verified via JWKS.
+    # Kept for backward compatibility with a single-IdP deployment; a
+    # multi-IdP deployment configures the named Okta/Azure AD/PingIdentity
+    # blocks below instead (app.security.sso_providers merges both into
+    # one provider registry, keyed by issuer).
     jwt_external_issuer: str | None = None
     jwt_jwks_url: str | None = None
     jwt_external_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
     tenant_client_key_prefix: str = "regengine:tenant_clients"
+
+    # --- Enterprise SSO: named identity providers (app.security.sso_providers) ---
+    # Each block is independently optional -- configure only the IdP(s)
+    # this deployment's institutional intermediaries actually use. All
+    # three are OIDC-compatible; `group_claim` is the ID token claim each
+    # IdP puts AD/directory group membership in (Okta and Azure AD both
+    # default to "groups" when group claims are enabled in the app
+    # registration/authorization server, but this is renamed often enough
+    # in practice that it stays configurable per IdP rather than assumed).
+    sso_okta_issuer: str | None = None  # e.g. "https://your-org.okta.com/oauth2/default"
+    sso_okta_jwks_url: str | None = None  # e.g. "https://your-org.okta.com/oauth2/default/v1/keys"
+    sso_okta_audience: str | None = None
+    sso_okta_group_claim: str = "groups"
+
+    sso_azure_ad_issuer: str | None = None  # e.g. "https://login.microsoftonline.com/{tenant_id}/v2.0"
+    sso_azure_ad_jwks_url: str | None = None  # e.g. "https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+    sso_azure_ad_audience: str | None = None  # the app registration's Application (client) ID
+    sso_azure_ad_group_claim: str = "groups"
+
+    sso_pingidentity_issuer: str | None = None
+    sso_pingidentity_jwks_url: str | None = None
+    sso_pingidentity_audience: str | None = None
+    sso_pingidentity_group_claim: str = "groups"
+
+    sso_external_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
+
+    # --- Automated Directory Sync: AD/Okta/Azure AD group -> RBAC role ---
+    # Evaluated on every token decode (claims-based, zero-latency, the
+    # standard OIDC pattern) -- see app.security.directory_sync. The
+    # supplementary periodic API-polling sync
+    # (app.security.directory_sync_job) additionally catches a group
+    # membership CHANGE taking effect before a long-lived token's natural
+    # expiry, by writing proactive per-subject role overrides here.
+    sso_directory_group_role_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "SEBI_Compliance_Team": "Compliance_Officer",
+            "IT_Audit_Group": "System_Admin",
+        },
+        description="IdP group name -> app.security.models.Role value.",
+    )
+    directory_sync_override_key_prefix: str = "regengine:directory_sync_override"
+    directory_sync_poll_interval_seconds: int = 900  # 15 min
+    celery_security_queue: str = "regengine_security"
+
+    # Okta/Azure AD directory APIs, used only by the supplementary polling
+    # sync job (scripts/sso and app.security.directory_sync_job), never by
+    # the request-time auth path.
+    okta_org_url: str | None = None  # e.g. "https://your-org.okta.com"
+    okta_api_token: str | None = None
+    azure_ad_tenant_id: str | None = None
+    azure_ad_client_id: str | None = None
+    azure_ad_client_secret: str | None = None
+
+    # --- Session Management & Step-Up MFA ---
+    session_key_prefix: str = "regengine:sessions"
+    # Idle timeout: no activity for this long ends the session even though
+    # the underlying JWT hasn't expired yet -- the actual "strict session
+    # timeout" enterprise SSO deployments expect, independent of whatever
+    # (possibly long) lifetime the IdP issued the token with.
+    session_idle_timeout_seconds: int = 15 * 60
+    # Absolute timeout: a session is force-ended this long after login
+    # regardless of activity, bounding how long a stolen/left-open session
+    # can ever be used for.
+    session_absolute_timeout_seconds: int = 8 * 3600
+    # Step-up MFA freshness window: an authentication event (`auth_time`/
+    # `amr` claim, or a session's own recorded MFA timestamp) older than
+    # this is no longer considered "fresh enough" to authorize a
+    # high-privilege operation (e.g. approving a compiled OPA policy) --
+    # the caller must re-authenticate with the IdP (a fresh MFA prompt)
+    # first. See app.security.step_up.
+    step_up_mfa_max_age_seconds: int = 5 * 60
+    # OIDC AMR (Authentication Methods Reference, RFC 8176) values treated
+    # as satisfying MFA -- "pwd" alone (password only) never counts.
+    step_up_required_amr_values: list[str] = Field(
+        default_factory=lambda: ["mfa", "otp", "hwk", "swk", "sms", "face", "fpt"]
+    )
+    step_up_redirect_base_url: str | None = None  # IdP re-auth URL template surfaced to the client on a 401 step-up challenge
+
+    # --- SAML 2.0 (app.api.saml_routes, via python3-saml) ---
+    saml_enabled: bool = False
+    saml_sp_entity_id: str = "https://regengine.internal/saml/metadata"
+    saml_sp_acs_url: str = "https://regengine.internal/v1/auth/saml/acs"
+    saml_idp_entity_id: str | None = None
+    saml_idp_sso_url: str | None = None
+    saml_idp_x509_cert: str | None = None  # IdP's public signing certificate (PEM, no header/footer needed by python3-saml)
+    saml_sp_x509_cert: str | None = None  # only required if this SP signs its own AuthnRequests
+    saml_sp_private_key: str | None = None
+    saml_group_attribute_name: str = "http://schemas.xmlsoap.org/claims/Group"  # ADFS/AD FS default; override per IdP
 
     # --- Security: secrets management backend ---
     secrets_backend: str = "env"  # "env" | "aws" | "vault" -- see app/security/secrets.py
