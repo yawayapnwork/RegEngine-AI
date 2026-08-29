@@ -13,6 +13,7 @@ import logging
 from app.execution.models import EvaluationResult, PolicyOutcome, TransactionPayload
 from app.ledger.models import ComplianceEvaluationEvent, EvaluationOutcome
 from app.ledger.service import LedgerService
+from app.observability.metrics import AUDIT_LEDGER_WRITE_FAILURES_TOTAL
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ async def log_evaluation(ledger: LedgerService, transaction: TransactionPayload,
         try:
             await ledger.append_entry(event)
         except Exception:  # noqa: BLE001
+            AUDIT_LEDGER_WRITE_FAILURES_TOTAL.inc()
             logger.exception(
                 "Failed to append audit ledger entry for transaction_id=%s rule_id=%s",
                 transaction.transaction_id,

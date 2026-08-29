@@ -1,0 +1,109 @@
+# =============================================================================
+# Distributed Locust load generation + observability stack for the
+# RegEngine AI OPA-evaluation breakpoint test.
+#
+# A single Locust process (even with FastHttpUser + gevent) tops out well
+# short of 10,000 rps -- distributed mode (one master, N workers, each on
+# its own CPU core/machine) is required. Scale `locust-worker` to as many
+# replicas as your load-generation hardware has cores; each worker should
+# get its own core to avoid gevent contention skewing latency measurements
+# of the SYSTEM UNDER TEST rather than the load generator itself.
+#
+# This compose file does NOT run RegEngine AI itself -- point
+# TARGET_HOST at wherever the system under test is already deployed
+# (the main docker-compose.yml stack, a staging cluster, etc). Load-testing
+# from a different host than the target is strongly preferred so the load
+# generator's own CPU/network use never contends with the target's.
+# =============================================================================
+
+version: "3.8"
+
+services:
+  locust-master:
+    image: locustio/locust:2.29.1
+    container_name: loadtest-locust-master
+    ports:
+      - "8089:8089"   # Locust web UI
+    volumes:
+      - ./:/mnt/loadtest:ro
+      - ./reports:/mnt/loadtest/reports
+    working_dir: /mnt/loadtest
+    command: >
+      -f locustfile.py,shapes.py
+      --master
+      --host ${TARGET_HOST:-http://host.docker.internal:8000}
+    environment:
+      LOADTEST_TENANTS_CONFIG: /mnt/loadtest/tenants_config.yaml
+    networks:
+      - loadtest-net
+
+  locust-worker:
+    image: locustio/locust:2.29.1
+    volumes:
+      - ./:/mnt/loadtest:ro
+    working_dir: /mnt/loadtest
+    command: >
+      -f locustfile.py,shapes.py
+      --worker
+      --master-host locust-master
+    environment:
+      LOADTEST_TENANTS_CONFIG: /mnt/loadtest/tenants_config.yaml
+    deploy:
+      replicas: 8   # scale to available load-generator CPU cores
+    depends_on:
+      - locust-master
+    networks:
+      - loadtest-net
+
+  # --- Observability: scrapes the SYSTEM UNDER TEST, not the load
+  # generator. Point these at the target environment's exporters. ---
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: loadtest-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    networks:
+      - loadtest-net
+
+  # Redis exporter for the TARGET environment's Redis (policy registry /
+  # HITL queue / rate-limit / L2 cache backing store) -- "Redis cache
+  # saturation" (requirement 2) needs real memory/ops/connection metrics,
+  # which app-level counters alone can't provide.
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: loadtest-redis-exporter
+    environment:
+      REDIS_ADDR: ${TARGET_REDIS_URL:-redis://host.docker.internal:6379}
+    ports:
+      - "9121:9121"
+    networks:
+      - loadtest-net
+
+  # Container-level CPU/memory for the target's API/worker containers
+  # (requirement 2's "CPU/Memory throughput"). Only meaningful when the
+  # target is running on the same Docker host as this exporter -- for a
+  # remote/k8s target, point Prometheus at that environment's existing
+  # cAdvisor/kube-state-metrics/node-exporter instead and skip this
+  # service entirely.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: loadtest-cadvisor
+    ports:
+      - "8085:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - loadtest-net
+
+networks:
+  loadtest-net:
+    driver: bridge

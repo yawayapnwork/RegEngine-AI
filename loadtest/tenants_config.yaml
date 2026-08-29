@@ -1,0 +1,59 @@
+# Multi-tenant broker configuration for the load test. `weight` is the
+# relative share of simulated traffic this tenant should receive --
+# modeled after a realistic market-intermediary mix (a handful of large
+# full-service brokers generating most order flow, a long tail of smaller
+# discount brokers each generating little) rather than uniform load across
+# tenants, since a real spike in production is never evenly distributed.
+#
+# client_secret values here are load-test fixtures only -- never reuse
+# these against a real environment. `provision_tenants.py` registers them
+# into the target environment's TenantClientStore (Redis) before a run.
+
+tenants:
+  - tenant_id: "INZ0001001"
+    client_id: "loadtest-inz0001001"
+    client_secret: "loadtest-secret-inz0001001-CHANGE-ME"
+    display_name: "Large Full-Service Broker A"
+    weight: 25
+
+  - tenant_id: "INZ0001002"
+    client_id: "loadtest-inz0001002"
+    client_secret: "loadtest-secret-inz0001002-CHANGE-ME"
+    display_name: "Large Full-Service Broker B"
+    weight: 20
+
+  - tenant_id: "INZ0001003"
+    client_id: "loadtest-inz0001003"
+    client_secret: "loadtest-secret-inz0001003-CHANGE-ME"
+    display_name: "Mid-Size Broker C"
+    weight: 15
+
+  - tenant_id: "INZ0001004"
+    client_id: "loadtest-inz0001004"
+    client_secret: "loadtest-secret-inz0001004-CHANGE-ME"
+    display_name: "Mid-Size Broker D"
+    weight: 15
+
+  - tenant_id: "INZ0001005"
+    client_id: "loadtest-inz0001005"
+    client_secret: "loadtest-secret-inz0001005-CHANGE-ME"
+    display_name: "Discount Broker E"
+    weight: 8
+
+  - tenant_id: "INZ0001006"
+    client_id: "loadtest-inz0001006"
+    client_secret: "loadtest-secret-inz0001006-CHANGE-ME"
+    display_name: "Discount Broker F"
+    weight: 7
+
+  - tenant_id: "INZ0001007"
+    client_id: "loadtest-inz0001007"
+    client_secret: "loadtest-secret-inz0001007-CHANGE-ME"
+    display_name: "Discount Broker G"
+    weight: 5
+
+  - tenant_id: "INZ0001008"
+    client_id: "loadtest-inz0001008"
+    client_secret: "loadtest-secret-inz0001008-CHANGE-ME"
+    display_name: "Discount Broker H"
+    weight: 5

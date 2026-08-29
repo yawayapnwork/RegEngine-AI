@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RegEngine AI Load Test Report -- ${run_id}</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; color: #1a1a1a; background: #fafafa; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  .verdict { display: inline-block; padding: 0.4rem 1rem; border-radius: 6px; font-weight: 600; font-size: 1.1rem; }
+  .pass { background: #d4edda; color: #155724; }
+  .fail { background: #f8d7da; color: #721c24; }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+  th, td { border: 1px solid #ddd; padding: 0.5rem 0.75rem; text-align: left; font-size: 0.92rem; }
+  th { background: #f0f0f0; }
+  .gate-pass { color: #155724; font-weight: 600; }
+  .gate-fail { color: #721c24; font-weight: 600; }
+  .note { color: #666; font-size: 0.85rem; }
+  .meta { color: #555; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+  <h1>RegEngine AI &mdash; OPA Evaluation Endpoint Load Test Report</h1>
+  <p class="meta">
+    Run ID: <strong>${run_id}</strong> &middot;
+    Window: ${window_start} &rarr; ${window_end} &middot;
+    Generated: ${generated_at}
+  </p>
+
+  <p>Overall verdict:
+    <span class="verdict ${verdict_class}">${verdict_label}</span>
+  </p>
+
+  <h2>Hard SLA Gates (Requirement 3)</h2>
+  <table>
+    <tr><th>Gate</th><th>Result</th><th>Observed</th><th>Threshold</th><th>Note</th></tr>
+    <tr>
+      <td>p99 OPA evaluation latency</td>
+      <td class="${p99_gate_class}">${p99_gate_label}</td>
+      <td>p50=${p50_latency_ms} ms / p95=${p95_latency_ms} ms / p99=${p99_latency_ms} ms</td>
+      <td>&lt; 10 ms (p99)</td>
+      <td class="note">Server-side (app.execution.opa_engine), not client-observed.</td>
+    </tr>
+    <tr>
+      <td>Zero dropped audit logs</td>
+      <td class="${ledger_gate_class}">${ledger_gate_label}</td>
+      <td>${ledger_failures} failure(s) during window</td>
+      <td>0</td>
+      <td class="note">audit_ledger_write_failures_total delta over the run.</td>
+    </tr>
+  </table>
+
+  <h2>Client-Observed Throughput &amp; Latency (Locust)</h2>
+  <table>
+    <tr><th>Metric</th><th>Value</th></tr>
+    <tr><td>Total requests</td><td>${locust_request_count}</td></tr>
+    <tr><td>Failures</td><td>${locust_failure_count}</td></tr>
+    <tr><td>Achieved throughput</td><td>${locust_rps} req/s</td></tr>
+    <tr><td>Median response time</td><td>${locust_median_ms} ms</td></tr>
+    <tr><td>p95 response time</td><td>${locust_p95_ms} ms</td></tr>
+    <tr><td>p99 response time</td><td>${locust_p99_ms} ms</td></tr>
+  </table>
+  <p class="note">These figures include network/TLS/FastAPI-stack overhead end to end -- they are a real user-facing latency number, but are not what the &lt;10ms SLA above is measured against.</p>
+
+  <h2>Informational: Resource Saturation</h2>
+  <table>
+    <tr><th>Signal</th><th>Value</th><th>Note</th></tr>
+    <tr><td>Policy cache hit ratio</td><td>${cache_hit_ratio_pct}%</td><td>app.execution.policy_cache L1 in-process cache</td></tr>
+    <tr><td>Redis memory used</td><td>${redis_memory_mb} MB</td><td>${redis_saturation_note}</td></tr>
+    <tr><td>Redis connected clients</td><td>${redis_connected_clients}</td><td></td></tr>
+    <tr><td>Target container CPU (cores)</td><td>${container_cpu_cores}</td><td>${cpu_saturation_note}</td></tr>
+    <tr><td>Target container memory</td><td>${container_memory_mb} MB</td><td></td></tr>
+  </table>
+
+  <h2>Raw Analysis JSON</h2>
+  <pre style="background:#fff; border:1px solid #ddd; padding:1rem; overflow-x:auto; font-size:0.8rem;">${raw_json}</pre>
+</body>
+</html>

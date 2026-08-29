@@ -137,6 +137,30 @@ LLM_TOKENS_TOTAL = Counter(
     registry=REGISTRY,
 )
 
+# --- Load-test / breakpoint-analysis support metrics ---
+# (loadtest/breakpoint_analysis.py's pass/fail gates read these two
+# directly.) Neither existed before load testing needed a concrete signal
+# for "is the audit ledger silently dropping writes" and "is the L1 policy
+# cache actually absorbing load" -- both were previously observable only
+# via application logs / in-process counters with no external visibility.
+
+AUDIT_LEDGER_WRITE_FAILURES_TOTAL = Counter(
+    "audit_ledger_write_failures_total",
+    "Count of ComplianceEvaluationEvent appends that raised instead of committing "
+    "(app.ledger.integration.log_evaluation). Every evaluation response is already "
+    "final by the time this fires -- see that function's docstring -- so this "
+    "counter is the ONLY signal that a compliance decision's audit trail entry "
+    "was lost. Must be zero under any load-test breakpoint.",
+    registry=REGISTRY,
+)
+
+POLICY_CACHE_LOOKUP_TOTAL = Counter(
+    "policy_cache_lookup_total",
+    "L1 in-process policy cache lookups by outcome (app.execution.policy_cache.PolicyCache.policies_for).",
+    labelnames=("outcome",),  # "hit" | "miss"
+    registry=REGISTRY,
+)
+
 _HALLUCINATION_FINDING_TYPES = frozenset({FindingType.HALLUCINATED_THRESHOLD, FindingType.HALLUCINATED_ENTITY})
 
 

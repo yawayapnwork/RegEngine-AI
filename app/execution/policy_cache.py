@@ -30,6 +30,8 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.observability.metrics import POLICY_CACHE_LOOKUP_TOTAL
+
 
 class PolicyLookup(Protocol):
     """The interface `Evaluator` actually depends on. Both `PolicyCache`
@@ -59,9 +61,11 @@ class PolicyCache:
         now = time.monotonic()
         if entry is not None and (now - entry.cached_at) < self._ttl:
             self.hits += 1
+            POLICY_CACHE_LOOKUP_TOTAL.labels(outcome="hit").inc()
             return entry.policies
 
         self.misses += 1
+        POLICY_CACHE_LOOKUP_TOTAL.labels(outcome="miss").inc()
         policies = await self._registry.policies_for(entity_type)
         self._entries[entity_type] = _CacheEntry(policies=policies, cached_at=now)
         return policies

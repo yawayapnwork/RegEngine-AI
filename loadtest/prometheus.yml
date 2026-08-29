@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # RegEngine AI's own /metrics (app.main's endpoint, backed by
+  # app.observability.metrics.REGISTRY) -- the source of
+  # opa_policy_evaluation_duration_seconds, audit_ledger_write_failures_total,
+  # and policy_cache_lookup_total that breakpoint_analysis.py gates on.
+  #
+  # NOTE: Prometheus's own YAML does not support ${VAR} substitution --
+  # edit the target below to point at your actual system-under-test
+  # host:port before starting this stack (or run this file through
+  # `envsubst` yourself and mount the rendered output instead).
+  - job_name: "regengine-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+
+  - job_name: "redis-exporter"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
