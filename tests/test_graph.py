@@ -144,6 +144,36 @@ class TestSyncPipeline:
         assert not any("Penalty" in q for q in queries)
         assert not any("referenced:Clause" in q for q in queries)
 
+    async def test_supersession_auto_detection_disabled_by_default(self) -> None:
+        session = _FakeSession()
+        audited = _approved_margin_rule()
+        clause_text = "Clause 4.2.b hereby supersedes Clause 1.1 of the Master Circular SEBI/HO/MIRSD/2020/01."
+
+        await sync_audited_rule_to_graph(session, audited, clause_text=clause_text)
+
+        queries = [q for q, _ in session.calls]
+        assert not any("SUPERSEDES" in q for q in queries)
+
+    async def test_supersession_auto_detection_writes_flagged_edge_when_enabled(self) -> None:
+        from app.config import get_settings
+
+        session = _FakeSession()
+        audited = _approved_margin_rule()
+        clause_text = "Clause 4.2.b hereby supersedes Clause 1.1 of the Master Circular SEBI/HO/MIRSD/2020/01."
+        settings = get_settings().model_copy(update={"supersession_auto_detection_enabled": True})
+
+        await sync_audited_rule_to_graph(session, audited, clause_text=clause_text, settings=settings)
+
+        queries_and_params = session.calls
+        edge_call = next((p for q, p in queries_and_params if "MERGE (cl)-[r:SUPERSEDES]->(target)" in q), None)
+        assert edge_call is not None
+        assert edge_call["confidence"] == 0.8
+        assert "SEBI/HO/MIRSD/2020/01" in edge_call["basis_text"]
+
+        target_stub_call = next(p for q, p in queries_and_params if "MERGE (target:Clause" in q)
+        assert target_stub_call["target_clause_number_value"] == "1.1"
+        assert target_stub_call["target_circular_number"] == "SEBI/HO/MIRSD/2020/01"
+
 
 @pytest.mark.asyncio
 class TestConflictDetection:

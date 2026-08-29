@@ -136,3 +136,38 @@ async def index_chunks(
         return IndexResponse(collection=settings.qdrant_collection, upserted=upserted, skipped_duplicates=skipped)
     finally:
         await client.close()
+
+
+async def vector_search(
+    query_text: str,
+    settings: Settings,
+    *,
+    top_k: int = 5,
+    client: AsyncQdrantClient | None = None,
+) -> list[dict]:
+    """Plain dense-vector search -- the "vector half" of
+    app.retrieval.hybrid_search's hybrid pipeline, kept here (rather
+    than in app.retrieval) since it's a thin wrapper over this module's
+    own client/embedding plumbing and nothing else.
+
+    Returns each hit's full payload (see `_chunk_payload`) plus a
+    `score` key, ordered by descending cosine similarity. Accepts an
+    already-open `client` (e.g. an embedded `AsyncQdrantClient(location=":memory:")`
+    in tests) so callers making several searches, or hybrid_search
+    combining this with a graph traversal in the same request, don't
+    pay for a new connection per call.
+    """
+    owns_client = client is None
+    client = client or _get_client(settings)
+    try:
+        [vector] = await embed_texts([query_text], settings)
+        hits = await client.query_points(
+            collection_name=settings.qdrant_collection,
+            query=vector,
+            limit=top_k,
+            with_payload=True,
+        )
+        return [{**point.payload, "score": point.score} for point in hits.points]
+    finally:
+        if owns_client:
+            await client.close()

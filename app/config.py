@@ -53,6 +53,32 @@ class Settings(BaseSettings):
     neo4j_password: str = "changeme-dev-only"
     neo4j_database: str = "sebiregulations"
 
+    # --- Hybrid Graph-RAG retrieval (app.retrieval) ---
+    # Off by default: a deployment that never enables this gets plain
+    # Qdrant-only vector search (app.vectorstore.qdrant_store) unchanged --
+    # this only ADDS a graph-traversal expansion step on top, and requires
+    # neo4j_sync_enabled=True (graph traversal has nothing to traverse
+    # otherwise).
+    hybrid_retrieval_enabled: bool = False
+    # How many hops of SUPERSEDES/AMENDS/REFERENCES to follow outward from
+    # each vector-search hit. Kept small and explicit: SEBI amendment
+    # chains are rarely more than 2-3 circulars deep in practice, and an
+    # unbounded traversal on a densely cross-referenced clause could pull
+    # in a large, low-relevance neighborhood.
+    hybrid_retrieval_graph_depth: int = 2
+    # Upper bound on graph-expanded clauses added to a single query's
+    # results, independent of vector top_k -- caps worst-case Neo4j
+    # traversal fan-out and downstream LLM context size.
+    hybrid_retrieval_max_graph_hits: int = 20
+    # Clause-level auto-detection of supersession/amendment language
+    # (app.graph.supersession_extractor), wired into
+    # app.graph.sync.sync_audited_rule_to_graph. Deliberately a SEPARATE
+    # flag from neo4j_sync_enabled: a deployment can sync clauses to the
+    # graph without trusting an automated (if flagged auto_detected=true)
+    # supersession claim, and vice versa is meaningless (this only ever
+    # fires from inside the sync path).
+    supersession_auto_detection_enabled: bool = False
+
     # --- Compliance rule extraction (CrewAI dual-agent pipeline) ---
     anthropic_api_key: str | None = None
     agent_verbose: bool = False

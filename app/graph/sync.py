@@ -24,8 +24,10 @@ from neo4j import AsyncSession
 
 from app.agents.schemas import AuditedComplianceRule, AuditVerdict, ExtractedComplianceRule
 from app.compiler.naming import metric_field_name
+from app.config import Settings, get_settings
 from app.graph.penalty_detector import detect_penalty
 from app.graph.reference_extractor import extract_referenced_clause_numbers
+from app.graph.supersession_extractor import detect_supersessions
 from app.regulatory.taxonomy import resolve_domain
 
 logger = logging.getLogger(__name__)
@@ -92,6 +94,34 @@ MATCH (cl:Clause {clause_id: $clause_id}), (referenced:Clause {clause_id: $refer
 MERGE (cl)-[:REFERENCES]->(referenced)
 """
 
+# Target circular for an auto-detected clause-level supersession/amendment
+# may not have been ingested yet (the whole point of detecting it at
+# ingestion time of the NEW clause) -- MERGE-create it exactly like
+# _MERGE_REFERENCED_CLAUSE_STUB does, reusing the same is_stub convention.
+_MERGE_SUPERSESSION_TARGET_CIRCULAR_STUB = """
+MERGE (old:Circular {circular_number: $target_circular_number})
+ON CREATE SET old.is_stub = true, old.created_at = datetime()
+"""
+
+_MERGE_SUPERSESSION_TARGET_CLAUSE_STUB = """
+MATCH (old:Circular {circular_number: $target_circular_number})
+MERGE (target:Clause {clause_id: $target_clause_id})
+ON CREATE SET target.clause_number = $target_clause_number_value,
+               target.circular_number = $target_circular_number, target.is_stub = true
+MERGE (old)-[:CONTAINS]->(target)
+"""
+
+# `rel_type` is one of the fixed, code-controlled strings "SUPERSEDES" /
+# "AMENDS" from SupersessionRelationshipType -- never user/LLM-supplied
+# text -- so interpolating it into the Cypher relationship type here does
+# not admit injection the way interpolating a $-parameter would.
+_MERGE_AUTO_DETECTED_EDGE_TEMPLATE = """
+MATCH (cl:Clause {{clause_id: $clause_id}}), (target:Clause {{clause_id: $target_clause_id}})
+MERGE (cl)-[r:{rel_type}]->(target)
+SET r.auto_detected = true, r.confidence = $confidence, r.basis_text = $basis_text,
+    r.target_circular_reference = $target_circular_reference, r.detected_at = datetime()
+"""
+
 
 def _stub_clause_id(circular_number: str, clause_number: str) -> str:
     """Referenced-but-not-yet-independently-extracted clauses have no
@@ -109,10 +139,20 @@ def _stub_clause_id(circular_number: str, clause_number: str) -> str:
     return f"stub:{circular_number}:{clause_number}"
 
 
+def _supersession_target_key(target_circular_number: str | None, target_circular_reference: str) -> str:
+    """A detected supersession claim names its target circular either by
+    a formal document number (the common, unambiguous case) or, when the
+    clause text cites it by title only (e.g. "the Master Circular on
+    Margin Requirements"), by that title phrase -- prefixed so a
+    title-keyed stub can never collide with a real circular_number."""
+    return target_circular_number or f"title:{target_circular_reference}"
+
+
 async def sync_audited_rule_to_graph(
     session: AsyncSession,
     audited: AuditedComplianceRule,
     clause_text: str | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """`clause_text`, when supplied, additionally populates REFERENCES
     edges and Penalty nodes (both need the raw text; `ExtractedComplianceRule`
@@ -180,6 +220,28 @@ async def sync_audited_rule_to_graph(
                 circular_number=rule.circular_number,
             )
             await session.run(_MERGE_REFERENCES_EDGE, clause_id=clause_id, referenced_clause_id=referenced_clause_id)
+
+        settings = settings or get_settings()
+        if settings.supersession_auto_detection_enabled:
+            for detection in detect_supersessions(clause_text):
+                target_key = _supersession_target_key(detection.target_circular_number, detection.target_circular_reference)
+                target_clause_id = _stub_clause_id(target_key, detection.target_clause_number)
+                await session.run(_MERGE_SUPERSESSION_TARGET_CIRCULAR_STUB, target_circular_number=target_key)
+                await session.run(
+                    _MERGE_SUPERSESSION_TARGET_CLAUSE_STUB,
+                    target_circular_number=target_key, target_clause_id=target_clause_id,
+                    target_clause_number_value=detection.target_clause_number,
+                )
+                await session.run(
+                    _MERGE_AUTO_DETECTED_EDGE_TEMPLATE.format(rel_type=detection.relationship_type.value),
+                    clause_id=clause_id, target_clause_id=target_clause_id,
+                    confidence=detection.confidence, basis_text=detection.basis_text,
+                    target_circular_reference=detection.target_circular_reference,
+                )
+                logger.info(
+                    "Auto-detected %s: clause_id=%s -> target_clause_id=%s (confidence=%.2f, auto_detected=true)",
+                    detection.relationship_type.value, clause_id, target_clause_id, detection.confidence,
+                )
 
     logger.info(
         "Synced rule_id=%s to knowledge graph: clause=%s circular=%s entities=%s obligations=%d",
