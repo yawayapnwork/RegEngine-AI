@@ -508,6 +508,23 @@ class Settings(BaseSettings):
     celery_llm_ops_queue: str = "regengine_llm_ops"
     llm_cache_purge_interval_seconds: int = 3600  # hourly sweep of expired semantic-cache Qdrant points
 
+    # --- Zero-knowledge proof verification (app.zkp, app.api.zkp_routes) ---
+    # Lets a broker prove `collected_margin >= required_margin` (see
+    # zk/circuits/margin_compliance.circom) without ever sending the
+    # margin amount or client account identifier to this server. Off by
+    # default like every other optional subsystem this session added --
+    # a deployment that never onboards a zk-capable broker needs no
+    # verification keys configured and py_ecc's pairing arithmetic never
+    # runs.
+    zkp_enabled: bool = False
+    # circuit_id -> filesystem path to that circuit's snarkjs-exported
+    # verification_key.json (see zk/scripts/build_circuit.sh's step 4).
+    # A dict (not a single path) because a deployment may run more than
+    # one zk-provable rule concurrently as new circuits are added.
+    zkp_verification_keys: dict[str, str] = Field(
+        default_factory=lambda: {"margin_compliance_v1": "zk/build/verification_key.json"}
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

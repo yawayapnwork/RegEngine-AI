@@ -25,6 +25,7 @@ from app.api.ingestion_routes import router as ingestion_router
 from app.api.llm_cost_routes import router as llm_cost_router
 from app.api.routes import router
 from app.api.sandbox_routes import router as sandbox_router
+from app.api.zkp_routes import router as zkp_router
 from app.config import get_settings
 from app.db.session import get_session_factory
 from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
@@ -155,6 +156,7 @@ app.include_router(diffing_router)
 app.include_router(explainability_router)
 app.include_router(incident_router)
 app.include_router(webhook_router)
+app.include_router(zkp_router)
 
 
 @app.exception_handler(ParsingError)

@@ -100,6 +100,14 @@ opentelemetry-instrumentation-sqlalchemy>=0.48b0
 opentelemetry-instrumentation-redis>=0.48b0
 prometheus-client>=0.20
 
+# Zero-knowledge proof verification (app.zkp) -- pure-Python BN254/alt_bn128
+# pairing arithmetic for verifying Groth16 proofs (app/zkp/groth16_verifier.py)
+# generated off-server by brokers via circom/snarkjs (zk/circuits/,
+# zk/scripts/) for zk/circuits/margin_compliance.circom. Only exercised when
+# settings.zkp_enabled=True; deferred-imported so a deployment that never
+# onboards a zk-capable broker doesn't need it.
+py_ecc>=8.0
+
 # Testing
 pytest>=8.2
 pytest-asyncio>=0.23
