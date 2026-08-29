@@ -15,6 +15,7 @@ from app.config import Settings
 from app.ingestion.exceptions import SourceFetchError
 from app.ingestion.http_client import SebiHttpClient
 from app.ingestion.models import DiscoveredDocument, SourceKind
+from app.regulatory.taxonomy import Regulator
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,12 @@ def _parse_datetime(raw: str | None) -> dt.datetime | None:
     return parsed
 
 
-async def poll_rss_feed(client: SebiHttpClient, feed_url: str) -> list[DiscoveredDocument]:
-    """Fetch and parse one RSS/Atom feed into discovered documents."""
+async def poll_rss_feed(client: SebiHttpClient, feed_url: str, regulator: Regulator = Regulator.SEBI) -> list[DiscoveredDocument]:
+    """Fetch and parse one RSS/Atom feed into discovered documents.
+    `regulator` is the caller's already-known answer (which regulator's
+    feed this URL belongs to, per app.ingestion.regulator_sources) --
+    stamped onto every resulting DiscoveredDocument rather than
+    re-detected from the entry text."""
     try:
         response = await client.get(feed_url)
     except SourceFetchError:
@@ -66,16 +71,18 @@ async def poll_rss_feed(client: SebiHttpClient, feed_url: str) -> list[Discovere
                 title=title,
                 published_at=_parse_datetime(published_raw),
                 circular_number=_extract_circular_number(title) or _extract_circular_number(link),
+                regulator=regulator,
             )
         )
-    logger.info("RSS feed %s yielded %d entries", feed_url, len(documents))
+    logger.info("RSS feed %s (%s) yielded %d entries", feed_url, regulator.value, len(documents))
     return documents
 
 
-async def poll_html_listing(client: SebiHttpClient, listing_url: str) -> list[DiscoveredDocument]:
-    """Fallback/supplement: scrape a SEBI HTML listing page directly for PDF
-    links. Used because the RSS feed can lag or omit master-circular
-    consolidation updates that don't fire a fresh "new circular" RSS entry.
+async def poll_html_listing(client: SebiHttpClient, listing_url: str, regulator: Regulator = Regulator.SEBI) -> list[DiscoveredDocument]:
+    """Fallback/supplement: scrape a regulator's HTML listing page directly
+    for PDF links. Used because an RSS feed can lag or omit
+    master-circular/master-direction consolidation updates that don't fire
+    a fresh "new document" RSS entry.
     """
     try:
         response = await client.get(listing_url)
@@ -110,24 +117,31 @@ async def poll_html_listing(client: SebiHttpClient, listing_url: str) -> list[Di
                 title=title,
                 published_at=published_at,
                 circular_number=_extract_circular_number(title) or _extract_circular_number(absolute_url),
+                regulator=regulator,
             )
         )
-    logger.info("HTML listing %s yielded %d PDF links", listing_url, len(documents))
+    logger.info("HTML listing %s (%s) yielded %d PDF links", listing_url, regulator.value, len(documents))
     return documents
 
 
 async def discover_all(client: SebiHttpClient, settings: Settings) -> list[DiscoveredDocument]:
-    """Poll every configured RSS feed and HTML listing page, merged and
-    de-duplicated by source URL (RSS entries win on conflict — they carry
-    more reliable publish timestamps)."""
+    """Poll every configured RSS feed and HTML listing page ACROSS EVERY
+    REGULATOR (app.ingestion.regulator_sources.REGULATOR_SOURCES), merged
+    and de-duplicated by source URL (RSS entries win on conflict -- they
+    carry more reliable publish timestamps). Two different regulators
+    never collide on the same source_url in practice (different domains),
+    so cross-regulator de-duplication is a non-issue here."""
+    from app.ingestion.regulator_sources import resolve_regulator_sources
+
     by_url: dict[str, DiscoveredDocument] = {}
 
-    for listing_url in settings.sebi_listing_page_urls:
-        for doc in await poll_html_listing(client, listing_url):
-            by_url[doc.source_url] = doc
+    for regulator, source_config in resolve_regulator_sources(settings).items():
+        for listing_url in source_config.listing_page_urls:
+            for doc in await poll_html_listing(client, listing_url, regulator):
+                by_url[doc.source_url] = doc
 
-    for feed_url in settings.sebi_rss_feed_urls:
-        for doc in await poll_rss_feed(client, feed_url):
-            by_url[doc.source_url] = doc  # RSS overwrites HTML-listing entry for the same URL
+        for feed_url in source_config.rss_feed_urls:
+            for doc in await poll_rss_feed(client, feed_url, regulator):
+                by_url[doc.source_url] = doc  # RSS overwrites HTML-listing entry for the same URL
 
     return list(by_url.values())

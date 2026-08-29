@@ -20,15 +20,18 @@ from app.config import Settings
 from app.models import BoundingBox, CircularMetadata, DocumentElement, ElementKind
 from app.parsing.exceptions import ExtractionBackendError, ParseTimeoutError, UnsupportedFileError
 from app.parsing.hierarchy import HierarchyTracker, detect_clause_number, is_footnote, is_section_header
+from app.regulatory.taxonomy import detect_regulator_and_document
 
 logger = logging.getLogger(__name__)
 
 _PDF_MAGIC = b"%PDF-"
 
-_CIRCULAR_NUMBER_RE = re.compile(
-    r"(SEBI/[A-Z\-]+(?:/[A-Z\-]+)*/\d{4}(?:[-/]\d{2,4})?/\d+|Circular\s+No\.?\s*[:\-]?\s*[\w/\-]+)",
-    re.IGNORECASE,
-)
+# Regulator-agnostic fallback: matches a generic "Circular No. ..." phrasing
+# when none of app.regulatory.taxonomy's regulator-specific document-number
+# patterns hit. Kept narrow (this exact phrasing) rather than widened,
+# since a looser generic pattern would start shadowing the more precise
+# regulator-specific patterns it's meant to be a fallback for.
+_GENERIC_DOC_NUMBER_RE = re.compile(r"Circular\s+No\.?\s*[:\-]?\s*[\w/\-]+", re.IGNORECASE)
 _ISSUE_DATE_RE = re.compile(
     r"(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})",
     re.IGNORECASE,
@@ -100,11 +103,20 @@ def _partition_with_tika(path: str, server_url: str) -> list[dict]:
     return out
 
 
-def _extract_metadata_from_elements(raw_elements: list[dict], filename: str | None) -> CircularMetadata:
+def _extract_metadata_from_elements(
+    raw_elements: list[dict], filename: str | None, source_tag: str | None = None
+) -> CircularMetadata:
     head_text = " \n".join(e["text"] for e in raw_elements[:40])
-    circular_number = None
-    if m := _CIRCULAR_NUMBER_RE.search(head_text):
-        circular_number = m.group(1).strip()
+
+    # `source_tag` (set by the ingestion routing layer -- see
+    # app.ingestion.regulator_sources -- when it already knows which
+    # regulator's feed a document was discovered from) takes precedence
+    # over text-sniffing; an ad-hoc upload with no source_tag falls back
+    # to detecting the regulator from the document-number pattern found
+    # in its own header text.
+    regulator, document_type, circular_number = detect_regulator_and_document(head_text, source_tag)
+    if circular_number is None and (m := _GENERIC_DOC_NUMBER_RE.search(head_text)):
+        circular_number = m.group(0).strip()
 
     issue_date = None
     if m := _ISSUE_DATE_RE.search(head_text):
@@ -122,6 +134,8 @@ def _extract_metadata_from_elements(raw_elements: list[dict], filename: str | No
         issue_date=issue_date,
         title=title,
         source_filename=filename,
+        regulator=regulator,
+        document_type=document_type,
     )
 
 
@@ -220,6 +234,7 @@ async def extract_pdf(
     source_path: Path,
     filename: str | None,
     settings: Settings,
+    source_tag: str | None = None,
 ) -> tuple[CircularMetadata, list[DocumentElement]]:
     """Extract layout-aware elements from a PDF, preferring Unstructured and
     falling back to Tika if the primary backend errors out."""
@@ -255,6 +270,6 @@ async def extract_pdf(
     if not raw_elements:
         raise ExtractionBackendError("Extraction produced zero elements; document may be scanned/unreadable.")
 
-    metadata = _extract_metadata_from_elements(raw_elements, filename)
+    metadata = _extract_metadata_from_elements(raw_elements, filename, source_tag)
     elements = _build_document_elements(raw_elements)
     return metadata, elements

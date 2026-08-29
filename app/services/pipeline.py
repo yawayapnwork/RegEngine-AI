@@ -35,7 +35,14 @@ async def parse_pdf_bytes(
     file_bytes: bytes,
     filename: str | None,
     settings: Settings | None = None,
+    source_tag: str | None = None,
 ) -> ParseResult:
+    """`source_tag` identifies which regulator's feed this document came
+    from (e.g. "rbi", "irdai") when known at call time -- the ingestion
+    pipeline (app.ingestion.regulator_sources) always supplies it; an
+    ad-hoc manual upload through the API leaves it None and the extractor
+    falls back to detecting the regulator from the document's own header
+    text (app.regulatory.taxonomy.detect_regulator_and_document)."""
     settings = settings or get_settings()
     warnings: list[str] = []
 
@@ -50,6 +57,7 @@ async def parse_pdf_bytes(
                     file_bytes=file_bytes,
                     source_path=tmp_path,
                     filename=filename,
+                    source_tag=source_tag,
                     settings=settings,
                 )
             except ParsingError:

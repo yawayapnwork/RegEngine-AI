@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.regulatory.taxonomy import DocumentType, Regulator
+
 
 class ElementKind(str, Enum):
     TITLE = "title"
@@ -38,14 +40,25 @@ class DocumentElement(BaseModel):
 
 
 class CircularMetadata(BaseModel):
-    """Header-level metadata for a SEBI Master Circular, either supplied by the
-    caller or inferred from the first page during extraction."""
+    """Header-level metadata for a regulatory document (SEBI circular, RBI
+    Master Direction, IRDAI regulation, PFRDA circular, ...), either
+    supplied by the caller or inferred from the first page during
+    extraction. The field name `circular_number` predates multi-regulator
+    support and is kept for backward compatibility -- it now holds
+    whichever document-numbering convention `regulator` actually uses
+    (an RBI Master Direction number, an IRDAI regulation number, etc.),
+    not literally a SEBI circular number. `regulator` and `document_type`
+    are what app.compiler.naming and app.agents.crew key their
+    regulator-specific behavior off of -- see app.regulatory.taxonomy for
+    the full taxonomy and detection logic."""
 
     circular_number: str | None = None
     issue_date: dt.date | None = None
     title: str | None = None
     source_filename: str | None = None
     department: str | None = None
+    regulator: Regulator = Regulator.SEBI
+    document_type: DocumentType = DocumentType.CIRCULAR
 
 
 class ClauseChunk(BaseModel):
@@ -65,6 +78,8 @@ class ClauseChunk(BaseModel):
     circular_number: str | None = None
     issue_date: dt.date | None = None
     source_filename: str | None = None
+    regulator: Regulator = Regulator.SEBI
+    document_type: DocumentType = DocumentType.CIRCULAR
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

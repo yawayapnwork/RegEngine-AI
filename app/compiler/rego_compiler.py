@@ -17,9 +17,12 @@ Every generated module assumes evaluation-time input of the shape:
 `metric` + `unit` via `naming.metric_field_name`, so the caller building the
 `input` document only needs the same slugging convention, not this module.
 
-Generated structure (modern Rego, `import rego.v1`):
+Generated structure (modern Rego, `import rego.v1`), namespaced by
+regulator and domain -- see app.regulatory.taxonomy and policies/README.md
+for the full multi-regulator layout (`data.sebi.broking.*`,
+`data.rbi.lending.*`, `data.irdai.underwriting.*`, `data.pfrda.pension.*`, ...):
 
-    package sebi.circulars.<circular>.clause_<clause>
+    package <regulator>.<domain>.circulars.<circular>.clause_<clause>
 
     import rego.v1
 
@@ -56,6 +59,7 @@ import json
 from app.agents.schemas import ComparisonOperator, ExtractedComplianceRule, NumericalThreshold
 from app.compiler.models import CompiledRego
 from app.compiler.naming import clause_slug, circular_slug, metric_field_name, rego_package_name
+from app.regulatory.taxonomy import resolve_domain
 
 _INDENT = "    "
 
@@ -137,7 +141,9 @@ def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
     if not rule.deterministic_logic:
         raise ValueError(f"Rule {rule.rule_id} has no deterministic_logic to compile.")
 
-    package = rego_package_name(rule.circular_number, rule.clause_number)
+    primary_entity = rule.target_entities[0].normalized_entity if rule.target_entities else None
+    domain = rule.regulatory_domain or resolve_domain(rule.regulator, primary_entity)
+    package = rego_package_name(rule.regulator, domain, rule.circular_number, rule.clause_number)
     clause = rule.clause_number or "unscoped"
     entity_guard = _entity_guard(rule)
 

@@ -15,6 +15,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.regulatory.taxonomy import Regulator
+
 
 # --------------------------------------------------------------------------
 # Extraction Agent output
@@ -97,6 +99,19 @@ class ExtractedComplianceRule(BaseModel):
     circular_number: str | None = None
     clause_number: str | None = None
     section_path: list[str] = Field(default_factory=list)
+
+    # Set deterministically from the source ClauseChunk's own regulator
+    # field (app.regulatory.taxonomy, resolved at ingestion time) by the
+    # pipeline that builds this object -- never by the extraction LLM
+    # itself. See app.agents.pipeline: an LLM guessing its own regulator
+    # from clause text alone risks misrouting a policy into the wrong
+    # namespace on a clause with no clear regulator marker; ingestion
+    # already knows this deterministically from which feed the source
+    # document came from.
+    regulator: Regulator = Regulator.SEBI
+    regulatory_domain: str | None = Field(
+        None, description="Rego namespace domain segment (e.g. 'broking', 'lending') -- resolved via app.regulatory.taxonomy.resolve_domain once target_entities is known."
+    )
 
     target_entities: list[TargetEntity] = Field(default_factory=list)
     trigger_conditions: list[TriggerCondition] = Field(default_factory=list)

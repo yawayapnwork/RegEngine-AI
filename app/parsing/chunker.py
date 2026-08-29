@@ -160,6 +160,8 @@ def chunk_elements(
                     circular_number=metadata.circular_number,
                     issue_date=metadata.issue_date,
                     source_filename=metadata.source_filename,
+                    regulator=metadata.regulator,
+                    document_type=metadata.document_type,
                     extra={"fragment_index": idx, "fragment_count": len(fragments)},
                 )
             )

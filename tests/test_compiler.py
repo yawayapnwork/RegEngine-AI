@@ -23,6 +23,7 @@ from app.compiler.models import HITLReasonCode, HITLSeverity
 from app.compiler.naming import metric_field_name, rego_package_name
 from app.compiler.pipeline import compile_audited_rule
 from app.compiler.rego_compiler import compile_rule_to_rego
+from app.regulatory.taxonomy import Regulator
 
 
 def _approved_audit(rule_id: str) -> ComplianceRuleAudit:
@@ -68,17 +69,27 @@ def test_metric_field_name_derivation() -> None:
 
 
 def test_rego_package_name() -> None:
-    assert rego_package_name("SEBI/HO/MRD/2024/1", "2.1.b") == "sebi.circulars.sebi_ho_mrd_2024_1.clause_2_1_b"
+    assert (
+        rego_package_name(Regulator.SEBI, "broking", "SEBI/HO/MRD/2024/1", "2.1.b")
+        == "sebi.broking.circulars.sebi_ho_mrd_2024_1.clause_2_1_b"
+    )
+
+
+def test_rego_package_name_rbi_namespace() -> None:
+    assert (
+        rego_package_name(Regulator.RBI, "nbfc", "RBI/2024-25/45", "3.a")
+        == "rbi.nbfc.circulars.rbi_2024_25_45.clause_3_a"
+    )
 
 
 def test_compile_rule_to_rego_basic_structure() -> None:
     rule = _margin_rule()
     compiled = compile_rule_to_rego(rule)
 
-    assert compiled.package == "sebi.circulars.sebi_ho_mrd_2024_1.clause_2_1_b"
+    assert compiled.package == "sebi.broking.circulars.sebi_ho_mrd_2024_1.clause_2_1_b"
     assert compiled.thresholds_compiled == 1
     code = compiled.rego_code
-    assert "package sebi.circulars.sebi_ho_mrd_2024_1.clause_2_1_b" in code
+    assert "package sebi.broking.circulars.sebi_ho_mrd_2024_1.clause_2_1_b" in code
     assert "import rego.v1" in code
     assert "default allow := false" in code
     assert 'input.entity_type == "Stockbroker"' in code
@@ -233,7 +244,7 @@ def test_pipeline_compiles_when_approved_and_deterministic() -> None:
     assert result.compiled is True
     assert result.rego is not None
     assert result.json_logic is not None
-    assert "package sebi.circulars" in result.rego.rego_code
+    assert "package sebi.broking.circulars" in result.rego.rego_code
 
 
 def test_pipeline_partial_compile_with_advisory_qualitative_flag() -> None:

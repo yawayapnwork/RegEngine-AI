@@ -37,6 +37,7 @@ from app.ingestion.exceptions import DocumentDownloadError, IngestionError, Robo
 from app.ingestion.feed_monitor import discover_all
 from app.ingestion.http_client import SebiHttpClient
 from app.ingestion.models import ChangeKind, DiscoveredDocument, IngestionRunResult
+from app.ingestion.regulator_sources import count_configured_sources
 from app.ingestion.pipeline_trigger import download_document, process_discovered_document
 from app.parsing.exceptions import ChunkingError, EmbeddingError, IndexingError, UnsupportedFileError
 from app.resilience.celery_helpers import route_to_dlq_sync
@@ -97,7 +98,7 @@ async def _run_poll_cycle() -> IngestionRunResult:
         return IngestionRunResult(
             started_at=started_at,
             finished_at=dt.datetime.now(dt.timezone.utc),
-            sources_polled=len(settings.sebi_rss_feed_urls) + len(settings.sebi_listing_page_urls),
+            sources_polled=count_configured_sources(settings),
             documents_discovered=len(discovered_documents),
             documents_new=documents_new,
             documents_amended=documents_amended,

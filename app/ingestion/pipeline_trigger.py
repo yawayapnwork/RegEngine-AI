@@ -61,7 +61,12 @@ async def process_discovered_document(
         logger.warning("Could not archive %s locally: %s", discovered.source_url, exc)
 
     try:
-        parsed = await parse_pdf_bytes(content, filename=discovered.source_url.rsplit("/", 1)[-1], settings=settings)
+        parsed = await parse_pdf_bytes(
+            content,
+            filename=discovered.source_url.rsplit("/", 1)[-1],
+            settings=settings,
+            source_tag=discovered.regulator.value,
+        )
         await index_chunks(parsed.chunks, settings, recreate_collection=False)
     except ParsingError:
         raise

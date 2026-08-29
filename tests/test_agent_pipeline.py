@@ -221,7 +221,7 @@ class TestDeterministicRuleCompilesCleanly:
         assert result.rego.thresholds_compiled == 1
         assert "input.facts.upfront_margin_pct >= 20" in result.rego.rego_code
         assert 'input.entity_type == "Stockbroker"' in result.rego.rego_code
-        assert result.rego.package == "sebi.circulars.sebi_ho_mrd_2024_1.clause_2_1_b"
+        assert result.rego.package == "sebi.broking.circulars.sebi_ho_mrd_2024_1.clause_2_1_b"
 
         assert result.json_logic is not None
         assert result.json_logic.data_schema["facts.upfront_margin_pct"] == "number"

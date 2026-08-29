@@ -104,6 +104,36 @@ class Settings(BaseSettings):
         ],
         description="HTML listing pages scraped as a fallback/supplement when the RSS feed lags or omits an item",
     )
+    # --- Regulatory ingestion: RBI / IRDAI / PFRDA source configuration ---
+    # (app.ingestion.regulator_sources) -- same shape as the SEBI fields
+    # above; kept as separate settings rather than one generic
+    # dict-of-lists so each regulator's URLs stay independently
+    # overridable via plain env vars (REGENGINE_RBI_RSS_FEED_URLS=... etc).
+    rbi_rss_feed_urls: list[str] = Field(
+        default_factory=lambda: ["https://www.rbi.org.in/pressreleases_rss.xml"],
+        description="RSS/Atom feeds polled for new RBI Master Directions/circulars/notifications",
+    )
+    rbi_listing_page_urls: list[str] = Field(
+        default_factory=lambda: ["https://www.rbi.org.in/Scripts/NotificationUser.aspx"],
+        description="HTML listing pages scraped as a fallback/supplement for RBI notifications",
+    )
+    irdai_rss_feed_urls: list[str] = Field(
+        default_factory=list,
+        description="RSS/Atom feeds polled for new IRDAI regulations/circulars (IRDAI does not publish a public RSS feed as of writing; populate once/if one becomes available).",
+    )
+    irdai_listing_page_urls: list[str] = Field(
+        default_factory=lambda: ["https://irdai.gov.in/circulars"],
+        description="HTML listing pages scraped for IRDAI circulars/regulations",
+    )
+    pfrda_rss_feed_urls: list[str] = Field(
+        default_factory=list,
+        description="RSS/Atom feeds polled for new PFRDA circulars (populate once/if PFRDA publishes one).",
+    )
+    pfrda_listing_page_urls: list[str] = Field(
+        default_factory=lambda: ["https://www.pfrda.org.in/index1.cshtml?lsid=204"],
+        description="HTML listing pages scraped for PFRDA circulars",
+    )
+
     ingestion_poll_interval_seconds: int = 900  # 15 min; SEBI publishes intermittently, not real-time
     ingestion_request_min_interval_seconds: float = 2.0  # min gap between requests to sebi.gov.in
     ingestion_request_timeout_seconds: float = 20.0

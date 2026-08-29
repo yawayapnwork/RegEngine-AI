@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from app.regulatory.taxonomy import Regulator
+
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 _UNIT_SUFFIX: dict[str, str] = {
@@ -62,8 +64,23 @@ def metric_field_name(metric: str, unit: str) -> str:
     return base
 
 
-def rego_package_name(circular_number: str | None, clause_number: str | None) -> str:
-    return f"sebi.circulars.{circular_slug(circular_number)}.clause_{clause_slug(clause_number)}"
+def rego_package_name(
+    regulator: Regulator,
+    domain: str,
+    circular_number: str | None,
+    clause_number: str | None,
+) -> str:
+    """`data.<regulator>.<domain>.circulars.<circular>.clause_<clause>` --
+    the multi-regulator namespace layout (see policies/ for the directory
+    structure this mirrors). `domain` is resolved by the caller via
+    app.regulatory.taxonomy.resolve_domain from the rule's normalized
+    entity type -- this function only assembles the already-resolved
+    segments, so it never itself needs to know the entity taxonomy.
+
+    `regulator` is a required positional argument (no default) precisely
+    so a caller CANNOT compile a rule without deciding a regulator first
+    -- see app.compiler.rego_compiler for where that decision is made."""
+    return f"{regulator.value}.{domain}.circulars.{circular_slug(circular_number)}.clause_{clause_slug(clause_number)}"
 
 
 def rego_identifier(prefix: str, index: int) -> str:

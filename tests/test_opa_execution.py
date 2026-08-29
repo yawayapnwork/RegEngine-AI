@@ -22,8 +22,9 @@ from app.compiler.naming import metric_field_name, rego_package_name
 from app.execution.evaluator import Evaluator
 from app.execution.models import Decision, HITLCase, PolicyOutcome, SourceChannel, TransactionPayload
 from app.execution.opa_engine import OPAEngine, OPAEngineError
+from app.regulatory.taxonomy import Regulator
 
-PACKAGE = rego_package_name("SEBI/HO/MRD/2024/1", "2.1.b")
+PACKAGE = rego_package_name(Regulator.SEBI, "broking", "SEBI/HO/MRD/2024/1", "2.1.b")
 RULE_ID = "a" * 64 + ":2.1.b"
 MARGIN_FIELD = metric_field_name("Upfront Margin", "%")  # "upfront_margin_pct"
 

@@ -35,6 +35,7 @@ from app.agents.schemas import (
 )
 from app.config import Settings, get_settings
 from app.models import ClauseChunk
+from app.regulatory.taxonomy import REGULATOR_PROFILES, Regulator, resolve_domain
 
 logger = logging.getLogger(__name__)
 
@@ -62,21 +63,27 @@ def _build_llm(settings: Settings, *, temperature: float):
 # --------------------------------------------------------------------------
 
 
-def build_extraction_agent(settings: Settings):
+def build_extraction_agent(settings: Settings, regulator: Regulator = Regulator.SEBI):
     from crewai import Agent  # deferred heavy import
 
     from app.agents.prompts import EXTRACTION_AGENT_SYSTEM_PROMPT
     from app.agents.tools import build_crewai_tools
 
+    profile = REGULATOR_PROFILES[regulator]
     tools = build_crewai_tools()
     return Agent(
-        role="SEBI Compliance Clause Extraction Specialist",
+        role=f"{profile.display_name} Compliance Clause Extraction Specialist",
         goal=(
-            "Convert a single SEBI legal clause into a structured, schema-conformant "
-            "ExtractedComplianceRule JSON object, with every claim traceable to an "
-            "exact verbatim quote from the source text."
+            f"Convert a single {profile.display_name} legal clause into a structured, "
+            "schema-conformant ExtractedComplianceRule JSON object, with every claim "
+            "traceable to an exact verbatim quote from the source text."
         ),
-        backstory=EXTRACTION_AGENT_SYSTEM_PROMPT,
+        # Regulator context is appended, never substituted -- the extraction
+        # discipline (verbatim_evidence for every field, no inferred
+        # numbers) in EXTRACTION_AGENT_SYSTEM_PROMPT applies identically
+        # across every regulator; only the entity/obligation vocabulary
+        # hint changes.
+        backstory=f"{EXTRACTION_AGENT_SYSTEM_PROMPT}\n\n{profile.agent_persona_hint}",
         tools=[t for t in tools if t.name in ("verify_quotes", "scan_numeric_tokens", "lookup_entity")],
         llm=_build_llm(settings, temperature=0.0),
         allow_delegation=False,
@@ -86,21 +93,22 @@ def build_extraction_agent(settings: Settings):
     )
 
 
-def build_audit_agent(settings: Settings):
+def build_audit_agent(settings: Settings, regulator: Regulator = Regulator.SEBI):
     from crewai import Agent  # deferred heavy import
 
     from app.agents.prompts import LOGIC_AUDITOR_SYSTEM_PROMPT
     from app.agents.tools import build_crewai_tools
 
+    profile = REGULATOR_PROFILES[regulator]
     tools = build_crewai_tools()
     return Agent(
-        role="SEBI Compliance Logic Auditor",
+        role=f"{profile.display_name} Compliance Logic Auditor",
         goal=(
             "Adversarially cross-examine an ExtractedComplianceRule against its source "
             "clause text, mechanically verifying every quote, number, and entity, and "
             "returning a ComplianceRuleAudit with a definitive verdict."
         ),
-        backstory=LOGIC_AUDITOR_SYSTEM_PROMPT,
+        backstory=f"{LOGIC_AUDITOR_SYSTEM_PROMPT}\n\n{profile.agent_persona_hint}",
         tools=tools,
         llm=_build_llm(settings, temperature=0.0),
         allow_delegation=False,
@@ -201,8 +209,8 @@ def _run_crew_once(
 ) -> tuple[ExtractedComplianceRule, ComplianceRuleAudit]:
     from crewai import Crew, Process  # deferred heavy import
 
-    extraction_agent = build_extraction_agent(settings)
-    audit_agent = build_audit_agent(settings)
+    extraction_agent = build_extraction_agent(settings, chunk.regulator)
+    audit_agent = build_audit_agent(settings, chunk.regulator)
 
     extraction_task = build_extraction_task(extraction_agent, chunk, prior_findings)
     audit_task = build_audit_task(audit_agent, chunk, extraction_task, sibling_chunks)
@@ -222,6 +230,17 @@ def _run_crew_once(
     audit = audit_task.output.pydantic
     if not isinstance(extracted, ExtractedComplianceRule) or not isinstance(audit, ComplianceRuleAudit):
         raise ValueError("Crew did not return schema-conformant output; refusing to persist.")
+
+    # Regulator/domain are deterministic ingestion-time facts (chunk.regulator
+    # came from app.regulatory.taxonomy.detect_regulator_and_document, not
+    # from the LLM) -- stamped onto the extraction here rather than trusted
+    # from whatever the model's JSON happened to contain. See
+    # ExtractedComplianceRule.regulator's docstring for why this must never
+    # be the LLM's own guess.
+    extracted.regulator = chunk.regulator
+    primary_entity = extracted.target_entities[0].normalized_entity if extracted.target_entities else None
+    extracted.regulatory_domain = resolve_domain(chunk.regulator, primary_entity)
+
     return extracted, audit
 
 
