@@ -1,0 +1,6 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic-settings>=2.3
+crewai>=0.70
+crewai-tools>=0.12
+litellm>=1.44

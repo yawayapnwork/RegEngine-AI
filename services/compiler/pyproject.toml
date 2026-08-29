@@ -1,0 +1,8 @@
+[project]
+name = "regengine-compiler"
+version = "0.1.0"
+description = "RegEngine AI compiler service: OPA Rego / JSON-Logic policy generation."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

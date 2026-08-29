@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "regengine.fullname" . }}
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: regengine.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "regengine.fullname" . }}-frontend
+                port:
+                  number: 80
+          - path: /api/execution
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "regengine.fullname" . }}-execution
+                port:
+                  number: 8004

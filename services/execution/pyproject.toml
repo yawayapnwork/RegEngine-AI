@@ -1,0 +1,8 @@
+[project]
+name = "regengine-execution"
+version = "0.1.0"
+description = "RegEngine AI execution service: live transaction evaluation against compiled OPA policy."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

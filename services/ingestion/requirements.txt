@@ -1,0 +1,10 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic-settings>=2.3
+unstructured[pdf]>=0.15
+tika>=2.6.0
+sentence-transformers>=3.0
+qdrant-client>=1.10
+feedparser>=6.0
+beautifulsoup4>=4.12
+lxml>=5.2

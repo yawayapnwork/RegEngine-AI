@@ -1,0 +1,8 @@
+[project]
+name = "regengine-audit"
+version = "0.1.0"
+description = "RegEngine AI audit service: append-only SHA-256 hash-chained compliance ledger."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,42 @@
+image:
+  registry: ghcr.io/your-org
+  tag: latest
+  pullPolicy: IfNotPresent
+
+services:
+  ingestion:
+    replicas: 2
+    port: 8001
+  agents:
+    replicas: 2
+    port: 8002
+  compiler:
+    replicas: 1
+    port: 8003
+  execution:
+    replicas: 3
+    port: 8004
+  audit:
+    replicas: 2
+    port: 8005
+  frontend:
+    replicas: 2
+    port: 80
+
+postgresql:
+  enabled: true
+  auth:
+    database: regengine
+
+redis:
+  enabled: true
+
+qdrant:
+  enabled: true
+
+opa:
+  enabled: true
+  image: openpolicyagent/opa:latest-envoy
+
+env:
+  ANTHROPIC_API_KEY: ""

@@ -1,0 +1,8 @@
+[project]
+name = "regengine-agents"
+version = "0.1.0"
+description = "RegEngine AI agents service: CrewAI dual-agent extraction on Claude 3.5 Sonnet."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

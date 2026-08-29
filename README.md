@@ -3,7 +3,7 @@
 **RegEngine AI turns a SEBI Master Circular PDF into an executable, auditable compliance control** — from
 layout-aware ingestion, through an AI extraction/audit pipeline, into compiled OPA Rego policy, live
 transaction enforcement, and a tamper-evident PostgreSQL audit ledger. Every stage that can't be resolved
-deterministically — an ambiguous clause, an undecidable transaction — is routed to a human-in-the-loop (HITL)
+deterministically : an ambiguous clause, an undecidable transaction is routed to a human-in-the-loop (HITL)
 queue instead of guessed at.
 
 ```mermaid
