@@ -41,6 +41,8 @@ celery_app.conf.update(
         "app.compiler.tasks.compile_audited_rule_task": {"queue": settings.celery_compiler_queue},
         "app.vectorstore.tasks.index_chunks_task": {"queue": settings.celery_vectorstore_queue},
         "app.llm_ops.tasks.purge_expired_cache_entries_task": {"queue": settings.celery_llm_ops_queue},
+        "app.incident.tasks.process_escalation_stage_task": {"queue": settings.celery_incidents_queue},
+        "app.incident.tasks.sweep_overdue_escalations_task": {"queue": settings.celery_incidents_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -57,7 +59,11 @@ celery_app.conf.update(
             "task": "app.llm_ops.tasks.purge_expired_cache_entries_task",
             "schedule": settings.llm_cache_purge_interval_seconds,
         },
+        "sweep-overdue-escalations": {
+            "task": "app.incident.tasks.sweep_overdue_escalations_task",
+            "schedule": settings.incident_escalation_sweep_interval_seconds,
+        },
     },
 )
 
-celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident"])

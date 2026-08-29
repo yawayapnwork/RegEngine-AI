@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import logging
 
+from app.config import get_settings
+from app.execution.dependencies import get_redis_pool
 from app.execution.models import EvaluationResult, PolicyOutcome, TransactionPayload
 from app.explainability.explainer import explain_policy_outcome_deterministic
+from app.incident.publisher import raise_breach_event
+from app.incident.trigger_matrix import ambiguous_hitl_event, clause_violation_event
 from app.ledger.models import ComplianceEvaluationEvent, EvaluationOutcome
 from app.ledger.service import LedgerService
 from app.observability.metrics import AUDIT_LEDGER_WRITE_FAILURES_TOTAL
@@ -73,6 +77,36 @@ def build_ledger_events(transaction: TransactionPayload, result: EvaluationResul
     return events
 
 
+async def _raise_breach_events(transaction: TransactionPayload, result: EvaluationResult) -> None:
+    """Requirement 1's trigger matrix, fired from the one place both a
+    DENY and a FLAGGED outcome are already fully known. Raised
+    independently of whether the ledger write below succeeds or fails --
+    a breach notification is about the COMPLIANCE OUTCOME, not about
+    audit-trail durability, so a ledger outage must never also silence
+    the compliance officer alert for a live violation."""
+    settings = get_settings()
+    redis_client = get_redis_pool()
+    for outcome in result.matched_policies:
+        try:
+            if _outcome_result(outcome) == EvaluationOutcome.FAIL:
+                await raise_breach_event(clause_violation_event(transaction, result, outcome), redis_client, settings)
+            elif _outcome_result(outcome) == EvaluationOutcome.HITL_REVIEW:
+                await raise_breach_event(
+                    ambiguous_hitl_event(
+                        transaction,
+                        reason=f"OPA returned an undefined result for rule_id={outcome.rule_id}; routed to HITL case {result.hitl_case_id}.",
+                        hitl_case_id=result.hitl_case_id,
+                        rule_id=outcome.rule_id,
+                        circular_number=outcome.circular_number,
+                        clause_number=outcome.clause_number,
+                    ),
+                    redis_client,
+                    settings,
+                )
+        except Exception:  # noqa: BLE001 - a breach-notification failure must never mask the underlying compliance decision or block the ledger write
+            logger.exception("Failed to raise breach event for transaction_id=%s rule_id=%s", transaction.transaction_id, outcome.rule_id)
+
+
 async def log_evaluation(ledger: LedgerService, transaction: TransactionPayload, result: EvaluationResult) -> None:
     """Best-effort: a ledger outage must not block a live compliance
     decision from being returned to the broker (the decision itself is
@@ -81,6 +115,8 @@ async def log_evaluation(ledger: LedgerService, transaction: TransactionPayload,
     a production deployment with a hard "no evaluation without an audit
     row" requirement should instead write through a durable outbox that
     retries independently of the request/response cycle."""
+    await _raise_breach_events(transaction, result)
+
     for event in build_ledger_events(transaction, result):
         try:
             await ledger.append_entry(event)

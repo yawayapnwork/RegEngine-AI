@@ -166,6 +166,36 @@ class Settings(BaseSettings):
     teams_webhook_url: str | None = None
     slack_signing_secret: str | None = None
 
+    # --- Breach Notification Engine (app.incident) ---
+    incident_key_prefix: str = "regengine:incidents"
+    incident_events_channel: str = "regengine:incident_events"  # Redis pub/sub -> WebSocket dashboard fanout
+    celery_incidents_queue: str = "regengine_incidents"
+    # Trigger-matrix defaults (Requirement 1) -- escalation timing in seconds.
+    incident_critical_ack_deadline_seconds: int = 15 * 60   # 15 min: PagerDuty/Twilio escalation deadline
+    incident_critical_sms_stage_seconds: int = 5 * 60        # 5 min: SMS stage before the 15-min PagerDuty stage
+    incident_warning_ack_deadline_seconds: int = 30 * 60     # 30 min: email escalation for unacknowledged warnings
+    incident_escalation_sweep_interval_seconds: int = 60     # safety-net sweep cadence (see app.incident.tasks)
+
+    # PagerDuty Events API v2 (https://developer.pagerduty.com/api-reference/)
+    pagerduty_routing_key: str | None = None
+    pagerduty_api_base_url: str = "https://events.pagerduty.com/v2"
+
+    # Twilio REST API (SMS)
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_from_number: str | None = None
+    twilio_oncall_phone_numbers: list[str] = Field(default_factory=list)
+    twilio_api_base_url: str = "https://api.twilio.com/2010-04-01"
+
+    # Email (SMTP) escalation channel
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_use_tls: bool = True
+    smtp_from_address: str = "regengine-alerts@example.com"
+    compliance_officer_email_list: list[str] = Field(default_factory=list)
+
     # --- Security: JWT / OAuth2 ---
     # Self-issued tokens (Broker_API_Client, via POST /v1/auth/token).
     jwt_algorithm: str = "HS256"  # or "RS256"; see app/security/jwt.py

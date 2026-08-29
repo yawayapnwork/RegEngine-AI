@@ -17,6 +17,7 @@ from app.api.execution_routes import router as execution_router
 from app.api.hitl_review_routes import router as hitl_review_router
 from app.api.diffing_routes import router as diffing_router
 from app.api.explainability_routes import router as explainability_router
+from app.api.incident_routes import router as incident_router
 from app.api.ingestion_routes import router as ingestion_router
 from app.api.llm_cost_routes import router as llm_cost_router
 from app.api.routes import router
@@ -26,6 +27,8 @@ from app.db.session import get_session_factory
 from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
 from app.execution.hitl_queue import HITLQueue
 from app.execution.policy_hot_reload import PolicyHotReloadSubscriber
+from app.incident.dependencies import get_dashboard_connection_manager
+from app.incident.websocket_manager import BreachEventBroadcastSubscriber
 from app.observability.metrics import poll_queue_depths, render_latest
 from app.observability.tracing import setup_tracing
 from app.parsing.exceptions import ParsingError
@@ -81,6 +84,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         name="hitl-queue-depth-poller",
     )
 
+    breach_subscriber = BreachEventBroadcastSubscriber(
+        redis_client=get_redis_pool(),
+        channel=settings.incident_events_channel,
+        manager=get_dashboard_connection_manager(),
+    )
+    breach_broadcast_task = asyncio.create_task(breach_subscriber.run(), name="breach-event-broadcast-subscriber")
+
     try:
         yield
     finally:
@@ -88,7 +98,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         hot_reload_task.cancel()
         queue_depth_stop.set()
         queue_depth_task.cancel()
-        for task in (hot_reload_task, queue_depth_task):
+        breach_subscriber.stop()
+        breach_broadcast_task.cancel()
+        for task in (hot_reload_task, queue_depth_task, breach_broadcast_task):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
@@ -133,6 +145,7 @@ app.include_router(analytics_router)
 app.include_router(llm_cost_router)
 app.include_router(diffing_router)
 app.include_router(explainability_router)
+app.include_router(incident_router)
 app.include_router(webhook_router)
 
 
