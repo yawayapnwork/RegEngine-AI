@@ -1,5 +1,6 @@
 import {
   FileStack,
+  FlaskConical,
   GitCompare,
   ScrollText,
   ShieldCheck,
@@ -9,6 +10,7 @@ import {
 const NAV_ITEMS = [
   { id: "pipeline", label: "Ingestion Pipeline", icon: FileStack },
   { id: "splitview", label: "Clause / Rego Split View", icon: GitCompare },
+  { id: "playground", label: "Policy Playground", icon: FlaskConical },
   { id: "hitl", label: "HITL Compliance Review", icon: ShieldCheck },
   { id: "vault", label: "Transaction Audit Vault", icon: Vault },
 ];

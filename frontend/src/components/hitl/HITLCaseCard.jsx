@@ -1,34 +1,36 @@
-import { Check, Clock, FileCode2, Gavel, X } from "lucide-react";
+import { Check, Clock, FileCode2, FlaskConical, Gavel, X } from "lucide-react";
 import { useState } from "react";
 import Card from "../shared/Card";
 import StatusBadge from "../shared/StatusBadge";
+
+const ICONS = {
+  compiler: { Icon: FileCode2, classes: "bg-violet-500/10 text-violet-400" },
+  playground: { Icon: FlaskConical, classes: "bg-sky-500/10 text-sky-400" },
+  execution: { Icon: Gavel, classes: "bg-amber-500/10 text-amber-400" },
+};
 
 export default function HITLCaseCard({ hitlCase, onResolve }) {
   const [notes, setNotes] = useState("");
   const isPending = hitlCase.status === "pending";
   const isCompilerCase = hitlCase.kind === "compiler";
+  const isPlaygroundCase = hitlCase.kind === "playground";
+  const { Icon, classes } = ICONS[hitlCase.kind] || ICONS.execution;
 
   return (
     <Card className="p-5">
       <div className="mb-3 flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div
-            className={`mt-0.5 rounded-lg p-2 ${isCompilerCase ? "bg-violet-500/10" : "bg-amber-500/10"}`}
-          >
-            {isCompilerCase ? (
-              <FileCode2 className="h-4 w-4 text-violet-400" />
-            ) : (
-              <Gavel className="h-4 w-4 text-amber-400" />
-            )}
+          <div className={`mt-0.5 rounded-lg p-2 ${classes}`}>
+            <Icon className="h-4 w-4" />
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-100">
-              {isCompilerCase
-                ? `Clause ${hitlCase.clauseNumber} &mdash; compile-time flag`
-                : `Transaction ${hitlCase.transactionId}`}
+              {isCompilerCase && `Clause ${hitlCase.clauseNumber} &mdash; compile-time flag`}
+              {isPlaygroundCase && `Clause ${hitlCase.clauseNumber} &mdash; playground submission`}
+              {!isCompilerCase && !isPlaygroundCase && `Transaction ${hitlCase.transactionId}`}
             </p>
             <p className="text-xs text-slate-500">
-              {isCompilerCase
+              {isCompilerCase || isPlaygroundCase
                 ? hitlCase.circularNumber
                 : `Broker ${hitlCase.brokerId}`}{" "}
               &middot; rule {hitlCase.ruleId}
@@ -37,7 +39,7 @@ export default function HITLCaseCard({ hitlCase, onResolve }) {
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <StatusBadge
-            status={isCompilerCase ? hitlCase.severity : "hitl_review"}
+            status={isCompilerCase ? hitlCase.severity : isPlaygroundCase ? "advisory" : "hitl_review"}
           />
           <span className="flex items-center gap-1 text-[11px] text-slate-600">
             <Clock className="h-3 w-3" />{" "}
@@ -47,7 +49,9 @@ export default function HITLCaseCard({ hitlCase, onResolve }) {
       </div>
 
       <p className="mb-2 rounded-lg bg-ink-850 px-3 py-2 text-sm text-slate-300">
-        {isCompilerCase ? hitlCase.description : hitlCase.reason}
+        {isCompilerCase && hitlCase.description}
+        {isPlaygroundCase && hitlCase.description}
+        {!isCompilerCase && !isPlaygroundCase && hitlCase.reason}
       </p>
 
       {isCompilerCase && hitlCase.sourceExcerpt && (
@@ -55,7 +59,12 @@ export default function HITLCaseCard({ hitlCase, onResolve }) {
           &ldquo;{hitlCase.sourceExcerpt}&rdquo;
         </p>
       )}
-      {!isCompilerCase && (
+      {isPlaygroundCase && hitlCase.editedCode && (
+        <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-ink-950 px-3 py-2 text-xs text-slate-400">
+          {hitlCase.editedCode}
+        </pre>
+      )}
+      {!isCompilerCase && !isPlaygroundCase && (
         <pre className="mb-3 overflow-x-auto rounded-lg bg-ink-950 px-3 py-2 text-xs text-slate-400">
           {JSON.stringify(hitlCase.facts, null, 2)}
         </pre>

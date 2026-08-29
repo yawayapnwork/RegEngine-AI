@@ -9,6 +9,10 @@ const TITLES = {
     "Clause / Rego Split View",
     "Raw legal text against its compiled OPA policy, clause by clause.",
   ],
+  playground: [
+    "Policy Playground",
+    "Edit a policy, run it instantly against a test transaction via OPA Wasm, and submit it for compliance sign-off.",
+  ],
   hitl: [
     "HITL Compliance Review",
     "Human sign-off queue for ambiguous compiler and execution-time cases.",

@@ -3,6 +3,7 @@ import Sidebar from "./components/layout/Sidebar";
 import TopBar from "./components/layout/TopBar";
 import PipelineTracker from "./components/pipeline/PipelineTracker";
 import ClauseSplitView from "./components/splitview/ClauseSplitView";
+import PolicyPlayground from "./components/playground/PolicyPlayground";
 import HITLDashboard from "./components/hitl/HITLDashboard";
 import AuditVault from "./components/vault/AuditVault";
 import {
@@ -32,6 +33,32 @@ export default function App() {
     );
   };
 
+  // Requirement 3's "Submit for HITL Review" action. This mock handler
+  // appends locally, matching this codebase's existing convention (see
+  // mock/mockData.js's module comment) of shaping mock state exactly
+  // like the real backend contract so a real integration is a drop-in
+  // swap -- src/api/playgroundApi.js's `submitForHitlReview` documents
+  // the intended REST contract this would call instead.
+  const submitPlaygroundDraftForReview = async (draft) => {
+    await new Promise((resolve) => setTimeout(resolve, 400)); // simulated network latency
+    setHitlCases((prev) => [
+      {
+        caseId: `hitl-pg-${Date.now()}`,
+        kind: "playground",
+        ruleId: draft.ruleId,
+        clauseNumber: draft.clauseNumber,
+        circularNumber: draft.circularNumber,
+        description: draft.lastEvaluation
+          ? `Manually edited in the Policy Playground. Last local evaluation: ${draft.lastEvaluation.allow ? "ALLOW" : "DENY"} (engine: ${draft.lastEvaluation.engine}).`
+          : "Manually edited in the Policy Playground.",
+        editedCode: draft.editedRego || JSON.stringify(draft.editedJsonLogic, null, 2),
+        flaggedAt: new Date().toISOString(),
+        status: "pending",
+      },
+      ...prev,
+    ]);
+  };
+
   const pendingHitlCount = hitlCases.filter(
     (c) => c.status === "pending",
   ).length;
@@ -55,6 +82,11 @@ export default function App() {
           {activeView === "splitview" && (
             <div className="h-[calc(100vh-9.5rem)]">
               <ClauseSplitView clauses={clauses} />
+            </div>
+          )}
+          {activeView === "playground" && (
+            <div className="h-[calc(100vh-9.5rem)]">
+              <PolicyPlayground clauses={clauses} onSubmitForReview={submitPlaygroundDraftForReview} />
             </div>
           )}
           {activeView === "hitl" && (

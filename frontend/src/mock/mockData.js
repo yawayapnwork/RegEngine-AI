@@ -154,6 +154,17 @@ decision := {
     "circular_number": "SEBI/HO/MIRSD/2026/01",
     "obligation_type": "mandatory",
 }`,
+    jsonLogic: {
+      and: [
+        { "==": [{ var: "entity_type" }, "Stockbroker"] },
+        { ">=": [{ var: "facts.upfront_margin_pct" }, 20] },
+      ],
+    },
+    sampleTransaction: {
+      transaction_id: "PLAYGROUND-TXN-0001",
+      entity_type: "Stockbroker",
+      facts: { upfront_margin_pct: 15 },
+    },
     status: "compiled",
   },
   {
@@ -172,6 +183,8 @@ decision := {
       },
     ],
     regoCode: null,
+    jsonLogic: null,
+    sampleTransaction: { transaction_id: "PLAYGROUND-TXN-0002", entity_type: "Stockbroker", facts: {} },
     status: "hitl_blocked",
   },
   {
@@ -220,6 +233,17 @@ decision := {
     "circular_number": "SEBI/HO/MIRSD/2026/01",
     "obligation_type": "mandatory",
 }`,
+    jsonLogic: {
+      and: [
+        { "==": [{ var: "entity_type" }, "Stockbroker"] },
+        { ">=": [{ var: "facts.net_worth_inr_crore" }, 5] },
+      ],
+    },
+    sampleTransaction: {
+      transaction_id: "PLAYGROUND-TXN-0003",
+      entity_type: "Stockbroker",
+      facts: { net_worth_inr_crore: 3 },
+    },
     status: "compiled",
   },
 ];
