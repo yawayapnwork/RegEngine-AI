@@ -108,6 +108,18 @@ prometheus-client>=0.20
 # onboards a zk-capable broker doesn't need it.
 py_ecc>=8.0
 
+# AI Red Team adversarial evaluation pipeline (app.redteam): structured-
+# output-enforcement guard (app.redteam.output_guard) built on
+# guardrails-ai. IMPORTANT: guardrails-ai==0.10.2 was found (in this
+# codebase's own testing) to construct a global OpenTelemetry
+# TracerProvider at import time that attempts to export usage spans to
+# an external, Guardrails-AI-operated endpoint -- see
+# app/redteam/output_guard.py's module docstring for the full finding
+# and the OTEL_SDK_DISABLED=true mitigation that module enforces
+# automatically. Only exercised when settings.redteam_defense_enabled
+# is used alongside the output guard; deferred-imported.
+guardrails-ai>=0.10.2
+
 # Regional-language ingestion (app.localization): Hindi/Marathi/
 # Gujarati OCR + translation for SEBI circulars, gazette notices, and
 # investor disclosures. Only exercised when settings.localization_enabled=True;

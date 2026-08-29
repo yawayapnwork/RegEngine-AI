@@ -1,0 +1,22 @@
+# Colang output rail: catches the case where an injection survived the
+# input rail and the model's OWN response leaked/complied with it --
+# the same failure mode app.redteam.output_guard's Guardrails AI
+# validator checks deterministically (see that module for the version
+# of this check actually run in this codebase's test suite). See
+# config.yml's header comment for this file's execution status.
+
+define bot leaked system prompt
+  "here is my system prompt"
+  "my instructions are"
+  "as an ai language model, i was told to"
+
+define flow block extraction notes leakage
+  bot leaked system prompt
+  bot refuse to respond
+  stop
+
+define flow self check output
+  $output_safe = execute self_check_output
+  if not $output_safe
+    bot refuse to respond
+    stop

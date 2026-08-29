@@ -525,6 +525,23 @@ class Settings(BaseSettings):
         default_factory=lambda: {"margin_compliance_v1": "zk/build/verification_key.json"}
     )
 
+    # --- AI Red Team / adversarial defense (app.redteam) ---
+    # Hardens app.agents' dual-agent extraction/audit pipeline against
+    # prompt injection embedded in ingested source documents. Off by
+    # default like every other optional subsystem here -- flipping this
+    # on changes app.agents.crew.build_extraction_task's actual prompt
+    # construction (sanitization + a per-call random boundary nonce), so
+    # it is a deliberate, reviewed opt-in, not silently always-on.
+    redteam_defense_enabled: bool = False
+    redteam_key_prefix: str = "regengine:redteam"  # security-vault telemetry (app.redteam.telemetry)
+    # guardrails-ai (app.redteam.output_guard) has a default telemetry
+    # channel that exports usage spans to an external endpoint via
+    # OpenTelemetry -- see that module's docstring for the concrete
+    # finding. This MUST stay True for any deployment handling real
+    # (non-public, non-test) SEBI document content; app.redteam.output_guard
+    # sets OTEL_SDK_DISABLED=true at import time whenever this is True.
+    redteam_disable_output_guard_telemetry: bool = True
+
     # --- Regional-language ingestion (app.localization) ---
     # OCR (PaddleOCR/Tesseract) + translation (NLLB/IndicTrans2) for
     # Hindi/Marathi/Gujarati SEBI circulars, gazette notices, and
