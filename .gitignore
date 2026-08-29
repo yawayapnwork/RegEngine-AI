@@ -50,3 +50,13 @@ Thumbs.db
 !tests/**/*.pdf
 policy_bundle/
 sftp_landing/
+
+# --- native/ (C++ policy kernel): compiled extensions and build output ---
+native/build/
+*.pyd
+*.obj
+*.exe
+*.exp
+*.lib
+*.ilk
+*.pdb
