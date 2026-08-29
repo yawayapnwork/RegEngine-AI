@@ -124,6 +124,43 @@ class Settings(BaseSettings):
     backtest_key_prefix: str = "regengine:backtest"
     celery_backtest_queue: str = "regengine_backtest"
 
+    # --- Shadow execution / canary release service (app.canary) ---
+    # Distinct from app.backtest: backtest replays PAST ledger transactions
+    # offline, on demand, against a separate OPA instance; canary shadows
+    # LIVE transactions in real time, in-process, against the SAME
+    # production OPA server (the candidate is just published under a
+    # namespaced package/rule_id -- see app.canary.opa_publisher, the same
+    # rewrite-the-package-line trick app.execution.tenant_policy_registry
+    # already uses for tenant isolation), and can automatically promote or
+    # roll back based on live divergence. Off by default.
+    canary_enabled: bool = False
+    canary_store_key_prefix: str = "regengine:canary"
+    # Requirement 3's "defined evaluation window (e.g. 24 hours)".
+    canary_evaluation_window_seconds: int = 24 * 3600
+    # A canary whose window has elapsed is auto-promoted only if divergence
+    # stayed at or below this fraction (0.02 = 2% of compared transactions
+    # disagreed between production and candidate) -- SEBI compliance
+    # decisions are high-stakes enough that even a small, persistent
+    # divergence rate should block auto-promotion and fall back to a human
+    # decision (the canary simply stays RUNNING past its window rather than
+    # either promoting or rolling back on ambiguous evidence).
+    canary_promotion_max_divergence_pct: float = 0.02
+    # Checked after EVERY comparison, not just at window end -- a spike at
+    # or above this fraction triggers an immediate rollback, before the
+    # scheduled sweep would otherwise catch it. Deliberately much higher
+    # than the promotion bar: this is a "something is badly wrong, stop
+    # now" circuit breaker, not the same threshold as the steady-state
+    # promotion decision.
+    canary_rollback_divergence_pct: float = 0.10
+    # Rollback-spike checking is suppressed below this many compared
+    # transactions -- a 100% divergence rate on 2 samples is noise, not a
+    # signal; matches the general "don't threshold on statistically
+    # meaningless sample sizes" principle used elsewhere in this codebase
+    # (e.g. app.localization's empirically-calibrated similarity threshold).
+    canary_rollback_min_sample_size: int = 25
+    canary_evaluation_sweep_interval_seconds: int = 300
+    celery_canary_queue: str = "regengine_canary"
+
     # --- Execution service: Redis (Celery broker/backend + HITL queue + policy registry) ---
     redis_url: str = "redis://localhost:6379/0"
     policy_registry_key: str = "regengine:policy_registry"

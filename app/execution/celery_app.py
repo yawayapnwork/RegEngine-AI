@@ -47,6 +47,8 @@ celery_app.conf.update(
         "app.backtest.tasks.run_backtest_task": {"queue": settings.celery_backtest_queue},
         "app.regulatory_filing.tasks.submit_filing_task": {"queue": settings.celery_regulatory_filing_queue},
         "app.regulatory_filing.tasks.submit_pending_filings_task": {"queue": settings.celery_regulatory_filing_queue},
+        "app.canary.tasks.evaluate_canary_windows_task": {"queue": settings.celery_canary_queue},
+        "app.canary.tasks.promote_canary_task": {"queue": settings.celery_canary_queue},
     },
     task_acks_late=True,           # redeliver a batch/CDC job if the worker dies mid-processing
     worker_prefetch_multiplier=1,  # avoid one worker hoarding a large SFTP batch queue
@@ -75,7 +77,11 @@ celery_app.conf.update(
             "task": "app.regulatory_filing.tasks.submit_pending_filings_task",
             "schedule": settings.regulatory_filing_submit_interval_seconds,
         },
+        "evaluate-canary-windows": {
+            "task": "app.canary.tasks.evaluate_canary_windows_task",
+            "schedule": settings.canary_evaluation_sweep_interval_seconds,
+        },
     },
 )
 
-celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security", "app.backtest", "app.regulatory_filing"])
+celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security", "app.backtest", "app.regulatory_filing", "app.canary"])
