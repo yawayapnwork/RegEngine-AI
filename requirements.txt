@@ -12,6 +12,7 @@ PyYAML>=6.0  # app.diffing.service_mapping's service_map.yaml
 # Layout-aware PDF extraction
 unstructured[pdf]>=0.15
 tika>=2.6.0
+pdf2image>=1.17         # OCR fallback page rasterization (app.parsing.extractor._ocr_fallback) -- shells out to poppler-utils, already installed for Unstructured's hi_res strategy
 
 # Embeddings
 sentence-transformers>=3.0
@@ -125,6 +126,14 @@ py_ecc>=8.0
 # is used alongside the output guard; deferred-imported.
 guardrails-ai>=0.10.2
 
+# pytesseract/Pillow are NOT gated behind settings.localization_enabled --
+# app.parsing.extractor's OCR fallback (the core English SEBI/RBI/IRDAI/
+# PFRDA ingestion path) uses them unconditionally for any scanned/image-
+# only PDF, regardless of language settings. transformers/langdetect
+# remain regional-language-only (below).
+pytesseract>=0.3.10      # Tesseract OCR Python binding -- the Tesseract OCR BINARY itself is a separate, OS-level install (see app.localization.ocr's module docstring)
+Pillow>=10.0             # image loading for the OCR path
+
 # Regional-language ingestion (app.localization): Hindi/Marathi/
 # Gujarati OCR + translation for SEBI circulars, gazette notices, and
 # investor disclosures. Only exercised when settings.localization_enabled=True;
@@ -132,8 +141,6 @@ guardrails-ai>=0.10.2
 # .translation, .verification), so a deployment that never onboards a
 # regional-language source doesn't pay for any of these at import time.
 transformers>=4.40      # NLLB / IndicTrans2 (app.localization.translation)
-pytesseract>=0.3.10      # Tesseract OCR Python binding -- the Tesseract OCR BINARY itself is a separate, OS-level install (see app.localization.ocr's module docstring)
-Pillow>=10.0             # image loading for the OCR path
 langdetect>=1.0.9        # regional-language auto-detection (app.localization.pipeline)
 # paddleocr>=2.7 / paddlepaddle>=2.6   # PaddleOCR (Hindi/Marathi Devanagari OCR) -- large (CUDA-capable) install; uncomment for a deployment that has reviewed it. Tesseract (above) covers every supported language on its own if this is omitted.
 # IndicTransToolkit                    # only if settings.localization_translation_backend="indictrans2" -- see app.localization.translation.IndicTrans2Backend's docstring

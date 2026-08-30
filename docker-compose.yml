@@ -138,7 +138,7 @@ services:
       SERVICE_ROLE: web
     env_file: [.env]
     ports:
-      - "8001:8000"
+      - "8000:8000"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -147,7 +147,13 @@ services:
       tika: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
+      # Runs INSIDE the container, where uvicorn listens on 8000 -- was
+      # checking 8001 (the HOST-side port before this mapping was fixed to
+      # match README.md's documented http://localhost:8000 and
+      # frontend/vite.config.js's dev-server proxy target), which nothing
+      # inside the container ever listened on, so this healthcheck could
+      # never pass.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5

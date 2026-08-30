@@ -1,8 +1,35 @@
-import { FileText } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Loader2 } from "lucide-react";
 import Card from "../shared/Card";
 import StatusBadge from "../shared/StatusBadge";
 import PdfUploadZone from "./PdfUploadZone";
 import PipelineStage from "./PipelineStage";
+
+function UploadStatusBanner({ uploadState, uploadResult, uploadError }) {
+  if (uploadState === "idle") return null;
+
+  if (uploadState === "uploading") {
+    return (
+      <div className="flex items-center gap-2 rounded-sm border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-slate-600">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading and parsing — this runs synchronously and can take a while for a large circular...
+      </div>
+    );
+  }
+  if (uploadState === "error") {
+    return (
+      <div className="flex items-center gap-2 rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Upload failed: {uploadError}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-sm border border-green-200 bg-green-100 px-3 py-2 text-sm text-green-800">
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+      Indexed <span className="font-mono">{uploadResult?.filename}</span> into{" "}
+      <span className="font-mono">{uploadResult?.collection}</span> — {uploadResult?.upserted} chunk(s) upserted
+      {uploadResult?.skipped_duplicates ? `, ${uploadResult.skipped_duplicates} duplicate(s) skipped` : ""}.
+    </div>
+  );
+}
 
 function extractNumber(detail, pattern) {
   const match = detail?.match(pattern);
@@ -67,10 +94,11 @@ function RunRow({ run }) {
   );
 }
 
-export default function PipelineTracker({ runs, onUpload }) {
+export default function PipelineTracker({ runs, onUpload, uploadState = "idle", uploadResult = null, uploadError = null }) {
   return (
     <div className="flex flex-col gap-4">
-      <PdfUploadZone onFileSelected={onUpload} />
+      <PdfUploadZone onFileSelected={onUpload} disabled={uploadState === "uploading"} />
+      <UploadStatusBanner uploadState={uploadState} uploadResult={uploadResult} uploadError={uploadError} />
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">

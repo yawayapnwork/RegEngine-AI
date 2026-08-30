@@ -124,7 +124,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           install-dev-tools: "true"
-          extras: "pip-audit>=2.7"
+          # bandit-sarif-formatter registers bandit's `sarif` output format --
+          # bandit itself only ships {csv,custom,html,json,screen,txt,xml,yaml}
+          # (verified directly: `bandit --help` lists no sarif choice without
+          # this plugin). Without it, the SARIF scan step below fails, is
+          # swallowed by `|| true`, and the next step's upload-sarif action
+          # then fails on the resulting missing file -- breaking this job on
+          # every run.
+          extras: "pip-audit>=2.7 bandit-sarif-formatter>=1.1"
 
       # Bandit: static analysis for common Python security issues.
       # -ll = LOW severity lines; -iii = HIGH confidence items only blocked
@@ -144,13 +151,18 @@ jobs:
           category: bandit
 
       # Bandit exit-code block: fail the job if HIGH confidence issues exist.
+      # No --exit-zero here (unlike the SARIF scan above) -- that flag
+      # unconditionally forces exit code 0, which silently defeated this
+      # step's entire purpose: Bandit findings never blocked CI regardless
+      # of severity. Bandit's natural exit code (1 when matching issues are
+      # found) is what --severity-level/--confidence-level need to actually
+      # gate the build.
       - name: Bandit (fail on HIGH)
         run: |
           bandit -r app/ sdk/ \
             --severity-level high \
             --confidence-level high \
-            --format text \
-            --exit-zero
+            --format txt
 
       # pip-audit: check installed packages against OSV / PyPI advisory DB.
       - name: pip-audit dependency CVE scan
@@ -263,6 +275,11 @@ jobs:
       HUGGINGFACEHUB_API_TOKEN: "dummy-ci-token"
       SECRETS_BACKEND: "env"
       SANDBOX_ENABLED: "true"
+      # `secrets` is not a valid named-value inside a step `if:` conditional
+      # (GitHub Actions rejects it: "Unrecognized named-value: 'secrets'") --
+      # the `env` context is, so the presence check has to be routed through
+      # one, computed once here rather than at the step itself.
+      HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
 
     steps:
       - name: Checkout
@@ -306,7 +323,7 @@ jobs:
       # Upload to Codecov if the secret is configured (optional integration).
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
-        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        if: ${{ env.HAS_CODECOV_TOKEN == 'true' }}
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: coverage.xml

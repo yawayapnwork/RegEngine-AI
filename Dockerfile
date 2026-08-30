@@ -20,7 +20,10 @@
 FROM python:3.11-slim-bookworm AS base
 
 # poppler-utils, tesseract-ocr, libmagic1, libgl1, libglib2.0-0:
-#   runtime requirements of unstructured[pdf]'s hi_res layout/OCR strategy.
+#   runtime requirements of unstructured[pdf]'s hi_res layout/OCR strategy,
+#   AND of app.parsing.extractor's own OCR fallback for scanned/image-only
+#   PDFs (poppler-utils for pdf2image's page rasterization, tesseract-ocr
+#   for app.localization.ocr's Tesseract backend).
 # curl:
 #   container HEALTHCHECK below and Kubernetes-style manual debugging.
 RUN apt-get update && apt-get install -y --no-install-recommends \

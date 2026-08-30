@@ -1,5 +1,6 @@
 """Layout-aware PDF extraction using Unstructured (primary) with an Apache
-Tika fallback.
+Tika fallback, and an OCR fallback (app.localization.ocr) below that for
+scanned/image-only pages neither text-layer backend can read.
 
 Both `unstructured.partition.pdf.partition_pdf` and `tika.parser.from_file`
 are synchronous, CPU/IO-heavy calls (the former shells out to detectron2/
@@ -13,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -225,6 +227,71 @@ def _build_document_elements(raw_elements: list[dict]) -> list[DocumentElement]:
     return result
 
 
+def _rasterize_pdf(path: str, dpi: int) -> list:
+    """Sync helper (run via asyncio.to_thread, matching this module's other
+    backend calls): renders every page to a PIL Image via pdf2image, which
+    shells out to poppler's `pdftoppm` -- already an OS-level dependency of
+    this image (Dockerfile installs poppler-utils for Unstructured's own
+    hi_res strategy), so this adds no new system dependency."""
+    from pdf2image import convert_from_path  # deferred heavy import
+
+    return convert_from_path(path, dpi=dpi)
+
+
+def _ocr_page(image_path: str, settings: Settings) -> str:
+    """Sync helper (run via asyncio.to_thread): OCRs one rasterized page
+    image via app.localization.ocr's PaddleOCR->Tesseract fallback chain,
+    forcing English since this fallback only runs for the plain English
+    SEBI/RBI/IRDAI/PFRDA ingestion path -- app.localization.pipeline is the
+    separate entrypoint for known-regional-language documents."""
+    from app.localization.languages import RegionalLanguage
+    from app.localization.ocr import extract_regional_text
+
+    result = extract_regional_text(image_path, RegionalLanguage.ENGLISH, settings)
+    return result.full_text
+
+
+async def _ocr_fallback(source_path: Path, filename: str | None, settings: Settings) -> list[dict]:
+    """Last-resort text recovery for a scanned/image-only PDF: rasterize
+    each page and OCR it, returning elements in the same shape
+    `_partition_with_unstructured`/`_partition_with_tika` produce so the
+    rest of `extract_pdf` (metadata detection, DocumentElement building)
+    is unaffected by which backend actually supplied the text. A page
+    whose OCR fails or comes back empty is skipped, not fatal -- the
+    caller decides whether the OVERALL result has enough text to proceed
+    (same "no element has non-whitespace text" check as the primary path)."""
+    try:
+        pages = await asyncio.to_thread(_rasterize_pdf, str(source_path), 300)
+    except Exception as exc:  # noqa: BLE001 - pdf2image/poppler failure never fatal to the caller; just yields no OCR text
+        logger.error("OCR fallback: failed to rasterize '%s': %r", filename or source_path, exc)
+        return []
+
+    out: list[dict] = []
+    for page_num, page_image in enumerate(pages, start=1):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            await asyncio.to_thread(page_image.save, tmp_path)
+            text = await asyncio.to_thread(_ocr_page, tmp_path, settings)
+        except Exception as exc:  # noqa: BLE001 - one page's OCR failure must not abort the rest of the document
+            logger.warning("OCR fallback: page %d of '%s' failed: %r", page_num, filename or source_path, exc)
+            continue
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        if text.strip():
+            out.append(
+                {
+                    "text": text,
+                    "category": "UncategorizedText",
+                    "page_number": page_num,
+                    "coordinates": None,
+                    "text_as_html": None,
+                }
+            )
+    return out
+
+
 def _bbox(raw: dict) -> BoundingBox | None:
     coords = raw.get("coordinates")
     page = raw.get("page_number")
@@ -279,16 +346,32 @@ async def extract_pdf(
     # whitespace text" catches both shapes with one branch.
     if not raw_elements or not any(el["text"].strip() for el in raw_elements):
         logger.warning(
-            "'%s' produced %d element(s) with no extractable text -- likely a scanned/image-only PDF with no text layer.",
+            "'%s' produced %d element(s) with no extractable text -- likely a scanned/image-only PDF; "
+            "attempting OCR fallback.",
             filename or "<unnamed upload>",
             len(raw_elements),
         )
-        raise ScannedDocumentError(
-            f"'{filename or 'document'}' has no extractable text layer (likely a scanned/image-only PDF). "
-            "Retrying the same extraction backend will not help -- route this document through the regional "
-            "OCR pipeline (app.localization.ocr.extract_regional_text) instead, or re-submit a PDF with a "
-            "real text layer."
+        try:
+            ocr_elements = await asyncio.wait_for(
+                _ocr_fallback(source_path, filename, settings), timeout=settings.parse_timeout_seconds
+            )
+        except asyncio.TimeoutError as exc:
+            raise ParseTimeoutError(
+                f"OCR fallback for '{filename or 'document'}' exceeded {settings.parse_timeout_seconds}s timeout."
+            ) from exc
+
+        if not ocr_elements:
+            raise ScannedDocumentError(
+                f"'{filename or 'document'}' has no extractable text layer (likely a scanned/image-only PDF), "
+                "and OCR fallback produced no usable text either. Re-submit a higher-quality scan, or if this "
+                "is a known regional-language document, route it through app.localization.pipeline instead "
+                "of this English-only ingestion path."
+            )
+        logger.info(
+            "OCR fallback recovered text from %d/%d page(s) of '%s'.",
+            len(ocr_elements), len(raw_elements) or len(ocr_elements), filename or "<unnamed upload>",
         )
+        raw_elements = ocr_elements
 
     metadata = _extract_metadata_from_elements(raw_elements, filename, source_tag)
     elements = _build_document_elements(raw_elements)

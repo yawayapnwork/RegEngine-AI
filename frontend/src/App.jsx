@@ -6,6 +6,7 @@ import ClauseSplitView from "./components/splitview/ClauseSplitView";
 import PolicyPlayground from "./components/playground/PolicyPlayground";
 import HITLDashboard from "./components/hitl/HITLDashboard";
 import AuditVault from "./components/vault/AuditVault";
+import { parseAndIndexCircular } from "./api/ingestionApi";
 import {
   clauses,
   hitlCases as initialHitlCases,
@@ -13,9 +14,33 @@ import {
   pipelineRuns,
 } from "./mock/mockData";
 
+// DEV-ONLY stopgap -- see frontend/.env.example. This backend has no
+// self-service login for Compliance_Officer/System_Admin (real SSO only,
+// by design -- app/api/auth_routes.py), so there is no login flow to
+// source a real token from yet; production needs that SSO integration
+// wired in here instead of an env var.
+const DEV_ACCESS_TOKEN = import.meta.env?.VITE_DEV_ACCESS_TOKEN || undefined;
+
 export default function App() {
   const [activeView, setActiveView] = useState("pipeline");
   const [hitlCases, setHitlCases] = useState(initialHitlCases);
+  const [uploadState, setUploadState] = useState("idle"); // idle | uploading | success | error
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
+
+  const handleUpload = async (file) => {
+    setUploadState("uploading");
+    setUploadError(null);
+    setUploadResult(null);
+    try {
+      const result = await parseAndIndexCircular(file, { accessToken: DEV_ACCESS_TOKEN });
+      setUploadResult({ filename: file.name, ...result });
+      setUploadState("success");
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed.");
+      setUploadState("error");
+    }
+  };
 
   const resolveHitlCase = (caseId, status, notes) => {
     setHitlCases((prev) =>
@@ -76,7 +101,10 @@ export default function App() {
           {activeView === "pipeline" && (
             <PipelineTracker
               runs={pipelineRuns}
-              onUpload={(file) => console.log("Uploaded (mock):", file.name)}
+              onUpload={handleUpload}
+              uploadState={uploadState}
+              uploadResult={uploadResult}
+              uploadError={uploadError}
             />
           )}
           {activeView === "splitview" && (
