@@ -115,7 +115,7 @@ services:
       SERVICE_ROLE: web
     env_file: [.env]
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -123,7 +123,7 @@ services:
       opa: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5
