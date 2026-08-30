@@ -24,12 +24,12 @@ export default function ClauseSplitView({ clauses }) {
             onClick={() => selectClause(c.ruleId)}
             className={`mb-0.5 flex w-full flex-col gap-1.5 border-l-2 px-2.5 py-2 text-left transition-colors ${
               c.ruleId === clause.ruleId
-                ? "border-sky-500 bg-ink-800"
+                ? "border-blue-500 bg-ink-800"
                 : "border-transparent hover:bg-ink-850"
             }`}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-sm font-medium text-slate-200">
+              <span className="font-mono text-sm font-medium text-slate-800">
                 Clause {c.clauseNumber}
               </span>
               <StatusBadge status={c.status} />
@@ -42,8 +42,8 @@ export default function ClauseSplitView({ clauses }) {
       <div className="grid flex-1 grid-cols-2 gap-3 overflow-hidden">
         <Card className="flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-850 px-4 py-2">
-            <FileText className="h-3.5 w-3.5 text-slate-500" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <FileText className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Raw Legal Text
             </span>
             <span className="ml-auto font-mono text-2xs text-slate-500">
@@ -59,10 +59,10 @@ export default function ClauseSplitView({ clauses }) {
           </div>
         </Card>
 
-        <Card className="flex flex-col overflow-hidden bg-ink-950">
+        <Card className="flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-850 px-4 py-2">
-            <FileCode2 className="h-3.5 w-3.5 text-slate-500" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <FileCode2 className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Compiled OPA Rego
             </span>
             <span className="ml-auto font-mono text-2xs text-slate-500">

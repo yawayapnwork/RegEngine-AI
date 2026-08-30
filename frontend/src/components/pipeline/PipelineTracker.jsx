@@ -28,12 +28,12 @@ function RunRow({ run }) {
   const m = metricsFor(run);
 
   return (
-    <tr className="border-b border-ink-800 text-sm last:border-b-0">
+    <tr className="border-b border-ink-700 text-sm last:border-b-0 even:bg-ink-850">
       <td className="px-4 py-3">
         <div className="flex items-start gap-2">
-          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
           <div>
-            <p className="font-medium leading-tight text-slate-200">
+            <p className="font-medium leading-tight text-slate-800">
               {run.filename}
             </p>
             <p className="mt-0.5 font-mono text-2xs text-slate-500">
@@ -48,13 +48,13 @@ function RunRow({ run }) {
       <td className="px-4 py-3">
         <PipelineStage stages={run.stages} />
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-400">
+      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-600">
         {m.extractionMs != null ? `${(m.extractionMs / 1000).toFixed(1)}s` : "—"}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-400">
+      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-600">
         {m.layoutElements}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-400">
+      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-600">
         {m.rulesExtracted}
       </td>
       <td className="whitespace-nowrap px-4 py-3">

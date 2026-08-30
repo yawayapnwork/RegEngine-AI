@@ -30,8 +30,8 @@ export default function HITLDashboard({ cases, onResolveCase }) {
               onClick={() => setFilter(f.id)}
               className={`rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${
                 filter === f.id
-                  ? "bg-ink-700 text-slate-100"
-                  : "text-slate-500 hover:text-slate-300"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
             >
               {f.label}
@@ -39,7 +39,7 @@ export default function HITLDashboard({ cases, onResolveCase }) {
           ))}
         </div>
         <p className="text-sm text-slate-500">
-          <span className="font-semibold text-amber-400">{pendingCount}</span>{" "}
+          <span className="font-semibold text-amber-700">{pendingCount}</span>{" "}
           case{pendingCount === 1 ? "" : "s"} awaiting compliance-officer
           sign-off
         </p>
@@ -61,7 +61,7 @@ export default function HITLDashboard({ cases, onResolveCase }) {
             />
           ))}
           {visible.length === 0 && (
-            <p className="py-16 text-center text-sm text-slate-600">
+            <p className="py-16 text-center text-sm text-slate-400">
               No cases in this filter.
             </p>
           )}

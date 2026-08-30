@@ -12,11 +12,11 @@ function ResultBanner({ result }) {
   }
   if (result.error) {
     return (
-      <div className="flex items-start gap-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
+      <div className="flex items-start gap-2 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <div>
           <p className="font-medium">Evaluation error</p>
-          <p className="text-xs text-amber-400/90">{result.error}</p>
+          <p className="text-xs text-amber-700">{result.error}</p>
         </div>
       </div>
     );
@@ -25,12 +25,12 @@ function ResultBanner({ result }) {
   return (
     <div
       className={`flex items-center gap-2 rounded-sm border-l-2 border px-3 py-2.5 text-sm font-semibold uppercase tracking-wide ${
-        allow ? "border-emerald-500 border-y-emerald-500/30 border-r-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-rose-500 border-y-rose-500/30 border-r-rose-500/30 bg-rose-500/10 text-rose-400"
+        allow ? "border-green-500 border-y-green-200 border-r-green-200 bg-green-50 text-green-800" : "border-red-500 border-y-red-200 border-r-red-200 bg-red-50 text-red-800"
       }`}
     >
       {allow ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
       {allow ? "ALLOW" : "DENY"}
-      <span className="ml-auto rounded-sm bg-black/20 px-2 py-0.5 text-2xs font-medium normal-case tracking-normal text-slate-300">
+      <span className="ml-auto rounded-sm bg-black/5 px-2 py-0.5 text-2xs font-medium normal-case tracking-normal text-slate-600">
         engine: {result.engine === "opa-wasm" ? "OPA Wasm" : "JSON-Logic (in-browser)"}
       </span>
     </div>
@@ -53,7 +53,7 @@ export default function TestConsolePane({
   return (
     <Card className="flex flex-col overflow-hidden">
       <div className="border-b border-ink-700 px-4 py-3">
-        <span className="text-sm font-medium text-slate-300">Test Transaction Payload</span>
+        <span className="text-sm font-medium text-slate-700">Test Transaction Payload</span>
       </div>
 
       <div className="h-48 shrink-0 border-b border-ink-700">
@@ -66,7 +66,7 @@ export default function TestConsolePane({
         />
       </div>
       {payloadParseError && (
-        <div className="flex items-center gap-2 border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-400">
+        <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {payloadParseError}
         </div>
       )}
@@ -78,9 +78,9 @@ export default function TestConsolePane({
         {result?.violations?.length > 0 && (
           <div className="rounded-sm border border-ink-700 bg-ink-850 p-3">
             <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-slate-500">Violations</p>
-            <ul className="space-y-1 text-xs text-slate-400">
+            <ul className="space-y-1 text-xs text-slate-600">
               {result.violations.map((v, i) => (
-                <li key={i} className="border-l-2 border-rose-500/40 pl-2">
+                <li key={i} className="border-l-2 border-red-300 pl-2">
                   {v}
                 </li>
               ))}
@@ -100,13 +100,13 @@ export default function TestConsolePane({
         <button
           onClick={onSubmitForReview}
           disabled={!canSubmit || submitState === "submitting"}
-          className="flex w-full items-center justify-center gap-2 rounded-sm border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-sm border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {submitState === "submitting" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Submit for HITL Review
         </button>
-        {submitState === "success" && <p className="mt-2 text-center text-xs text-emerald-400">Submitted to the compliance review queue.</p>}
-        {submitState === "error" && <p className="mt-2 text-center text-xs text-rose-400">{submitError || "Submission failed."}</p>}
+        {submitState === "success" && <p className="mt-2 text-center text-xs text-green-700">Submitted to the compliance review queue.</p>}
+        {submitState === "error" && <p className="mt-2 text-center text-xs text-red-700">{submitError || "Submission failed."}</p>}
       </div>
     </Card>
   );

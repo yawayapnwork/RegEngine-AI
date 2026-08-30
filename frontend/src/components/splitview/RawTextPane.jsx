@@ -1,7 +1,7 @@
 const KIND_CLASSES = {
-  threshold: "bg-sky-500/10 text-sky-300 border-b-2 border-sky-500/60",
-  condition: "bg-violet-500/10 text-violet-300 border-b-2 border-violet-500/60",
-  qualitative: "bg-amber-500/10 text-amber-300 border-b-2 border-amber-500/60",
+  threshold: "bg-blue-50 text-blue-800 border-b-2 border-blue-400",
+  condition: "bg-violet-50 text-violet-800 border-b-2 border-violet-400",
+  qualitative: "bg-amber-50 text-amber-800 border-b-2 border-amber-400",
 };
 
 /** Splits `[[marked]]` spans out of rawText and pairs each, in order, with
@@ -20,7 +20,7 @@ export default function RawTextPane({ clause, activeIndex, onSelect }) {
   let highlightCursor = -1;
 
   return (
-    <div className="prose-invert max-w-none whitespace-pre-wrap text-[15px] leading-relaxed text-slate-300">
+    <div className="max-w-none whitespace-pre-wrap text-[15px] leading-relaxed text-slate-700">
       {segments(clause.rawText).map((seg) => {
         if (!seg.marked) return <span key={seg.key}>{seg.text}</span>;
 
@@ -33,8 +33,8 @@ export default function RawTextPane({ clause, activeIndex, onSelect }) {
           <button
             key={seg.key}
             onClick={() => onSelect(isActive ? null : index)}
-            className={`mx-0.5 px-0.5 py-0.5 font-medium transition-colors ${KIND_CLASSES[highlight?.kind] || "bg-slate-500/10 border-b-2 border-slate-500/60"} ${
-              isActive ? "bg-white/10 text-slate-100" : ""
+            className={`mx-0.5 px-0.5 py-0.5 font-medium transition-colors ${KIND_CLASSES[highlight?.kind] || "bg-slate-100 border-b-2 border-slate-400"} ${
+              isActive ? "bg-slate-900/10 text-slate-900" : ""
             }`}
             title={`clause element: ${highlight?.kind}`}
           >

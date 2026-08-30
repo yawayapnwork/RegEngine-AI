@@ -4,11 +4,11 @@
 
 @layer base {
   body {
-    @apply bg-ink-950 text-slate-300 antialiased font-sans;
+    @apply bg-ink-950 text-slate-800 antialiased font-sans;
     font-feature-settings: "tnum" 1, "cv11" 1;
   }
   ::selection {
-    @apply bg-sky-500/30 text-slate-100;
+    @apply bg-blue-100 text-slate-900;
   }
 }
 

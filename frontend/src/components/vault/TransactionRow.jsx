@@ -8,15 +8,15 @@ function truncateHash(hash) {
 export default function TransactionRow({ entry, isNew }) {
   return (
     <tr
-      className={`border-b border-ink-800 text-sm transition-colors ${isNew ? "bg-sky-500/5" : ""}`}
+      className={`border-b border-ink-700 text-sm transition-colors even:bg-ink-850 ${isNew ? "bg-blue-50" : ""}`}
     >
       <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs tabular-nums text-slate-500">
         #{entry.sequenceNum}
       </td>
-      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-300">
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-800">
         {entry.transactionId}
       </td>
-      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-400">
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
         {entry.brokerId}
       </td>
       <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-500">
@@ -24,14 +24,14 @@ export default function TransactionRow({ entry, isNew }) {
       </td>
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-1.5">
-          <Link2 className="h-3.5 w-3.5 shrink-0 text-slate-600" />
+          <Link2 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
           <span
-            className="font-mono text-xs text-slate-400"
+            className="font-mono text-xs text-slate-600"
             title={entry.clauseHash}
           >
             {truncateHash(entry.clauseHash)}
           </span>
-          <span className="text-xs text-slate-600">
+          <span className="text-xs text-slate-400">
             &sect;{entry.sectionReference}
           </span>
         </div>
@@ -39,18 +39,18 @@ export default function TransactionRow({ entry, isNew }) {
       <td className="px-4 py-2.5">
         <StatusBadge status={entry.evaluationResult} />
         {entry.hitlReviewId && (
-          <span className="ml-1.5 text-[11px] text-slate-600">
+          <span className="ml-1.5 text-[11px] text-slate-400">
             {entry.hitlReviewId}
           </span>
         )}
       </td>
       <td className="px-4 py-2.5">
-        <div className="flex items-center gap-1 font-mono text-xs text-slate-600">
+        <div className="flex items-center gap-1 font-mono text-xs text-slate-400">
           <span title={entry.previousHash}>
             {truncateHash(entry.previousHash)}
           </span>
-          <span className="text-slate-700">&rarr;</span>
-          <span className="text-slate-400" title={entry.currentHash}>
+          <span className="text-slate-300">&rarr;</span>
+          <span className="text-slate-600" title={entry.currentHash}>
             {truncateHash(entry.currentHash)}
           </span>
         </div>

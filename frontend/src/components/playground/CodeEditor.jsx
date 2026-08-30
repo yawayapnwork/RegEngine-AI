@@ -15,14 +15,14 @@ export default function CodeEditor({ value, onChange, readOnly = false, placehol
     if (gutterRef.current) gutterRef.current.scrollTop = e.target.scrollTop;
   };
 
-  const toneClasses = tone === "error" ? "text-rose-300" : "text-slate-200";
+  const toneClasses = tone === "error" ? "text-red-600" : "text-slate-800";
 
   return (
-    <div className="flex h-full overflow-hidden bg-ink-950/60 font-mono text-[13px] leading-relaxed">
+    <div className="flex h-full overflow-hidden bg-ink-850 font-mono text-[13px] leading-relaxed">
       <pre
         ref={gutterRef}
         aria-hidden="true"
-        className="select-none overflow-hidden px-3 py-3 text-right text-slate-600"
+        className="select-none overflow-hidden px-3 py-3 text-right text-slate-400"
       >
         {Array.from({ length: lineCount }, (_, i) => i + 1).join("\n")}
       </pre>
@@ -35,7 +35,7 @@ export default function CodeEditor({ value, onChange, readOnly = false, placehol
         placeholder={placeholder}
         spellCheck={false}
         wrap="off"
-        className={`flex-1 resize-none overflow-auto whitespace-pre bg-transparent px-3 py-3 outline-none placeholder:text-slate-600 ${toneClasses} ${
+        className={`flex-1 resize-none overflow-auto whitespace-pre bg-transparent px-3 py-3 outline-none placeholder:text-slate-400 ${toneClasses} ${
           readOnly ? "cursor-default" : ""
         }`}
       />

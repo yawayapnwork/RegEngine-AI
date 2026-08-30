@@ -10,56 +10,56 @@ import {
 const VARIANTS = {
   complete: {
     icon: CheckCircle2,
-    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+    classes: "border-green-200 bg-green-100 text-green-800",
   },
   pass: {
     icon: CheckCircle2,
-    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+    classes: "border-green-200 bg-green-100 text-green-800",
   },
   approved: {
     icon: CheckCircle2,
-    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+    classes: "border-green-200 bg-green-100 text-green-800",
   },
   compiled: {
     icon: CheckCircle2,
-    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+    classes: "border-green-200 bg-green-100 text-green-800",
   },
 
   in_progress: {
     icon: Loader2,
-    classes: "border-sky-500/40 bg-sky-500/10 text-sky-400",
+    classes: "border-blue-200 bg-blue-100 text-blue-800",
     spin: true,
   },
 
   pending: {
     icon: Clock,
-    classes: "border-ink-600 bg-ink-800 text-slate-400",
+    classes: "border-slate-200 bg-slate-100 text-slate-600",
   },
 
   fail: {
     icon: XCircle,
-    classes: "border-rose-500/40 bg-rose-500/10 text-rose-400",
+    classes: "border-red-200 bg-red-100 text-red-800",
   },
   rejected: {
     icon: XCircle,
-    classes: "border-rose-500/40 bg-rose-500/10 text-rose-400",
+    classes: "border-red-200 bg-red-100 text-red-800",
   },
   blocking: {
     icon: XCircle,
-    classes: "border-rose-500/40 bg-rose-500/10 text-rose-400",
+    classes: "border-red-200 bg-red-100 text-red-800",
   },
 
   hitl_blocked: {
     icon: ShieldAlert,
-    classes: "border-amber-500/40 bg-amber-500/10 text-amber-400",
+    classes: "border-yellow-200 bg-yellow-100 text-yellow-800",
   },
   hitl_review: {
     icon: ShieldAlert,
-    classes: "border-amber-500/40 bg-amber-500/10 text-amber-400",
+    classes: "border-yellow-200 bg-yellow-100 text-yellow-800",
   },
   advisory: {
     icon: AlertTriangle,
-    classes: "border-amber-500/40 bg-amber-500/10 text-amber-400",
+    classes: "border-yellow-200 bg-yellow-100 text-yellow-800",
   },
 };
 

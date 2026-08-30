@@ -8,8 +8,8 @@ const STAGE_LABELS = {
 };
 
 function segmentClasses(status) {
-  if (status === "complete") return "bg-emerald-500";
-  if (status === "in_progress") return "bg-sky-400";
+  if (status === "complete") return "bg-green-500";
+  if (status === "in_progress") return "bg-blue-500";
   return "bg-ink-700";
 }
 
@@ -31,7 +31,7 @@ export default function PipelineStage({ stages }) {
           />
         ))}
       </div>
-      <div className="flex justify-between font-mono text-[10px] uppercase tracking-wide text-slate-600">
+      <div className="flex justify-between font-mono text-[10px] uppercase tracking-wide text-slate-400">
         {PIPELINE_STAGES.map((stageId) => (
           <span key={stageId}>{STAGE_LABELS[stageId].slice(0, 3)}</span>
         ))}

@@ -44,7 +44,7 @@ export default function PolicyEditorPane({
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 py-1 text-sm font-medium transition-colors ${
-              activeTab === tab.id ? "bg-ink-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
+              activeTab === tab.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
             }`}
           >
             <FileCode2 className="h-3.5 w-3.5" />
@@ -55,14 +55,14 @@ export default function PolicyEditorPane({
 
       <div className="flex items-center gap-2 border-b border-ink-700 px-2 py-1.5">
         {wasm.hasWasmPolicy ? (
-          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-emerald-400">
+          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-green-200 bg-green-100 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-green-800">
             <Cpu className="h-3 w-3" /> Wasm loaded ({wasm.wasmMeta?.fileName})
-            <button onClick={wasm.clearWasmBundle} className="ml-1 text-emerald-400/70 hover:text-emerald-200">
+            <button onClick={wasm.clearWasmBundle} className="ml-1 text-green-700/70 hover:text-green-900">
               <X className="h-3 w-3" />
             </button>
           </span>
         ) : (
-          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-sky-400">
+          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-blue-200 bg-blue-100 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-blue-800">
             <Zap className="h-3 w-3" /> JSON-Logic (instant)
           </span>
         )}
@@ -80,17 +80,17 @@ export default function PolicyEditorPane({
         <button
           onClick={() => fileInputRef.current?.click()}
           title="Load a pre-compiled OPA .wasm bundle (opa build -t wasm) for real OPA Wasm evaluation"
-          className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-ink-700 px-2 py-1 text-xs font-medium text-slate-400 hover:border-ink-600 hover:text-slate-200"
+          className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-ink-700 px-2 py-1 text-xs font-medium text-slate-600 hover:border-ink-650 hover:text-slate-900"
         >
           <Upload className="h-3.5 w-3.5" /> Load .wasm
         </button>
       </div>
 
       {wasm.wasmStatus === "loading" && (
-        <div className="border-b border-ink-700 bg-ink-850 px-4 py-2 text-xs text-slate-400">Loading compiled Wasm policy...</div>
+        <div className="border-b border-ink-700 bg-ink-850 px-4 py-2 text-xs text-slate-500">Loading compiled Wasm policy...</div>
       )}
       {wasm.wasmStatus === "error" && (
-        <div className="flex items-center gap-2 border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-400">
+        <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Failed to load Wasm bundle: {wasm.wasmError}
         </div>
       )}
@@ -115,7 +115,7 @@ export default function PolicyEditorPane({
       </div>
 
       {activeTab === "jsonlogic" && jsonLogicParseError && (
-        <div className="flex items-center gap-2 border-t border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-400">
+        <div className="flex items-center gap-2 border-t border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {jsonLogicParseError}
         </div>
       )}

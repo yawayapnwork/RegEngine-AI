@@ -53,7 +53,7 @@ export default function AuditVault({ initialFeed }) {
       <div className="flex items-center gap-2">
         <button
           onClick={() => setIsLive((v) => !v)}
-          className="flex items-center gap-1.5 rounded-sm border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-sm font-medium text-slate-300 hover:bg-ink-800"
+          className="flex items-center gap-1.5 rounded-sm border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-sm font-medium text-slate-700 hover:bg-ink-850"
         >
           {isLive ? (
             <Pause className="h-3.5 w-3.5" />
@@ -64,13 +64,13 @@ export default function AuditVault({ initialFeed }) {
         </button>
         <button
           onClick={runVerification}
-          className="flex items-center gap-1.5 rounded-sm border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-sm font-medium text-sky-400 hover:bg-sky-500/20"
+          className="flex items-center gap-1.5 rounded-sm border border-blue-200 bg-blue-100 px-2.5 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-200"
         >
           <ShieldCheck className="h-3.5 w-3.5" /> Verify chain integrity
         </button>
         <button
           onClick={simulateTamper}
-          className="ml-auto flex items-center gap-1.5 rounded-sm border border-ink-700 px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:border-rose-500/40 hover:text-rose-400"
+          className="ml-auto flex items-center gap-1.5 rounded-sm border border-ink-700 px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:border-red-300 hover:text-red-700"
           title="Demo only: forges a row in place to show verify_chain catching it, mirroring app/ledger/verifier.py."
         >
           <Wrench className="h-3.5 w-3.5" /> Simulate tamper
@@ -81,25 +81,25 @@ export default function AuditVault({ initialFeed }) {
         <Card
           className={`flex items-start gap-3 p-3 ${
             verifyResult.valid
-              ? "border-emerald-500/30 bg-emerald-500/5"
-              : "border-rose-500/30 bg-rose-500/5"
+              ? "border-green-200 bg-green-50"
+              : "border-red-200 bg-red-50"
           }`}
         >
           {verifyResult.valid ? (
-            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-green-700" />
           ) : (
-            <ShieldX className="mt-0.5 h-5 w-5 shrink-0 text-rose-400" />
+            <ShieldX className="mt-0.5 h-5 w-5 shrink-0 text-red-700" />
           )}
           <div className="text-sm">
             <p
-              className={`font-medium ${verifyResult.valid ? "text-emerald-400" : "text-rose-400"}`}
+              className={`font-medium ${verifyResult.valid ? "text-green-800" : "text-red-800"}`}
             >
               {verifyResult.valid
                 ? `Chain intact across ${verifyResult.entriesChecked} entries.`
                 : `Integrity violation detected across ${verifyResult.entriesChecked} entries.`}
             </p>
             {!verifyResult.valid && (
-              <ul className="mt-1 list-inside list-disc text-rose-300/80">
+              <ul className="mt-1 list-inside list-disc text-red-700">
                 {verifyResult.breaks.map((b, i) => (
                   <li key={i}>
                     sequence #{b.sequenceNum}: {b.reason}
@@ -114,7 +114,7 @@ export default function AuditVault({ initialFeed }) {
       {tamperedSeq && (
         <p className="text-xs text-slate-500">
           Row #{tamperedSeq} was forged in place for this demo (bypassing the
-          real append-only path) &mdash; run &ldquo;Verify chain
+          real append-only path) — run &ldquo;Verify chain
           integrity&rdquo; to see it caught.
         </p>
       )}
