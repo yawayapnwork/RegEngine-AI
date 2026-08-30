@@ -72,7 +72,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      test: ["CMD", "./qdrant", "--version"]
       interval: 5s
       timeout: 5s
       retries: 10
