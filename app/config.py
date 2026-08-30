@@ -412,6 +412,35 @@ class Settings(BaseSettings):
     sso_pingidentity_audience: str | None = None
     sso_pingidentity_group_claim: str = "groups"
 
+    # Auth0 issues an opaque (non-JWT) access token unless `audience` is
+    # specified on every authorize/getAccessTokenSilently call -- this
+    # provider registration only ever verifies a JWT, so sso_auth0_audience
+    # is effectively required (not optional in practice, even though typed
+    # the same as the other providers' for consistency), and MUST exactly
+    # match the API Identifier of the Auth0 API resource this frontend
+    # requests. Auth0 also does not put group/role membership in a token by
+    # DEFAULT at all -- unlike Okta/Azure AD, it requires a dashboard-
+    # configured Action (Auth0 Dashboard -> Actions -> Flows -> Login) that
+    # adds a custom namespaced claim, e.g.:
+    #
+    #   exports.onExecutePostLogin = async (event, api) => {
+    #     const roles = event.authorization?.roles || [];
+    #     api.idToken.setCustomClaim('https://regengine-ai/roles', roles);
+    #     api.accessToken.setCustomClaim('https://regengine-ai/roles', roles);
+    #   };
+    #
+    # sso_auth0_group_claim must then be set to that exact namespaced claim
+    # name (Auth0 requires non-standard claims to be namespaced as a full
+    # URI -- an unnamespaced custom claim is silently dropped), and
+    # sso_directory_group_role_map's keys must match the ROLE NAMES this
+    # Action emits (from Auth0's own Role assignment, e.g. via
+    # `event.authorization.roles`), not an AD/LDAP group name as with the
+    # other providers -- Auth0 has no native concept of AD groups.
+    sso_auth0_issuer: str | None = None  # e.g. "https://your-tenant.us.auth0.com/" -- note the trailing slash Auth0's own issuer claim always includes
+    sso_auth0_jwks_url: str | None = None  # e.g. "https://your-tenant.us.auth0.com/.well-known/jwks.json"
+    sso_auth0_audience: str | None = None  # the Auth0 API's "Identifier", e.g. "https://api.regengine-ai.com"
+    sso_auth0_group_claim: str = "https://regengine-ai/roles"
+
     sso_external_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
 
     # --- Automated Directory Sync: AD/Okta/Azure AD group -> RBAC role ---

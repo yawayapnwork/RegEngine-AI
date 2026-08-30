@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import Sidebar from "./components/layout/Sidebar";
 import TopBar from "./components/layout/TopBar";
 import PipelineTracker from "./components/pipeline/PipelineTracker";
@@ -14,14 +15,23 @@ import {
   pipelineRuns,
 } from "./mock/mockData";
 
-// DEV-ONLY stopgap -- see frontend/.env.example. This backend has no
-// self-service login for Compliance_Officer/System_Admin (real SSO only,
-// by design -- app/api/auth_routes.py), so there is no login flow to
-// source a real token from yet; production needs that SSO integration
-// wired in here instead of an env var.
+// LOCAL-DEV-ONLY fallback -- see frontend/.env.example. Never set this in
+// a deployed environment: it bakes a static Bearer token into the public
+// JS bundle. Real auth is Auth0 (below); this only exists so `npm run dev`
+// works without clicking through a login on every restart.
 const DEV_ACCESS_TOKEN = import.meta.env?.VITE_DEV_ACCESS_TOKEN || undefined;
+const AUTH0_AUDIENCE = import.meta.env?.VITE_AUTH0_AUDIENCE;
 
-export default function App() {
+export default function App({ auth0Configured = true }) {
+  const {
+    isAuthenticated,
+    isLoading: authLoading,
+    loginWithRedirect,
+    logout,
+    getAccessTokenSilently,
+    user,
+  } = useAuth0();
+
   const [activeView, setActiveView] = useState("pipeline");
   const [hitlCases, setHitlCases] = useState(initialHitlCases);
   const [uploadState, setUploadState] = useState("idle"); // idle | uploading | success | error
@@ -33,7 +43,18 @@ export default function App() {
     setUploadError(null);
     setUploadResult(null);
     try {
-      const result = await parseAndIndexCircular(file, { accessToken: DEV_ACCESS_TOKEN });
+      let accessToken = DEV_ACCESS_TOKEN;
+      if (auth0Configured && isAuthenticated) {
+        // Auth0 SDK handles caching + silent refresh internally -- this
+        // is cheap to call on every upload, never a network round trip
+        // unless the cached token is actually expired.
+        accessToken = await getAccessTokenSilently(
+          AUTH0_AUDIENCE ? { authorizationParams: { audience: AUTH0_AUDIENCE } } : undefined,
+        );
+      } else if (auth0Configured && !accessToken) {
+        throw new Error("Not logged in. Click \"Log in\" in the top bar first.");
+      }
+      const result = await parseAndIndexCircular(file, { accessToken });
       setUploadResult({ filename: file.name, ...result });
       setUploadState("success");
     } catch (err) {
@@ -96,7 +117,15 @@ export default function App() {
         pendingHitlCount={pendingHitlCount}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar activeView={activeView} />
+        <TopBar
+          activeView={activeView}
+          auth0Configured={auth0Configured}
+          isAuthenticated={isAuthenticated}
+          isLoading={authLoading}
+          user={user}
+          onLogin={() => loginWithRedirect()}
+          onLogout={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+        />
         <main className="flex-1 overflow-y-auto scrollbar-thin p-4">
           {activeView === "pipeline" && (
             <PipelineTracker

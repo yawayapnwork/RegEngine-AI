@@ -1,4 +1,4 @@
-import { Bell, Search } from "lucide-react";
+import { Bell, LogOut, Search, User } from "lucide-react";
 
 const TITLES = {
   pipeline: [
@@ -23,7 +23,53 @@ const TITLES = {
   ],
 };
 
-export default function TopBar({ activeView }) {
+function AuthControl({ auth0Configured, isAuthenticated, isLoading, user, onLogin, onLogout }) {
+  if (!auth0Configured) {
+    return (
+      <span
+        title="VITE_AUTH0_DOMAIN / VITE_AUTH0_CLIENT_ID are not set -- see frontend/.env.example"
+        className="rounded-sm border border-amber-200 bg-amber-100 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-amber-800"
+      >
+        Auth not configured
+      </span>
+    );
+  }
+  if (isLoading) {
+    return <div className="h-7 w-16 animate-pulse rounded-sm bg-ink-850" />;
+  }
+  if (!isAuthenticated) {
+    return (
+      <button
+        onClick={onLogin}
+        className="flex items-center gap-1.5 rounded-sm border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+      >
+        <User className="h-3.5 w-3.5" /> Log in
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onLogout}
+      title={user?.email || user?.name || "Log out"}
+      className="flex items-center gap-1.5 rounded-sm border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:border-red-300 hover:text-red-700"
+    >
+      <span className="max-w-[10rem] truncate font-mono text-2xs">
+        {user?.email || user?.name || "Signed in"}
+      </span>
+      <LogOut className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+export default function TopBar({
+  activeView,
+  auth0Configured = true,
+  isAuthenticated = false,
+  isLoading = false,
+  user = null,
+  onLogin = () => {},
+  onLogout = () => {},
+}) {
   const [title, subtitle] = TITLES[activeView] || ["", ""];
   return (
     <header className="flex items-center justify-between border-b border-ink-700 bg-ink-900 px-5 py-3">
@@ -43,9 +89,14 @@ export default function TopBar({ activeView }) {
           <Bell className="h-3.5 w-3.5" />
           <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-red-500" />
         </button>
-        <div className="flex h-7 w-7 items-center justify-center rounded-sm border border-ink-700 bg-ink-850 font-mono text-2xs font-semibold text-slate-600">
-          CO
-        </div>
+        <AuthControl
+          auth0Configured={auth0Configured}
+          isAuthenticated={isAuthenticated}
+          isLoading={isLoading}
+          user={user}
+          onLogin={onLogin}
+          onLogout={onLogout}
+        />
       </div>
     </header>
   );
