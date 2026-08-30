@@ -511,6 +511,17 @@ class Settings(BaseSettings):
         default_factory=lambda: ["/healthz", "/", "/docs", "/openapi.json", "/redoc", "/metrics"]
     )
     payload_encryption_enabled: bool = False
+    # Origins the browser-facing frontend (frontend/) is allowed to call
+    # this API from cross-origin. Empty by default (same-origin/no-CORS
+    # deployments -- e.g. served behind the same domain, or accessed only
+    # via curl/server-to-server) never need this touched. The production
+    # split-deployment case (frontend on Vercel, API on Render/elsewhere)
+    # DOES: without an explicit allowlist here, the browser blocks every
+    # cross-origin request with no server-side symptom to point at (the
+    # request never even reaches a route handler to log).
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["https://regengine-ai.vercel.app", "http://localhost:5173"]
+    )
 
     # --- Observability: OpenTelemetry tracing ---
     otel_enabled: bool = True

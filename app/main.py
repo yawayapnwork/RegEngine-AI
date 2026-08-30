@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.requests import Request
 
@@ -158,7 +159,7 @@ setup_tracing(app, settings)
 # Starlette runs middleware in the REVERSE of add_middleware() call order
 # (last added = outermost = runs first on the way in). Added here (bottom
 # to top) so the effective request path is:
-#   SecurityHeaders -> JWTAuthentication -> KillSwitch -> SessionManagement -> TenantRateLimit -> PayloadEncryption -> route
+#   CORS -> SecurityHeaders -> JWTAuthentication -> KillSwitch -> SessionManagement -> TenantRateLimit -> PayloadEncryption -> route
 # See app/security/middleware.py's module docstring for the base rationale.
 # KillSwitchMiddleware (app.governance) is inserted right after
 # JWTAuthentication specifically so it has `request.state.principal`
@@ -171,6 +172,21 @@ app.add_middleware(SessionManagementMiddleware, settings=settings, redis_client=
 app.add_middleware(KillSwitchMiddleware, settings=settings, kill_switch_store=KillSwitchStore(get_redis_pool(), settings.governance_key_prefix))
 app.add_middleware(JWTAuthenticationMiddleware, settings=settings)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
+# CORS must be OUTERMOST (added last): a preflight OPTIONS request carries
+# no Authorization header, so if JWTAuthenticationMiddleware ran first it
+# would 401 every preflight before CORSMiddleware ever got a chance to
+# answer it -- the browser would then block the real request with a CORS
+# error that never even shows up in this service's logs (the actual POST
+# never gets sent). CORSMiddleware only adds headers to non-preflight
+# requests; it never bypasses auth for them.
+if settings.cors_allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 from app.api.webhook_routes import router as webhook_router
 
