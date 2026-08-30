@@ -10,12 +10,12 @@ nameOverride: ""
 fullnameOverride: ""
 
 image:
-  repository: ghcr.io/your-org/regengine-ai
-  tag: ""  # defaults to .Chart.AppVersion
-  pullPolicy: IfNotPresent
+  repository: 093047596689.dkr.ecr.ap-south-1.amazonaws.com/regengine-ai
+  tag: "latest"  # Points directly to your ECR image tag
+  pullPolicy: Always
 
-imagePullSecrets: []
-# - name: regcred
+imagePullSecrets:
+  - name: ecr-cred
 
 serviceAccount:
   create: true
