@@ -86,7 +86,7 @@ export default function PolicyPlayground({ clauses, onSubmitForReview }) {
   };
 
   return (
-    <div className="grid h-full grid-cols-[1.1fr_1fr_0.9fr] gap-4">
+    <div className="grid h-full grid-cols-[1.1fr_1fr_0.9fr] gap-3">
       <CircularTextPane
         clauses={clauses}
         selectedRuleId={clause.ruleId}

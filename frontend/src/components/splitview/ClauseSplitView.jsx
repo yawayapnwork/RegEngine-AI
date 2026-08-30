@@ -16,20 +16,20 @@ export default function ClauseSplitView({ clauses }) {
   };
 
   return (
-    <div className="flex h-full gap-6">
-      <Card className="w-72 shrink-0 overflow-y-auto scrollbar-thin p-2">
+    <div className="flex h-full gap-3">
+      <Card className="w-64 shrink-0 overflow-y-auto scrollbar-thin p-1.5">
         {clauses.map((c) => (
           <button
             key={c.ruleId}
             onClick={() => selectClause(c.ruleId)}
-            className={`mb-1 flex w-full flex-col gap-1.5 rounded-lg px-3 py-2.5 text-left transition-colors ${
+            className={`mb-0.5 flex w-full flex-col gap-1.5 border-l-2 px-2.5 py-2 text-left transition-colors ${
               c.ruleId === clause.ruleId
-                ? "bg-ink-800 ring-1 ring-inset ring-ink-600"
-                : "hover:bg-ink-800/60"
+                ? "border-sky-500 bg-ink-800"
+                : "border-transparent hover:bg-ink-850"
             }`}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-slate-200">
+              <span className="font-mono text-sm font-medium text-slate-200">
                 Clause {c.clauseNumber}
               </span>
               <StatusBadge status={c.status} />
@@ -39,14 +39,14 @@ export default function ClauseSplitView({ clauses }) {
         ))}
       </Card>
 
-      <div className="grid flex-1 grid-cols-2 gap-6 overflow-hidden">
+      <div className="grid flex-1 grid-cols-2 gap-3 overflow-hidden">
         <Card className="flex flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-ink-700 px-4 py-3">
-            <FileText className="h-4 w-4 text-slate-400" />
-            <span className="text-sm font-medium text-slate-300">
+          <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-850 px-4 py-2">
+            <FileText className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Raw Legal Text
             </span>
-            <span className="ml-auto text-xs text-slate-500">
+            <span className="ml-auto font-mono text-2xs text-slate-500">
               source_sha256 {clause.sourceSha256.slice(0, 12)}&hellip;
             </span>
           </div>
@@ -59,13 +59,13 @@ export default function ClauseSplitView({ clauses }) {
           </div>
         </Card>
 
-        <Card className="flex flex-col overflow-hidden bg-ink-950/60">
-          <div className="flex items-center gap-2 border-b border-ink-700 px-4 py-3">
-            <FileCode2 className="h-4 w-4 text-slate-400" />
-            <span className="text-sm font-medium text-slate-300">
+        <Card className="flex flex-col overflow-hidden bg-ink-950">
+          <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-850 px-4 py-2">
+            <FileCode2 className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Compiled OPA Rego
             </span>
-            <span className="ml-auto font-mono text-xs text-slate-500">
+            <span className="ml-auto font-mono text-2xs text-slate-500">
               clause_{clause.clauseNumber.replace(/\./g, "_")}
             </span>
           </div>

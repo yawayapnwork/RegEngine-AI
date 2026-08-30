@@ -23,20 +23,20 @@ export default function PdfUploadZone({ onFileSelected }) {
         handleFiles(e.dataTransfer.files);
       }}
       onClick={() => inputRef.current?.click()}
-      className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
+      className={`flex cursor-pointer items-center gap-3 rounded-sm border px-4 py-3 transition-colors ${
         isDragging
           ? "border-sky-500 bg-sky-500/5"
-          : "border-ink-700 bg-ink-900/40 hover:border-ink-600"
+          : "border-dashed border-ink-700 bg-ink-900 hover:border-ink-600"
       }`}
     >
       <UploadCloud
-        className={`h-8 w-8 ${isDragging ? "text-sky-400" : "text-slate-500"}`}
+        className={`h-4 w-4 shrink-0 ${isDragging ? "text-sky-400" : "text-slate-500"}`}
       />
-      <p className="mt-3 text-sm font-medium text-slate-300">
+      <p className="text-sm text-slate-300">
         Drop a SEBI Master Circular PDF, or click to browse
       </p>
-      <p className="mt-1 text-xs text-slate-500">
-        Feeds POST /v1/circulars/parse-and-index &middot; max 50MB
+      <p className="ml-auto font-mono text-2xs text-slate-600">
+        POST /v1/circulars/parse-and-index &middot; max 50MB
       </p>
       <input
         ref={inputRef}

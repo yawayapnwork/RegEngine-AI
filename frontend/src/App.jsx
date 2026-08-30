@@ -72,7 +72,7 @@ export default function App() {
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar activeView={activeView} />
-        <main className="flex-1 overflow-y-auto scrollbar-thin p-6">
+        <main className="flex-1 overflow-y-auto scrollbar-thin p-4">
           {activeView === "pipeline" && (
             <PipelineTracker
               runs={pipelineRuns}
@@ -80,17 +80,17 @@ export default function App() {
             />
           )}
           {activeView === "splitview" && (
-            <div className="h-[calc(100vh-9.5rem)]">
+            <div className="h-[calc(100vh-7.5rem)]">
               <ClauseSplitView clauses={clauses} />
             </div>
           )}
           {activeView === "playground" && (
-            <div className="h-[calc(100vh-9.5rem)]">
+            <div className="h-[calc(100vh-7.5rem)]">
               <PolicyPlayground clauses={clauses} onSubmitForReview={submitPlaygroundDraftForReview} />
             </div>
           )}
           {activeView === "hitl" && (
-            <div className="h-[calc(100vh-9.5rem)]">
+            <div className="h-[calc(100vh-7.5rem)]">
               <HITLDashboard
                 cases={hitlCases}
                 onResolveCase={resolveHitlCase}
@@ -98,7 +98,7 @@ export default function App() {
             </div>
           )}
           {activeView === "vault" && (
-            <div className="h-[calc(100vh-9.5rem)]">
+            <div className="h-[calc(100vh-7.5rem)]">
               <AuditVault initialFeed={ledgerFeed} />
             </div>
           )}

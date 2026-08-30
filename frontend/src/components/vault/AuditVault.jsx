@@ -50,10 +50,10 @@ export default function AuditVault({ initialFeed }) {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <button
           onClick={() => setIsLive((v) => !v)}
-          className="flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-ink-800"
+          className="flex items-center gap-1.5 rounded-sm border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-sm font-medium text-slate-300 hover:bg-ink-800"
         >
           {isLive ? (
             <Pause className="h-3.5 w-3.5" />
@@ -64,13 +64,13 @@ export default function AuditVault({ initialFeed }) {
         </button>
         <button
           onClick={runVerification}
-          className="flex items-center gap-1.5 rounded-lg bg-sky-500/15 px-3 py-1.5 text-sm font-medium text-sky-400 ring-1 ring-inset ring-sky-500/30 hover:bg-sky-500/25"
+          className="flex items-center gap-1.5 rounded-sm border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-sm font-medium text-sky-400 hover:bg-sky-500/20"
         >
           <ShieldCheck className="h-3.5 w-3.5" /> Verify chain integrity
         </button>
         <button
           onClick={simulateTamper}
-          className="ml-auto flex items-center gap-1.5 rounded-lg border border-ink-700 px-3 py-1.5 text-sm font-medium text-slate-500 hover:border-rose-500/40 hover:text-rose-400"
+          className="ml-auto flex items-center gap-1.5 rounded-sm border border-ink-700 px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:border-rose-500/40 hover:text-rose-400"
           title="Demo only: forges a row in place to show verify_chain catching it, mirroring app/ledger/verifier.py."
         >
           <Wrench className="h-3.5 w-3.5" /> Simulate tamper
@@ -79,7 +79,7 @@ export default function AuditVault({ initialFeed }) {
 
       {verifyResult && (
         <Card
-          className={`flex items-start gap-3 p-4 ${
+          className={`flex items-start gap-3 p-3 ${
             verifyResult.valid
               ? "border-emerald-500/30 bg-emerald-500/5"
               : "border-rose-500/30 bg-rose-500/5"
@@ -121,16 +121,16 @@ export default function AuditVault({ initialFeed }) {
 
       <Card className="flex-1 overflow-hidden">
         <div className="h-full overflow-y-auto scrollbar-thin">
-          <table className="w-full border-collapse">
-            <thead className="sticky top-0 bg-ink-900/95 text-left text-xs uppercase tracking-wide text-slate-500 backdrop-blur">
+          <table className="w-full min-w-[900px] border-collapse">
+            <thead className="sticky top-0 border-b border-ink-700 bg-ink-850 text-left text-2xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-medium">Seq</th>
-                <th className="px-4 py-3 font-medium">Transaction</th>
-                <th className="px-4 py-3 font-medium">Broker</th>
-                <th className="px-4 py-3 font-medium">Evaluated</th>
-                <th className="px-4 py-3 font-medium">SEBI Clause Link</th>
-                <th className="px-4 py-3 font-medium">Result</th>
-                <th className="px-4 py-3 font-medium">Hash Chain</th>
+                <th className="px-4 py-2.5">Seq</th>
+                <th className="px-4 py-2.5">Transaction</th>
+                <th className="px-4 py-2.5">Broker</th>
+                <th className="px-4 py-2.5">Evaluated</th>
+                <th className="px-4 py-2.5">SEBI Clause Link</th>
+                <th className="px-4 py-2.5">Result</th>
+                <th className="px-4 py-2.5">Hash Chain</th>
               </tr>
             </thead>
             <tbody>

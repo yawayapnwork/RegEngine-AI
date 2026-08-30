@@ -10,59 +10,61 @@ import {
 const VARIANTS = {
   complete: {
     icon: CheckCircle2,
-    classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
   },
   pass: {
     icon: CheckCircle2,
-    classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
   },
   approved: {
     icon: CheckCircle2,
-    classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
   },
   compiled: {
     icon: CheckCircle2,
-    classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
   },
 
   in_progress: {
     icon: Loader2,
-    classes: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+    classes: "border-sky-500/40 bg-sky-500/10 text-sky-400",
     spin: true,
   },
 
   pending: {
     icon: Clock,
-    classes: "bg-slate-500/10 text-slate-400 border-slate-500/30",
+    classes: "border-ink-600 bg-ink-800 text-slate-400",
   },
 
   fail: {
     icon: XCircle,
-    classes: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    classes: "border-rose-500/40 bg-rose-500/10 text-rose-400",
   },
   rejected: {
     icon: XCircle,
-    classes: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    classes: "border-rose-500/40 bg-rose-500/10 text-rose-400",
   },
   blocking: {
     icon: XCircle,
-    classes: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    classes: "border-rose-500/40 bg-rose-500/10 text-rose-400",
   },
 
   hitl_blocked: {
     icon: ShieldAlert,
-    classes: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    classes: "border-amber-500/40 bg-amber-500/10 text-amber-400",
   },
   hitl_review: {
     icon: ShieldAlert,
-    classes: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    classes: "border-amber-500/40 bg-amber-500/10 text-amber-400",
   },
   advisory: {
     icon: AlertTriangle,
-    classes: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    classes: "border-amber-500/40 bg-amber-500/10 text-amber-400",
   },
 };
 
+/** A rectangular, uppercase status tag — deliberately not a rounded/glowing
+ * pill, to match the rest of this app's dense, tabular status vocabulary. */
 export default function StatusBadge({ status, label }) {
   const key = String(status || "").toLowerCase();
   const variant = VARIANTS[key] || VARIANTS.pending;
@@ -70,9 +72,9 @@ export default function StatusBadge({ status, label }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${variant.classes}`}
+      className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide ${variant.classes}`}
     >
-      <Icon className={`h-3.5 w-3.5 ${variant.spin ? "animate-spin" : ""}`} />
+      <Icon className={`h-3 w-3 ${variant.spin ? "animate-spin" : ""}`} />
       {label || key.replace(/_/g, " ")}
     </span>
   );

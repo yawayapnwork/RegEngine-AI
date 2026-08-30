@@ -38,52 +38,52 @@ export default function PolicyEditorPane({
 
   return (
     <Card className="flex flex-col overflow-hidden">
-      <div className="flex items-center gap-1 border-b border-ink-700 px-2 py-2">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-ink-700 bg-ink-850 px-2 py-1.5">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === tab.id ? "bg-ink-800 text-slate-100" : "text-slate-500 hover:text-slate-300"
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 py-1 text-sm font-medium transition-colors ${
+              activeTab === tab.id ? "bg-ink-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
             }`}
           >
             <FileCode2 className="h-3.5 w-3.5" />
             {tab.label}
           </button>
         ))}
+      </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {wasm.hasWasmPolicy ? (
-            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
-              <Cpu className="h-3.5 w-3.5" /> Wasm loaded ({wasm.wasmMeta?.fileName})
-              <button onClick={wasm.clearWasmBundle} className="ml-1 text-emerald-400/70 hover:text-emerald-200">
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-medium text-sky-400">
-              <Zap className="h-3.5 w-3.5" /> JSON-Logic engine (instant)
-            </span>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".wasm"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) wasm.loadWasmBundle(file);
-              e.target.value = "";
-            }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="Load a pre-compiled OPA .wasm bundle (opa build -t wasm) for real OPA Wasm evaluation"
-            className="flex items-center gap-1.5 rounded-lg border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-slate-400 hover:border-ink-600 hover:text-slate-200"
-          >
-            <Upload className="h-3.5 w-3.5" /> Load .wasm
-          </button>
-        </div>
+      <div className="flex items-center gap-2 border-b border-ink-700 px-2 py-1.5">
+        {wasm.hasWasmPolicy ? (
+          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-emerald-400">
+            <Cpu className="h-3 w-3" /> Wasm loaded ({wasm.wasmMeta?.fileName})
+            <button onClick={wasm.clearWasmBundle} className="ml-1 text-emerald-400/70 hover:text-emerald-200">
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-sky-400">
+            <Zap className="h-3 w-3" /> JSON-Logic (instant)
+          </span>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".wasm"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) wasm.loadWasmBundle(file);
+            e.target.value = "";
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          title="Load a pre-compiled OPA .wasm bundle (opa build -t wasm) for real OPA Wasm evaluation"
+          className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border border-ink-700 px-2 py-1 text-xs font-medium text-slate-400 hover:border-ink-600 hover:text-slate-200"
+        >
+          <Upload className="h-3.5 w-3.5" /> Load .wasm
+        </button>
       </div>
 
       {wasm.wasmStatus === "loading" && (

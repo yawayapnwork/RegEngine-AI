@@ -1,67 +1,105 @@
 import { FileText } from "lucide-react";
-import { PIPELINE_STAGES } from "../../mock/mockData";
 import Card from "../shared/Card";
 import StatusBadge from "../shared/StatusBadge";
 import PdfUploadZone from "./PdfUploadZone";
 import PipelineStage from "./PipelineStage";
 
-function connectorClass(fromStatus) {
-  if (fromStatus === "complete") return "bg-emerald-500";
-  if (fromStatus === "in_progress")
-    return "bg-gradient-to-r from-sky-500 to-ink-700";
-  return "bg-ink-700";
+function extractNumber(detail, pattern) {
+  const match = detail?.match(pattern);
+  return match ? match[1] : "—";
 }
 
-function RunCard({ run }) {
+function metricsFor(run) {
+  return {
+    extractionMs: run.stages.extraction.durationMs,
+    layoutElements: extractNumber(
+      run.stages.ingestion.detail,
+      /(\d+)\s+layout elements/,
+    ),
+    rulesExtracted: extractNumber(
+      run.stages.extraction.detail,
+      /(\d+)\s+extracted rules/,
+    ),
+  };
+}
+
+function RunRow({ run }) {
   const overallDone = run.currentStage === "done";
+  const m = metricsFor(run);
+
   return (
-    <Card className="p-6">
-      <div className="mb-6 flex items-start justify-between">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-lg bg-ink-800 p-2">
-            <FileText className="h-5 w-5 text-sky-400" />
-          </div>
+    <tr className="border-b border-ink-800 text-sm last:border-b-0">
+      <td className="px-4 py-3">
+        <div className="flex items-start gap-2">
+          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
           <div>
-            <p className="text-sm font-semibold text-slate-100">
+            <p className="font-medium leading-tight text-slate-200">
               {run.filename}
             </p>
-            <p className="text-xs text-slate-500">
-              {run.circularNumber} &middot; started{" "}
-              {new Date(run.startedAt).toLocaleString()}
+            <p className="mt-0.5 font-mono text-2xs text-slate-500">
+              {run.circularNumber}
             </p>
           </div>
         </div>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-2xs text-slate-500">
+        {new Date(run.startedAt).toLocaleString()}
+      </td>
+      <td className="px-4 py-3">
+        <PipelineStage stages={run.stages} />
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-400">
+        {m.extractionMs != null ? `${(m.extractionMs / 1000).toFixed(1)}s` : "—"}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-400">
+        {m.layoutElements}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs tabular-nums text-slate-400">
+        {m.rulesExtracted}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3">
         <StatusBadge
           status={overallDone ? "complete" : "in_progress"}
-          label={overallDone ? "pipeline complete" : "running"}
+          label={overallDone ? "complete" : "running"}
         />
-      </div>
-
-      <div className="flex items-start">
-        {PIPELINE_STAGES.map((stageId, i) => (
-          <div key={stageId} className="flex flex-1 items-start">
-            <PipelineStage stageId={stageId} stage={run.stages[stageId]} />
-            {i < PIPELINE_STAGES.length - 1 && (
-              <div
-                className={`mt-5 h-0.5 flex-1 rounded ${connectorClass(run.stages[stageId].status)}`}
-              />
-            )}
-          </div>
-        ))}
-      </div>
-    </Card>
+      </td>
+    </tr>
   );
 }
 
 export default function PipelineTracker({ runs, onUpload }) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PdfUploadZone onFileSelected={onUpload} />
-      <div className="flex flex-col gap-4">
-        {runs.map((run) => (
-          <RunCard key={run.id} run={run} />
-        ))}
-      </div>
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] border-collapse">
+            <thead className="border-b border-ink-700 bg-ink-850 text-left text-2xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Document</th>
+                <th className="px-4 py-2.5 font-semibold">Started</th>
+                <th className="px-4 py-2.5 font-semibold">Pipeline</th>
+                <th className="px-4 py-2.5 text-right font-semibold">
+                  Extraction Time
+                </th>
+                <th className="px-4 py-2.5 text-right font-semibold">
+                  Layout Elements
+                </th>
+                <th className="px-4 py-2.5 text-right font-semibold">
+                  Rules Extracted
+                </th>
+                <th className="px-4 py-2.5 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <RunRow key={run.id} run={run} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }

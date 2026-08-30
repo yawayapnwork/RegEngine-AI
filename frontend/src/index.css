@@ -4,18 +4,26 @@
 
 @layer base {
   body {
-    @apply bg-ink-950 text-slate-200 antialiased;
+    @apply bg-ink-950 text-slate-300 antialiased font-sans;
+    font-feature-settings: "tnum" 1, "cv11" 1;
+  }
+  ::selection {
+    @apply bg-sky-500/30 text-slate-100;
   }
 }
 
 @layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: theme("colors.ink.600");
-    border-radius: 9999px;
+    border-radius: 2px;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
     background-color: transparent;

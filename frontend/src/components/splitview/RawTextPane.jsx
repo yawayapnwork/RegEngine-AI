@@ -1,7 +1,7 @@
 const KIND_CLASSES = {
-  threshold: "bg-sky-500/20 text-sky-300 ring-1 ring-sky-500/40",
-  condition: "bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/40",
-  qualitative: "bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40",
+  threshold: "bg-sky-500/10 text-sky-300 border-b-2 border-sky-500/60",
+  condition: "bg-violet-500/10 text-violet-300 border-b-2 border-violet-500/60",
+  qualitative: "bg-amber-500/10 text-amber-300 border-b-2 border-amber-500/60",
 };
 
 /** Splits `[[marked]]` spans out of rawText and pairs each, in order, with
@@ -33,10 +33,8 @@ export default function RawTextPane({ clause, activeIndex, onSelect }) {
           <button
             key={seg.key}
             onClick={() => onSelect(isActive ? null : index)}
-            className={`mx-0.5 rounded px-1 py-0.5 font-medium transition-all ${KIND_CLASSES[highlight?.kind] || "bg-slate-500/20"} ${
-              isActive
-                ? "outline outline-2 outline-offset-1 outline-white/60"
-                : ""
+            className={`mx-0.5 px-0.5 py-0.5 font-medium transition-colors ${KIND_CLASSES[highlight?.kind] || "bg-slate-500/10 border-b-2 border-slate-500/60"} ${
+              isActive ? "bg-white/10 text-slate-100" : ""
             }`}
             title={`clause element: ${highlight?.kind}`}
           >

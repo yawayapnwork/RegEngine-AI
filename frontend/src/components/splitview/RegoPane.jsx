@@ -27,7 +27,7 @@ export default function RegoPane({ clause, activeIndex }) {
           return (
             <div
               key={i}
-              className={`px-3 ${isActive ? "-mx-3 bg-sky-500/10 ring-1 ring-inset ring-sky-500/30" : ""}`}
+              className={`px-3 ${isActive ? "-mx-3 border-l-2 border-sky-500 bg-sky-500/10 pl-[calc(0.75rem-2px)]" : ""}`}
             >
               <span className="mr-4 inline-block w-6 select-none text-right text-slate-600">
                 {i + 1}

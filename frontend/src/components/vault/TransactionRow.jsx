@@ -10,19 +10,19 @@ export default function TransactionRow({ entry, isNew }) {
     <tr
       className={`border-b border-ink-800 text-sm transition-colors ${isNew ? "bg-sky-500/5" : ""}`}
     >
-      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs tabular-nums text-slate-500">
         #{entry.sequenceNum}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-slate-300">
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-300">
         {entry.transactionId}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-slate-400">
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-400">
         {entry.brokerId}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-slate-500">
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-500">
         {new Date(entry.evaluatedAt).toLocaleTimeString()}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-2.5">
         <div className="flex items-center gap-1.5">
           <Link2 className="h-3.5 w-3.5 shrink-0 text-slate-600" />
           <span
@@ -36,7 +36,7 @@ export default function TransactionRow({ entry, isNew }) {
           </span>
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-2.5">
         <StatusBadge status={entry.evaluationResult} />
         {entry.hitlReviewId && (
           <span className="ml-1.5 text-[11px] text-slate-600">
@@ -44,7 +44,7 @@ export default function TransactionRow({ entry, isNew }) {
           </span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-2.5">
         <div className="flex items-center gap-1 font-mono text-xs text-slate-600">
           <span title={entry.previousHash}>
             {truncateHash(entry.previousHash)}

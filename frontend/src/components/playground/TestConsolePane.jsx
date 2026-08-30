@@ -5,14 +5,14 @@ import CodeEditor from "./CodeEditor";
 function ResultBanner({ result }) {
   if (!result) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-slate-500">
+      <div className="flex items-center gap-2 rounded-sm border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-slate-500">
         <ShieldQuestion className="h-4 w-4" /> Edit the payload or policy to see a live result.
       </div>
     );
   }
   if (result.error) {
     return (
-      <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
+      <div className="flex items-start gap-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <div>
           <p className="font-medium">Evaluation error</p>
@@ -24,13 +24,13 @@ function ResultBanner({ result }) {
   const allow = Boolean(result.allow);
   return (
     <div
-      className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold ${
-        allow ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-400"
+      className={`flex items-center gap-2 rounded-sm border-l-2 border px-3 py-2.5 text-sm font-semibold uppercase tracking-wide ${
+        allow ? "border-emerald-500 border-y-emerald-500/30 border-r-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-rose-500 border-y-rose-500/30 border-r-rose-500/30 bg-rose-500/10 text-rose-400"
       }`}
     >
       {allow ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
       {allow ? "ALLOW" : "DENY"}
-      <span className="ml-auto rounded-full bg-black/20 px-2 py-0.5 text-[11px] font-medium text-slate-300">
+      <span className="ml-auto rounded-sm bg-black/20 px-2 py-0.5 text-2xs font-medium normal-case tracking-normal text-slate-300">
         engine: {result.engine === "opa-wasm" ? "OPA Wasm" : "JSON-Logic (in-browser)"}
       </span>
     </div>
@@ -76,8 +76,8 @@ export default function TestConsolePane({
         <ResultBanner result={result} />
 
         {result?.violations?.length > 0 && (
-          <div className="rounded-lg border border-ink-700 bg-ink-850 p-3">
-            <p className="mb-1.5 text-xs font-medium text-slate-400">Violations</p>
+          <div className="rounded-sm border border-ink-700 bg-ink-850 p-3">
+            <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-slate-500">Violations</p>
             <ul className="space-y-1 text-xs text-slate-400">
               {result.violations.map((v, i) => (
                 <li key={i} className="border-l-2 border-rose-500/40 pl-2">
@@ -89,18 +89,18 @@ export default function TestConsolePane({
         )}
 
         {result?.raw !== undefined && (
-          <div className="rounded-lg border border-ink-700 bg-ink-850 p-3">
-            <p className="mb-1.5 text-xs font-medium text-slate-400">Raw decision object</p>
+          <div className="rounded-sm border border-ink-700 bg-ink-850 p-3">
+            <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-slate-500">Raw decision object</p>
             <pre className="overflow-x-auto text-xs text-slate-500">{JSON.stringify(result.raw, null, 2)}</pre>
           </div>
         )}
       </div>
 
-      <div className="border-t border-ink-700 p-4">
+      <div className="border-t border-ink-700 p-3">
         <button
           onClick={onSubmitForReview}
           disabled={!canSubmit || submitState === "submitting"}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-500/15 px-4 py-2.5 text-sm font-medium text-sky-300 ring-1 ring-inset ring-sky-500/30 transition-colors hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-sm border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {submitState === "submitting" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Submit for HITL Review
