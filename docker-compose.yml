@@ -47,7 +47,7 @@ services:
       # applied here -- see the module comment above.
       - ./sql/ledger_schema.sql:/docker-entrypoint-initdb.d/01-ledger-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-regengine} -d ${POSTGRES_DB:-regengine}"]
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -90,10 +90,7 @@ services:
     image: openpolicyagent/opa:0.68.0-static
     command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=info"]
     healthcheck:
-      test: ["CMD", "/opa", "eval", "-", "--stdin-input", "--format=raw"]
-      # Trivial always-succeeds probe: OPA has no /health check in the
-      # -static (non-Envoy) image's default config short of `opa eval`
-      # itself succeeding, which requires the server to be up and parsing.
+      test: ["CMD-SHELL", "OPA_URL='http://localhost:8181/health'; if command -v curl >/dev/null 2>&1; then curl -f $$OPA_URL; else /opa eval '1 == 1' >/dev/null 2>&1; fi"]
       interval: 5s
       timeout: 5s
       retries: 10
