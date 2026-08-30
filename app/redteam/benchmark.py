@@ -22,7 +22,7 @@ Two scenario types, matching the two places an injection can be caught
      synthetic "compromised" extraction result. This measures the
      second line of defense independent of the first.
 
-Neither scenario requires a live LLM call (no ANTHROPIC_API_KEY
+Neither scenario requires a live LLM call (no HUGGINGFACEHUB_API_TOKEN
 needed) -- both measure whether the DETERMINISTIC defense layers this
 codebase actually ships would catch each attack, which is exactly what
 "defense middleware resistance" means for the two guards Requirement 2

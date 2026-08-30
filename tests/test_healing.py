@@ -5,7 +5,7 @@ tests/test_opa_execution.py's `_patch_transport` exactly), so
 error-interception is tested against OPAEngine's real request/response
 code, not a hand-rolled fake. Redis is faked throughout (mirrors this
 repo's established `_FakeRedis` pattern -- see tests/test_incident.py).
-No ANTHROPIC_API_KEY / crewai is used anywhere here -- every test drives
+No HUGGINGFACEHUB_API_TOKEN / crewai is used anywhere here -- every test drives
 the deterministic fast path or the orchestrator's retry/tracking
 mechanics directly, matching regengine-cli.py's `--offline-agents`
 precedent for testing this pipeline without a live LLM.
@@ -241,16 +241,16 @@ class TestApplyDeterministicFixes:
 class TestRepairPolicyRouting:
     def test_uses_deterministic_fix_without_touching_llm(self):
         failure = _base_failure(error_type=PolicyErrorType.SYNTAX_ERROR, rego_code=_MISSING_DEFAULT_REGO)
-        suggestion, strategy = repair_policy(failure, Settings(anthropic_api_key=None))
+        suggestion, strategy = repair_policy(failure, Settings(hf_api_token=None))
         assert strategy == RepairStrategy.DETERMINISTIC_FIX
         assert suggestion.can_repair is True
 
     def test_unfixable_without_api_key_when_no_deterministic_fix_applies(self):
         failure = _base_failure(error_type=PolicyErrorType.RUNTIME_CRASH, error_message="novel failure")
-        suggestion, strategy = repair_policy(failure, Settings(anthropic_api_key=None))
+        suggestion, strategy = repair_policy(failure, Settings(hf_api_token=None))
         assert strategy == RepairStrategy.UNFIXABLE
         assert suggestion.can_repair is False
-        assert "ANTHROPIC_API_KEY" in suggestion.repair_notes
+        assert "HUGGINGFACEHUB_API_TOKEN" in suggestion.repair_notes
 
 
 # --------------------------------------------------------------------------
@@ -302,7 +302,7 @@ class TestHealingAttemptTracker:
 class TestSelfHealingLoop:
     async def test_heals_syntax_error_on_first_attempt(self):
         tracker = HealingAttemptTracker(_FakeRedis(), "test:healing")
-        loop = SelfHealingLoop(tracker, Settings(anthropic_api_key=None, policy_self_healing_max_retries=3))
+        loop = SelfHealingLoop(tracker, Settings(hf_api_token=None, policy_self_healing_max_retries=3))
         failure = _base_failure(error_type=PolicyErrorType.SYNTAX_ERROR, rego_code=_MISSING_DEFAULT_REGO)
 
         result = await loop.heal(failure, _TEST_FIXTURES)
@@ -318,7 +318,7 @@ class TestSelfHealingLoop:
 
     async def test_heals_invalid_json_logic_type(self):
         tracker = HealingAttemptTracker(_FakeRedis(), "test:healing")
-        loop = SelfHealingLoop(tracker, Settings(anthropic_api_key=None))
+        loop = SelfHealingLoop(tracker, Settings(hf_api_token=None))
         failure = _base_failure(error_type=PolicyErrorType.INVALID_JSON_LOGIC_TYPE, json_logic=_STRING_TYPED_JSON_LOGIC)
 
         result = await loop.heal(failure, _TEST_FIXTURES)
@@ -328,7 +328,7 @@ class TestSelfHealingLoop:
 
     async def test_escalates_unfixable_without_burning_full_retry_budget(self):
         tracker = HealingAttemptTracker(_FakeRedis(), "test:healing")
-        loop = SelfHealingLoop(tracker, Settings(anthropic_api_key=None, policy_self_healing_max_retries=3))
+        loop = SelfHealingLoop(tracker, Settings(hf_api_token=None, policy_self_healing_max_retries=3))
         failure = _base_failure(error_type=PolicyErrorType.RUNTIME_CRASH, error_message="novel, no known fix")
 
         result = await loop.heal(failure, _TEST_FIXTURES)
@@ -351,7 +351,7 @@ class TestSelfHealingLoop:
         monkeypatch.setattr(orchestrator_module, "repair_policy", _always_wrong_fix)
 
         tracker = HealingAttemptTracker(_FakeRedis(), "test:healing")
-        loop = SelfHealingLoop(tracker, Settings(anthropic_api_key=None, policy_self_healing_max_retries=3))
+        loop = SelfHealingLoop(tracker, Settings(hf_api_token=None, policy_self_healing_max_retries=3))
         failure = _base_failure(error_type=PolicyErrorType.COMPILE_ERROR)
 
         # Fixtures that _GOOD_JSON_LOGIC can never satisfy, so every attempt fails its tests.

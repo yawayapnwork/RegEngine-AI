@@ -474,7 +474,7 @@ class AgentInventory(Base):
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     model_provider: Mapped[str] = mapped_column(String(64), nullable=False)
     model_weight_version: Mapped[str] = mapped_column(
-        String(128), nullable=False, doc="Exact model identifier in production use, e.g. 'anthropic/claude-3-5-sonnet-20241022'."
+        String(128), nullable=False, doc="Exact model identifier in production use, e.g. 'huggingface/Qwen/Qwen2.5-72B-Instruct'."
     )
     business_domain: Mapped[str] = mapped_column(Text, nullable=False)
     is_critical_operation: Mapped[bool] = mapped_column(

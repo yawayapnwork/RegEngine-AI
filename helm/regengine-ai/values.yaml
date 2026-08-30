@@ -268,7 +268,7 @@ secrets:
   existingSecretName: "regengine-ai-secrets"
   # Keys the Deployments expect on either the created or existing Secret:
   #   DATABASE_URL, LEDGER_DATABASE_URL, REDIS_URL, QDRANT_URL,
-  #   QDRANT_API_KEY, ANTHROPIC_API_KEY, WEBHOOK_HMAC_SECRET
+  #   QDRANT_API_KEY, HUGGINGFACEHUB_API_TOKEN, WEBHOOK_HMAC_SECRET
   # NOTE: with SECRETS_BACKEND=aws|vault (the production default -- see
   # config.SECRETS_BACKEND above), JWT_SECRET_KEY / JWT_PRIVATE_KEY_PEM and
   # any per-tenant payload_key are NOT read from this Secret at all -- they
@@ -280,7 +280,7 @@ secrets:
   #   REDIS_URL: "redis://:...@redis.internal:6379/0"
   #   QDRANT_URL: "https://qdrant.internal:6333"
   #   QDRANT_API_KEY: ""
-  #   ANTHROPIC_API_KEY: ""
+  #   HUGGINGFACEHUB_API_TOKEN: ""
   #   WEBHOOK_HMAC_SECRET: ""
   #   JWT_SECRET_KEY: ""            # only if SECRETS_BACKEND=env and JWT_ALGORITHM=HS256
   #   JWT_PRIVATE_KEY_PEM: ""       # only if SECRETS_BACKEND=env and JWT_ALGORITHM=RS256

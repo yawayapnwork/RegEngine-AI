@@ -30,7 +30,7 @@ metadata = Base.metadata
 class ModelTier(str, Enum):
     CACHE_HIT = "cache_hit"        # no model invoked at all
     CHEAP_LOCAL = "cheap_local"    # e.g. the QLoRA-fine-tuned model via vLLM/Ollama (llm_finetune/)
-    FRONTIER = "frontier"          # e.g. Claude 3.5 Sonnet
+    FRONTIER = "frontier"          # e.g. Qwen2.5-72B-Instruct via Hugging Face Inference
 
 
 class TaskComplexity(str, Enum):

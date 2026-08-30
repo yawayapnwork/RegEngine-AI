@@ -19,7 +19,7 @@ sentence-transformers>=3.0
 # Vector DB
 qdrant-client>=1.10
 
-# Dual-agent compliance rule extraction (Claude 3.5 Sonnet)
+# Dual-agent compliance rule extraction (Qwen2.5, via Hugging Face Inference)
 crewai>=0.70
 crewai-tools>=0.12
 
@@ -39,7 +39,9 @@ neo4j>=5.24
 # own Agent/Task machinery (the escalation path in
 # app.llm_ops.cached_extraction) go through litellm directly -- the same
 # library crewai.LLM wraps internally, so this reuses one dependency
-# instead of adding a second Anthropic SDK.
+# instead of adding a second Hugging Face SDK (litellm's `huggingface/`
+# provider talks to HF Inference directly; no separate huggingface_hub
+# client is needed).
 litellm>=1.44
 
 # Execution service: embedded OPA (co-located `opa run --server`) evaluation,

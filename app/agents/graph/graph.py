@@ -74,7 +74,7 @@ _CLASSIFY = "classify_complexity"
 _SETTINGS_FIELDS_FOR_STATE = (
     "jwt_algorithm", "jwt_secret_key", "jwt_public_key_pem", "jwt_private_key_pem",
     "jwt_issuer", "jwt_audience",
-    "anthropic_api_key", "agent_verbose", "agent_max_rpm",
+    "hf_api_token", "hf_model_id", "agent_verbose", "agent_max_rpm",
     "agent_confidence_threshold", "agent_max_fallback_attempts", "agent_fallback_model",
     "redis_url", "agent_graph_state_key_prefix", "agent_graph_state_ttl_seconds",
 )

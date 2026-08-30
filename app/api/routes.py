@@ -13,6 +13,7 @@ from app.parsing.exceptions import (
     ExtractionBackendError,
     IndexingError,
     ParseTimeoutError,
+    ScannedDocumentError,
     UnsupportedFileError,
 )
 from app.security.dependencies import require_roles
@@ -31,6 +32,12 @@ _require_ingestion_role = Depends(require_roles(Role.COMPLIANCE_OFFICER, Role.SY
 
 _ERROR_STATUS_MAP: dict[type[Exception], int] = {
     UnsupportedFileError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    # Must be listed before ExtractionBackendError: `_map_status` looks up
+    # `type(exc)` exactly (no MRO walk), so this subclass needs its own
+    # entry or it silently falls through to ExtractionBackendError's 502 --
+    # wrong here, since a scanned PDF is a client-fixable content problem
+    # (422: resubmit via OCR or a text-layer PDF), not a broken backend.
+    ScannedDocumentError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     ExtractionBackendError: status.HTTP_502_BAD_GATEWAY,
     ParseTimeoutError: status.HTTP_504_GATEWAY_TIMEOUT,
     ChunkingError: status.HTTP_422_UNPROCESSABLE_ENTITY,

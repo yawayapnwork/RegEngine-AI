@@ -6,7 +6,7 @@ prompt-injection payloads, real text-layer extraction (via `pypdf`)
 proving the attack surface is genuine, and a real `guardrails-ai` Guard
 object (not mocked) for the structured-output-enforcement layer,
 verified against real malicious and benign inputs. No live LLM call is
-used anywhere (no ANTHROPIC_API_KEY needed) -- see
+used anywhere (no HUGGINGFACEHUB_API_TOKEN needed) -- see
 app.redteam.benchmark's module docstring for exactly why that's the
 correct scope for what can be verified in this environment.
 """

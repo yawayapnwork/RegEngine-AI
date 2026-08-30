@@ -56,7 +56,7 @@ async def classify_change_with_llm(
 
     response = await litellm.acompletion(
         model=settings.llm_router_frontier_model,
-        api_key=settings.anthropic_api_key,
+        api_key=settings.hf_api_token,
         temperature=0.0,
         max_tokens=1024,
         messages=[

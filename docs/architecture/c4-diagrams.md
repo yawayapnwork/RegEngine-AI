@@ -20,14 +20,14 @@ C4Context
     System_Ext(sebiSources, "SEBI Circular Sources", "RSS feeds and HTML notice pages publishing new/amended circulars")
     System_Ext(brokerOms, "Broker OMS / RMS", "Order Management / Risk Management System submitting live orders via FIX")
     System_Ext(scores, "SEBI SCORES Portal", "Regulator grievance-redress REST API")
-    System_Ext(claude, "Anthropic Claude API", "Claude 3.5 Sonnet — dual-agent clause extraction and audit")
+    System_Ext(hfInference, "Hugging Face Inference API", "Qwen2.5-72B-Instruct — dual-agent clause extraction and audit")
 
     System(regengine, "RegEngine AI", "Extracts, compiles, executes, and audits SEBI compliance rules against live broker transactions")
 
     Rel(sebiSources, regengine, "Publishes new circulars", "RSS / HTTPS")
     Rel(brokerOms, regengine, "Submits orders for validation", "FIX 4.2/4.4")
     Rel(regengine, brokerOms, "Returns Execution Reports (accept/reject + SEBI clause citation)", "FIX 4.2/4.4")
-    Rel(regengine, claude, "Extracts & audits compliance rules from clause text", "HTTPS / Anthropic API")
+    Rel(regengine, hfInference, "Extracts & audits compliance rules from clause text", "HTTPS / Hugging Face Inference API")
     Rel(regengine, scores, "Files grievance records for systemic broker non-compliance", "HTTPS / REST")
     Rel(officer, regengine, "Reviews, approves, confirms", "HTTPS / Web UI")
     Rel(inspector, regengine, "Downloads signed audit binder (offline afterward)", "HTTPS, one-time export")
@@ -45,7 +45,7 @@ C4Container
     System_Ext(sebiSources, "SEBI Circular Sources")
     System_Ext(brokerOms, "Broker OMS / RMS")
     System_Ext(scores, "SEBI SCORES Portal")
-    System_Ext(claude, "Anthropic Claude API")
+    System_Ext(hfInference, "Hugging Face Inference API")
 
     Container_Boundary(regengine, "RegEngine AI") {
         Container(frontend, "Compliance IDE", "React + Tailwind", "Dashboards: HITL queue, incident feed, grievance timelines, policy diffs")
@@ -62,7 +62,7 @@ C4Container
     }
 
     Rel(sebiSources, workers, "Polled by ingestion tasks", "RSS / HTTPS")
-    Rel(workers, claude, "Extraction + Audit agent calls", "HTTPS")
+    Rel(workers, hfInference, "Extraction + Audit agent calls", "HTTPS")
     Rel(workers, opa, "Publishes compiled Rego", "HTTPS Policy API")
     Rel(workers, postgres, "Persists circulars/clauses/compiled rules")
     Rel(workers, qdrant, "Indexes clause embeddings")

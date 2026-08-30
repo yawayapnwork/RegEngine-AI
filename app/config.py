@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,7 +80,23 @@ class Settings(BaseSettings):
     supersession_auto_detection_enabled: bool = False
 
     # --- Compliance rule extraction (CrewAI dual-agent pipeline) ---
-    anthropic_api_key: str | None = None
+    # Hugging Face Inference token -- accepts either env var name (HF's own
+    # tooling is inconsistent about which one it reads: huggingface_hub's
+    # CLI/login flow writes HF_TOKEN, but a lot of existing docs/tutorials
+    # still say HUGGINGFACEHUB_API_TOKEN, so both are honored here rather
+    # than picking one and silently ignoring the other).
+    hf_api_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("HUGGINGFACEHUB_API_TOKEN", "HF_TOKEN", "hf_api_token"),
+    )
+    # Default model for every CrewAI agent / litellm call in this pipeline
+    # (app.agents.crew._build_llm, app.diffing.llm_classifier,
+    # app.explainability.llm_explainer, app.llm_ops.cached_extraction's
+    # frontier tier) unless a call site overrides it explicitly (e.g.
+    # agent_fallback_model below). Bare repo id, NOT litellm's
+    # "huggingface/<repo_id>" form -- call sites add that prefix
+    # themselves, matching litellm's own provider-routing convention.
+    hf_model_id: str = "Qwen/Qwen2.5-72B-Instruct"
     agent_verbose: bool = False
     agent_max_rpm: int = 20
 
@@ -98,10 +114,12 @@ class Settings(BaseSettings):
     agent_confidence_threshold: float = 0.85
     agent_max_fallback_attempts: int = 2
     # A genuinely different model/checkpoint from the primary
-    # (anthropic/claude-3-5-sonnet-20241022, hardcoded in
-    # app.agents.crew._build_llm's default) -- see that function's
-    # docstring for why a different model, not a retry of the same one.
-    agent_fallback_model: str = "anthropic/claude-3-opus-20240229"
+    # (huggingface/<hf_model_id>, app.agents.crew._build_llm's default) --
+    # see that function's docstring for why a different model, not a retry
+    # of the same one. A materially smaller Qwen checkpoint (7B vs. the
+    # 72B default) is the closest fit to that "genuinely different"
+    # intent while staying on one inference provider (Hugging Face).
+    agent_fallback_model: str = "huggingface/Qwen/Qwen2.5-7B-Instruct"
     agent_graph_state_key_prefix: str = "regengine:agent_graph"
     agent_graph_state_ttl_seconds: int = 7 * 24 * 3600
 
@@ -613,7 +631,7 @@ class Settings(BaseSettings):
     # llm_finetune/vllm (or Ollama) for deterministic/simple clauses.
     llm_router_cheap_model: str = "sebi-compliance-llm"
     llm_router_cheap_model_base_url: str = "http://localhost:8000/v1"
-    llm_router_frontier_model: str = "anthropic/claude-3-5-sonnet-20241022"
+    llm_router_frontier_model: str = "huggingface/Qwen/Qwen2.5-72B-Instruct"
     # Below this confidence (or on a schema-validation failure) from the
     # cheap tier, the router escalates to the frontier model rather than
     # accepting a low-confidence local-model extraction.

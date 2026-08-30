@@ -12,7 +12,7 @@ Run with, e.g.:
         -Q regengine_batch,regengine_cdc,regengine_webhooks,regengine_ingestion,regengine_agents,regengine_compiler,regengine_vectorstore \
         -l info
 Or scale each workload's worker pool independently -- `-Q regengine_agents`
-alone for a pool sized to Anthropic's rate limit, separate from a
+alone for a pool sized to the Hugging Face Inference rate limit, separate from a
 CPU-bound `-Q regengine_compiler` pool.
 """
 from __future__ import annotations

@@ -11,7 +11,7 @@
 # helm/regengine-ai/values.yaml.
 #
 # Usage:
-#   cp .env.example .env   # fill in ANTHROPIC_API_KEY at minimum
+#   cp .env.example .env   # fill in HUGGINGFACEHUB_API_TOKEN (or HF_TOKEN) at minimum
 #   docker compose up --build
 #   docker compose up --build --scale worker=3   # scale workers independently
 
@@ -31,6 +31,7 @@ x-app-env: &app-env
   REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
   QDRANT_URL: http://qdrant:6333
   OPA_SERVER_URL: http://opa:8181
+  TIKA_SERVER_URL: http://tika:9998
 
 services:
   postgres:
@@ -97,6 +98,28 @@ services:
     networks: [regengine-net]
     restart: unless-stopped
 
+  tika:
+    # Apache Tika server: extract_pdf's fallback backend when Unstructured
+    # (the primary) errors out (app/parsing/extractor.py). `settings.tika_server_url`
+    # must point at a real networked Tika instance -- tika-python has no way
+    # to self-launch one here (that requires a local Java runtime + bundled
+    # jar, neither present in the slim runtime image, deliberately, same
+    # reasoning as OPA above: a persistent co-located server, not a
+    # per-request subprocess embedded in the app image).
+    image: apache/tika:2.9.2.1
+    healthcheck:
+      # apache/tika's image ships neither curl nor wget (JRE-only
+      # userland) -- bash IS present, so a bare /dev/tcp connect check
+      # (port-open, not a full HTTP round-trip) is what's actually
+      # available here rather than this repo's usual curl-based pattern.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9998"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [regengine-net]
+    restart: unless-stopped
+
   migrate:
     <<: *app-image
     environment:
@@ -121,6 +144,7 @@ services:
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
       opa: { condition: service_healthy }
+      tika: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
@@ -144,6 +168,7 @@ services:
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
       opa: { condition: service_healthy }
+      tika: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.execution.celery_app inspect ping -d celery@$$HOSTNAME | grep -q OK"]

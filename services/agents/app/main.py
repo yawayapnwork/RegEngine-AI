@@ -1,7 +1,7 @@
 """Agents service: dual-agent (Extraction + Logic Auditor) compliance
-rule extraction via CrewAI, backed by Claude 3.5 Sonnet. This file is a
-scaffold -- wire it up to the real CrewAI crew/task definitions before
-deploying."""
+rule extraction via CrewAI, backed by Qwen2.5 (via Hugging Face
+Inference). This file is a scaffold -- wire it up to the real CrewAI
+crew/task definitions before deploying."""
 from __future__ import annotations
 
 import os
@@ -20,5 +20,5 @@ async def healthz() -> dict[str, str]:
 async def readyz() -> dict[str, str]:
     return {
         "status": "ok",
-        "anthropic_api_key_configured": str(bool(os.environ.get("ANTHROPIC_API_KEY"))),
+        "hf_api_token_configured": str(bool(os.environ.get("HUGGINGFACEHUB_API_TOKEN") or os.environ.get("HF_TOKEN"))),
     }

@@ -1,7 +1,7 @@
 """Tests for the dynamic agent graph (app.agents.graph): complexity
 detection, Redis state recording, and the graph's routing/fallback/
 revision topology run end-to-end through LangGraph's real engine with
-stub node functions (no CrewAI/Anthropic call needed to verify the WIRING
+stub node functions (no CrewAI/Hugging Face call needed to verify the WIRING
 is correct -- app.agents.graph.nodes's actual CrewAI-calling logic is
 exercised indirectly via tests/test_agent_pipeline.py's existing coverage
 of app.agents.crew, which every graph node delegates to).
@@ -114,7 +114,7 @@ class TestGraphExecutionEndToEnd:
     LangGraph's actual engine, with trivial stub node functions standing
     in for the CrewAI-calling nodes -- proves the graph TOPOLOGY (dynamic
     routing, fallback loop, revision loop) is wired correctly, independent
-    of whether CrewAI/Anthropic are available."""
+    of whether CrewAI/Hugging Face are available."""
 
     async def _build_stub_graph(self, quant_confidences: list[float]):
         from langgraph.graph import END, StateGraph

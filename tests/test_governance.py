@@ -402,12 +402,12 @@ class TestAgentInventory:
         for spec in SEED_AGENTS:
             assert spec.owner_name and " " in spec.owner_name  # a real "First Last" name, not a role alias
             assert "@" in spec.owner_email
-            assert spec.model_weight_version == "claude-3-5-sonnet-20241022"
+            assert spec.model_weight_version == "Qwen/Qwen2.5-72B-Instruct"
 
     async def test_register_get_update_retire_round_trip(self, db_session):
         spec = AgentInventoryCreate(
-            agent_key="test_agent", display_name="Test Agent", model_provider="anthropic",
-            model_weight_version="claude-3-5-sonnet-20241022", business_domain="testing",
+            agent_key="test_agent", display_name="Test Agent", model_provider="huggingface",
+            model_weight_version="Qwen/Qwen2.5-72B-Instruct", business_domain="testing",
             owner_name="Test Owner", owner_email="owner@test.com",
         )
         created = await register_agent(db_session, spec)

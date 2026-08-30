@@ -19,9 +19,9 @@ produced the claim is the one accountable for correcting it. This keeps the
 audit trail clean (findings <-> revision <-> re-audit) and avoids the
 auditor silently overwriting facts with its own unverified guesses.
 
-crewai and its Anthropic LLM binding are imported lazily inside the builder
-functions so `app.agents.schemas` / `app.agents.tools` (and their tests)
-remain usable without crewai installed.
+crewai and its Hugging Face LLM binding are imported lazily inside the
+builder functions so `app.agents.schemas` / `app.agents.tools` (and their
+tests) remain usable without crewai installed.
 """
 from __future__ import annotations
 
@@ -47,10 +47,10 @@ MAX_REVISION_ROUNDS = 2
 
 
 def _build_llm(settings: Settings, *, temperature: float, model_override: str | None = None):
-    """Claude 3.5 Sonnet via CrewAI's LiteLLM-backed LLM wrapper, by
-    default. `model_override` is how app.agents.graph's fallback node
-    escalates to a secondary model (settings.agent_fallback_model) when
-    the primary extraction's confidence falls below
+    """Qwen (via Hugging Face Inference) through CrewAI's LiteLLM-backed
+    LLM wrapper, by default. `model_override` is how app.agents.graph's
+    fallback node escalates to a secondary model (settings.agent_fallback_model)
+    when the primary extraction's confidence falls below
     settings.agent_confidence_threshold -- a distinct model family/
     checkpoint, not just a retried call to the same one, on the theory
     that a low-confidence result from one model is more likely to be
@@ -59,8 +59,8 @@ def _build_llm(settings: Settings, *, temperature: float, model_override: str | 
     from crewai import LLM  # deferred heavy import
 
     return LLM(
-        model=model_override or "anthropic/claude-3-5-sonnet-20241022",
-        api_key=settings.anthropic_api_key,
+        model=model_override or f"huggingface/{settings.hf_model_id}",
+        api_key=settings.hf_api_token,
         temperature=temperature,
         max_tokens=4096,
     )

@@ -1,5 +1,5 @@
 """Secrets management integration: where key material (JWT signing keys,
-per-tenant broker credentials, ANTHROPIC_API_KEY, WEBHOOK_HMAC_SECRET,
+per-tenant broker credentials, HUGGINGFACEHUB_API_TOKEN, WEBHOOK_HMAC_SECRET,
 database passwords) actually comes from in each environment.
 
 `.env` / plain environment variables (app.config.Settings' default) are
@@ -206,8 +206,8 @@ def get_secrets_provider() -> SecretsProvider:
 def resolve_secret(name: str, *, field: str | None = None, settings: Settings | None = None) -> str:
     """Convenience wrapper most call sites should use instead of touching
     the provider directly -- e.g.
-        anthropic_api_key = resolve_secret("anthropic_api_key")             # env backend
-        anthropic_api_key = resolve_secret("regengine/prod/agents", field="anthropic_api_key")  # aws/vault
+        hf_api_token = resolve_secret("hf_api_token")             # env backend
+        hf_api_token = resolve_secret("regengine/prod/agents", field="hf_api_token")  # aws/vault
 
     `settings`, when given, is honored ONLY for the "env" backend --
     constructing a fresh, uncached EnvSecretsProvider bound to exactly that

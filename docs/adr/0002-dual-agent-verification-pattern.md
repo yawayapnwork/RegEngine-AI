@@ -7,8 +7,9 @@ Accepted
 ## Context
 
 RegEngine AI's compliance rules are extracted from raw SEBI circular
-text by an LLM (Claude 3.5 Sonnet via CrewAI, `app.agents.crew`, and an
-equivalent LangGraph-based orchestration in `app.agents.graph`). An
+text by an LLM (Qwen2.5, via Hugging Face Inference, through CrewAI,
+`app.agents.crew`, and an equivalent LangGraph-based orchestration in
+`app.agents.graph`). An
 LLM extracting a `NumericalThreshold` (e.g. "Upfront Margin >= 20%")
 from legal prose can hallucinate: invent a threshold value not actually
 present in the source, misattribute a threshold to the wrong entity,
@@ -53,9 +54,9 @@ roles**, not one:
 re-enters the Extraction Agent for a bounded number of additional
 rounds (`MAX_REVISION_ROUNDS = 2`, enforced identically in both
 `app.agents.crew` and `app.agents.graph.nodes`) — a revision attempt
-also escalates to a different, typically stronger model
+also escalates to a different model/checkpoint
 (`settings.agent_fallback_model`, currently
-`anthropic/claude-3-opus-20240229`) when `extraction_confidence` falls
+`huggingface/Qwen/Qwen2.5-7B-Instruct`) when `extraction_confidence` falls
 below `settings.agent_confidence_threshold` (0.85), rather than
 re-asking the identical model the identical question. `REJECTED` (or a
 revision budget exhausted with any `BLOCKER`-severity finding still

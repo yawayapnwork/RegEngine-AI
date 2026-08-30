@@ -18,7 +18,12 @@ from pathlib import Path
 
 from app.config import Settings
 from app.models import BoundingBox, CircularMetadata, DocumentElement, ElementKind
-from app.parsing.exceptions import ExtractionBackendError, ParseTimeoutError, UnsupportedFileError
+from app.parsing.exceptions import (
+    ExtractionBackendError,
+    ParseTimeoutError,
+    ScannedDocumentError,
+    UnsupportedFileError,
+)
 from app.parsing.hierarchy import HierarchyTracker, detect_clause_number, is_footnote, is_section_header
 from app.regulatory.taxonomy import detect_regulator_and_document
 
@@ -267,8 +272,23 @@ async def extract_pdf(
             f"PDF extraction exceeded {settings.parse_timeout_seconds}s timeout."
         ) from exc
 
-    if not raw_elements:
-        raise ExtractionBackendError("Extraction produced zero elements; document may be scanned/unreadable.")
+    # A scanned/image-only PDF still commonly produces *some* raw elements
+    # (Unstructured detects page/table regions from layout alone), just with
+    # no recoverable text in any of them -- so "zero elements" alone
+    # under-detects the scanned case. Checking for "no element has non-
+    # whitespace text" catches both shapes with one branch.
+    if not raw_elements or not any(el["text"].strip() for el in raw_elements):
+        logger.warning(
+            "'%s' produced %d element(s) with no extractable text -- likely a scanned/image-only PDF with no text layer.",
+            filename or "<unnamed upload>",
+            len(raw_elements),
+        )
+        raise ScannedDocumentError(
+            f"'{filename or 'document'}' has no extractable text layer (likely a scanned/image-only PDF). "
+            "Retrying the same extraction backend will not help -- route this document through the regional "
+            "OCR pipeline (app.localization.ocr.extract_regional_text) instead, or re-submit a PDF with a "
+            "real text layer."
+        )
 
     metadata = _extract_metadata_from_elements(raw_elements, filename, source_tag)
     elements = _build_document_elements(raw_elements)

@@ -5,7 +5,7 @@ and compiled OPA modules (`app.compiler.models.CompiledRego`) -- into
 chat-format instruction-tuning JSONL.
 
 Why these artifacts and not a hand-written dataset: the production system
-(CrewAI + Claude, see `app.agents.crew`) already produces exactly the
+(CrewAI + Qwen via Hugging Face, see `app.agents.crew`) already produces exactly the
 input/output pairs a domain-adapted local model needs to imitate --
 clause text in, structured JSON out; structured JSON in, Rego out. Every
 example here is therefore something the *real* pipeline actually did and

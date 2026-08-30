@@ -13,10 +13,11 @@ CrewAI dual-agent crew for the extraction step:
              via its vLLM OpenAI-compatible endpoint
                 -> low confidence / bad schema / ambiguous_spans?
                      ModelRouter.should_escalate() -> retry on FRONTIER
-        -> FRONTIER: call Claude 3.5 Sonnet directly via litellm (the same
-             library CrewAI's `LLM` wrapper uses internally, so this reuses
-             whatever ANTHROPIC_API_KEY / retry config is already set up
-             for app.agents.crew, without pulling in a second SDK)
+        -> FRONTIER: call Qwen (via Hugging Face Inference) directly via
+             litellm (the same library CrewAI's `LLM` wrapper uses
+             internally, so this reuses whatever HUGGINGFACEHUB_API_TOKEN /
+             retry config is already set up for app.agents.crew, without
+             pulling in a second SDK)
         -> cache the validated result for next time
 
 The Logic Auditor Agent (app.agents.crew.build_audit_agent) is
@@ -106,7 +107,7 @@ async def _call_frontier_tier(chunk: ClauseChunk, settings: Settings) -> tuple[d
 
     response = await litellm.acompletion(
         model=settings.llm_router_frontier_model,
-        api_key=settings.anthropic_api_key,
+        api_key=settings.hf_api_token,
         temperature=0.0,
         max_tokens=4096,
         messages=[

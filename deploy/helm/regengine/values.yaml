@@ -39,4 +39,5 @@ opa:
   image: openpolicyagent/opa:latest-envoy
 
 env:
-  ANTHROPIC_API_KEY: ""
+  HUGGINGFACEHUB_API_TOKEN: ""
+  HF_MODEL_ID: "Qwen/Qwen2.5-72B-Instruct"

@@ -8,7 +8,7 @@
 # like; it only ever fills in what's missing.
 #
 #   /services/ingestion   FastAPI + Tika + Qdrant
-#   /services/agents      CrewAI + Claude 3.5 Sonnet
+#   /services/agents      CrewAI + Qwen2.5 (Hugging Face Inference)
 #   /services/compiler    OPA Rego generator
 #   /services/execution   FastAPI + Redis + OPA Wasm
 #   /services/audit       PostgreSQL SHA-256 vault
@@ -132,7 +132,7 @@ Run locally: `uvicorn app.main:app --reload --port 8001`
 EOF
 
 # ---------------------------------------------------------------------
-# services/agents -- CrewAI + Claude 3.5 Sonnet
+# services/agents -- CrewAI + Qwen2.5 (Hugging Face Inference)
 # ---------------------------------------------------------------------
 echo "== services/agents =="
 
@@ -141,7 +141,8 @@ EOF
 
 create_file services/agents/app/main.py <<'EOF'
 """Agents service: dual-agent (Extraction + Logic Auditor) compliance
-rule extraction via CrewAI, backed by Claude 3.5 Sonnet. This file is a
+rule extraction via CrewAI, backed by Qwen2.5 (via Hugging Face
+Inference). This file is a
 scaffold -- wire it up to the real CrewAI crew/task definitions before
 deploying."""
 from __future__ import annotations
@@ -162,7 +163,7 @@ async def healthz() -> dict[str, str]:
 async def readyz() -> dict[str, str]:
     return {
         "status": "ok",
-        "anthropic_api_key_configured": str(bool(os.environ.get("ANTHROPIC_API_KEY"))),
+        "hf_api_token_configured": str(bool(os.environ.get("HUGGINGFACEHUB_API_TOKEN") or os.environ.get("HF_TOKEN"))),
     }
 EOF
 
@@ -179,7 +180,7 @@ create_file services/agents/pyproject.toml <<'EOF'
 [project]
 name = "regengine-agents"
 version = "0.1.0"
-description = "RegEngine AI agents service: CrewAI dual-agent extraction on Claude 3.5 Sonnet."
+description = "RegEngine AI agents service: CrewAI dual-agent extraction on Qwen2.5 (via Hugging Face Inference)."
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
@@ -200,7 +201,7 @@ create_file services/agents/README.md <<'EOF'
 # Agents Service
 
 Dual-agent (Extraction + Logic Auditor) compliance rule extraction via
-CrewAI, backed by Claude 3.5 Sonnet.
+CrewAI, backed by Qwen2.5 (via Hugging Face Inference).
 
 Run locally: `uvicorn app.main:app --reload --port 8002`
 EOF
@@ -588,7 +589,8 @@ opa:
   image: openpolicyagent/opa:latest-envoy
 
 env:
-  ANTHROPIC_API_KEY: ""
+  HUGGINGFACEHUB_API_TOKEN: ""
+  HF_MODEL_ID: "Qwen/Qwen2.5-72B-Instruct"
 EOF
 
 create_file deploy/helm/regengine/templates/_helpers.tpl <<'EOF'
@@ -746,8 +748,10 @@ asyncio_mode = "auto"
 EOF
 
 create_file .env.example <<'EOF'
-# --- Anthropic / CrewAI (services/agents) ---
-ANTHROPIC_API_KEY=
+# --- Hugging Face / CrewAI (services/agents) ---
+HUGGINGFACEHUB_API_TOKEN=
+HF_TOKEN=
+HF_MODEL_ID=Qwen/Qwen2.5-72B-Instruct
 
 # --- Ingestion (services/ingestion) ---
 TIKA_SERVER_URL=http://localhost:9998

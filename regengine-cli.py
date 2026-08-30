@@ -12,7 +12,7 @@ so a green run here is a real signal the stack is wired together correctly:
     2. Extract/Audit  the target clause through the CrewAI dual-agent
                     pipeline (app.agents.pipeline.extract_and_audit_clause),
                     or a canned deterministic rule with --offline-agents
-                    when no ANTHROPIC_API_KEY is configured
+                    when no HUGGINGFACEHUB_API_TOKEN is configured
     3. Compile      the audited rule to OPA Rego (+ JSON-Logic fallback)
                     (app.compiler.pipeline.compile_audited_rule)
     4. Deploy       the compiled Rego to a live OPA server's Policy API
@@ -25,12 +25,12 @@ so a green run here is a real signal the stack is wired together correctly:
 
 Requires a reachable OPA server and PostgreSQL ledger for steps 4-6 (e.g.
 `docker compose up opa postgres` -- see docker-compose.yml); step 2 needs
-ANTHROPIC_API_KEY unless run with --offline-agents. Steps 1-3 have no
+HUGGINGFACEHUB_API_TOKEN unless run with --offline-agents. Steps 1-3 have no
 external dependency beyond what's already in requirements.txt.
 
 Usage:
     python regengine-cli.py                                    # full run, synthetic sample, real agents
-    python regengine-cli.py --offline-agents                    # no ANTHROPIC_API_KEY required
+    python regengine-cli.py --offline-agents                    # no HUGGINGFACEHUB_API_TOKEN required
     python regengine-cli.py --pdf ./my_circular.pdf              # ingest a real file
     python regengine-cli.py --pdf https://example.com/c.pdf      # ingest from a URL
     python regengine-cli.py --facts '{"upfront_margin_pct": 25}' # demonstrate an ALLOW instead of DENY
@@ -191,7 +191,7 @@ async def _load_pdf_bytes(pdf_source: str | None) -> tuple[bytes, str]:
 def _canned_audited_rule(chunk: ClauseChunk) -> AuditedComplianceRule:
     """A deterministic 'Upfront Margin >= 20%' rule bound to the ACTUAL
     ingested chunk's identity (sha256/chunk_id/circular_number/clause_number),
-    used in place of a real CrewAI/Claude call when --offline-agents is
+    used in place of a real CrewAI/Hugging Face call when --offline-agents is
     set. Mirrors the fixture used throughout this repo's own test suite
     (tests/test_agent_pipeline.py) -- the same worked example, here
     standing in for a live LLM extraction rather than testing one."""
@@ -316,12 +316,12 @@ async def step_ingest(pdf_source: str | None, settings: Settings) -> tuple[Parse
 async def step_extract_and_audit(chunk: ClauseChunk, settings: Settings, offline: bool) -> AuditedComplianceRule:
     _step_header(2)
     if offline:
-        console.print("[yellow]--offline-agents set: skipping CrewAI/Anthropic, using a canned rule.[/yellow]")
+        console.print("[yellow]--offline-agents set: skipping CrewAI/Hugging Face, using a canned rule.[/yellow]")
         audited = _canned_audited_rule(chunk)
     else:
-        if not settings.anthropic_api_key:
+        if not settings.hf_api_token:
             raise PipelineError(
-                "ANTHROPIC_API_KEY is not set. Configure it in .env, or re-run with --offline-agents "
+                "HUGGINGFACEHUB_API_TOKEN is not set. Configure it in .env, or re-run with --offline-agents "
                 "to use a canned rule instead of the live CrewAI extraction/audit agents."
             )
         try:
@@ -512,8 +512,8 @@ async def run_pipeline(
 )
 @click.option(
     "--offline-agents", is_flag=True, default=False,
-    help="Skip the live CrewAI/Anthropic extraction+audit agents and use a canned, deterministic "
-         "'Upfront Margin >= 20%' rule instead. Use this when ANTHROPIC_API_KEY isn't configured.",
+    help="Skip the live CrewAI/Hugging Face extraction+audit agents and use a canned, deterministic "
+         "'Upfront Margin >= 20%' rule instead. Use this when HUGGINGFACEHUB_API_TOKEN isn't configured.",
 )
 @click.option("--opa-url", default="http://localhost:8181", show_default=True, help="OPA server base URL.")
 @click.option("--opa-timeout", default=5.0, show_default=True, help="OPA HTTP request timeout, in seconds.")

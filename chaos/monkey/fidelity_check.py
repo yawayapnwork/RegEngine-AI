@@ -5,7 +5,7 @@ comparison language actually present in `verbatim_evidence`; see
 app.agents.tools' module docstring on why that check is designed to be
 "mechanically enforceable rather than a matter of prompt phrasing").
 
-This chaos suite has no ANTHROPIC_API_KEY / LLM available to invoke the
+This chaos suite has no HUGGINGFACEHUB_API_TOKEN / LLM available to invoke the
 real CrewAI Logic Auditor Agent, so this module reimplements the
 deterministic half of that check -- the half that never depended on an
 LLM to begin with -- using the same real, dependency-free

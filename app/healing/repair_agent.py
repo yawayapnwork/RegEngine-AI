@@ -7,12 +7,12 @@ Requirement 3's named defect classes ("syntax errors, missing field
 checks, or invalid JSON-Logic types") have a small, well-defined,
 mechanically-safe transformation and don't need an LLM call at all.
 
-crewai and its Anthropic LLM binding are imported lazily inside
+crewai and its Hugging Face LLM binding are imported lazily inside
 `build_repair_agent`/`run_llm_repair`, exactly like app.agents.crew, so
 this module (and its deterministic fast path) stays importable and
-testable without crewai installed or an ANTHROPIC_API_KEY configured --
-see tests/test_healing.py, which exercises the full retry loop through
-the deterministic path only, matching regengine-cli.py's own
+testable without crewai installed or an HUGGINGFACEHUB_API_TOKEN
+configured -- see tests/test_healing.py, which exercises the full retry
+loop through the deterministic path only, matching regengine-cli.py's own
 `--offline-agents` precedent for testing this pipeline without a live
 LLM.
 """
@@ -195,10 +195,10 @@ def repair_policy(failure: PolicyFailure, settings: Settings | None = None, prio
     if deterministic.can_repair:
         return deterministic, RepairStrategy.DETERMINISTIC_FIX
 
-    if not settings.anthropic_api_key:
-        logger.info("No deterministic fix for rule_id=%s and no ANTHROPIC_API_KEY configured; cannot escalate to the LLM Policy Repair Agent.", failure.rule_id)
+    if not settings.hf_api_token:
+        logger.info("No deterministic fix for rule_id=%s and no HUGGINGFACEHUB_API_TOKEN configured; cannot escalate to the LLM Policy Repair Agent.", failure.rule_id)
         return (
-            RepairSuggestion(can_repair=False, repair_notes=deterministic.repair_notes + " No ANTHROPIC_API_KEY configured, so the LLM Policy Repair Agent could not be tried either."),
+            RepairSuggestion(can_repair=False, repair_notes=deterministic.repair_notes + " No HUGGINGFACEHUB_API_TOKEN configured, so the LLM Policy Repair Agent could not be tried either."),
             RepairStrategy.UNFIXABLE,
         )
 

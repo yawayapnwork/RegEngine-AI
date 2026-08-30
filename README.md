@@ -43,7 +43,7 @@ flowchart LR
 | Stage | Module | What it does |
 |---|---|---|
 | **Ingestion** | `app.parsing`, `app.vectorstore` | Layout-aware PDF parsing (Unstructured `hi_res`, Tika fallback), clause-level chunking with content hashing, embedding + Qdrant indexing. |
-| **Extraction** | `app.agents` | CrewAI dual-agent pipeline (Claude): an **Extraction Agent** structures each clause into obligations/thresholds/entities, and a **Logic Auditor Agent** independently verifies extraction fidelity before anything is trusted downstream. |
+| **Extraction** | `app.agents` | CrewAI dual-agent pipeline (Qwen2.5, via Hugging Face Inference): an **Extraction Agent** structures each clause into obligations/thresholds/entities, and a **Logic Auditor Agent** independently verifies extraction fidelity before anything is trusted downstream. |
 | **Compilation** | `app.compiler` | Compiles audited, deterministic clauses into **OPA Rego** and a **JSON-Logic** fallback. Clauses that are qualitative, ambiguous, low-confidence, or internally conflicting are never silently compiled — they're flagged (`HITLFlag`, blocking or advisory) and routed for human review instead. |
 | **Execution** | `app.execution` | FastAPI service that evaluates live broker transactions against compiled policy via a co-located OPA server, returning `allow` / `deny` / `flagged` in real time. A two-layer cache (in-process `PolicyCache` in front of a Redis `PolicyRegistry`) gives sub-millisecond `entity_type -> applicable policies` lookups; a Redis pub/sub `PolicyHotReloadSubscriber` running in every worker hot-reloads OPA and invalidates that cache the instant a compliance officer approves a policy — zero downtime, no restart. Legacy SFTP batch files and DB CDC events are processed asynchronously on Celery/Redis queues. Ambiguous transactions (missing/undefined facts) fall back to a Redis-backed HITL queue, with resolution delivered back via signed webhook. |
 | **Audit** | `app.ledger` | Every compliance evaluation is written to a PostgreSQL **append-only, SHA-256 hash-chained ledger** (AWS QLDB–style journal model), binding each transaction to the exact SEBI circular/clause hash that decided it. A verifier recomputes the chain over any time range and reports the first tampered block, if any. |
@@ -144,7 +144,7 @@ npm run dev          # http://localhost:5173, proxies /v1/* to :8000
 
 All settings are environment-driven (`app/config.py`, loaded from `.env` in local dev). Every value below has
 a working local-dev default — nothing is required to boot the service against localhost dependencies except
-`ANTHROPIC_API_KEY`.
+`HUGGINGFACEHUB_API_TOKEN` (or `HF_TOKEN`).
 
 | Variable | Default | Purpose |
 |---|---|---|

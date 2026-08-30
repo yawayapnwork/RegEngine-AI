@@ -39,7 +39,13 @@ from app.ingestion.http_client import SebiHttpClient
 from app.ingestion.models import ChangeKind, DiscoveredDocument, IngestionRunResult
 from app.ingestion.regulator_sources import count_configured_sources
 from app.ingestion.pipeline_trigger import download_document, process_discovered_document
-from app.parsing.exceptions import ChunkingError, EmbeddingError, IndexingError, UnsupportedFileError
+from app.parsing.exceptions import (
+    ChunkingError,
+    EmbeddingError,
+    IndexingError,
+    ScannedDocumentError,
+    UnsupportedFileError,
+)
 from app.resilience.celery_helpers import route_to_dlq_sync
 from app.resilience.models import FailureCategory
 from app.resilience.retry_policy import is_transient
@@ -170,7 +176,15 @@ async def _process_one(discovered: DiscoveredDocument, change_kind: ChangeKind, 
 # deliberately NOT here: an extraction backend being briefly unreachable,
 # or a slow document tripping the timeout under load, both plausibly
 # succeed on a retry -- classified via is_transient() instead, below.
-_PERMANENT_PARSING_ERRORS = (UnsupportedFileError, ChunkingError)
+#
+# ScannedDocumentError IS explicitly permanent even though it subclasses
+# ExtractionBackendError: a scanned/image-only PDF has no text layer to
+# find regardless of how many times the same backend re-reads it, so it
+# belongs with UnsupportedFileError/ChunkingError, not with the
+# is_transient()-classified network-flakiness case below. Listed before
+# the parent type has any chance to matter here since isinstance() against
+# this tuple checks ScannedDocumentError directly.
+_PERMANENT_PARSING_ERRORS = (UnsupportedFileError, ChunkingError, ScannedDocumentError)
 
 
 @celery_app.task(

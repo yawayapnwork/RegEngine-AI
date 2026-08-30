@@ -9,7 +9,7 @@ silently compiled.
 `app.agents.crew` (and crewai itself) is never imported for real here --
 `run_dual_validation` is monkeypatched at the module level `extract_and_audit_clause`
 resolves it from, so these tests run without the crewai package or any
-Anthropic API call.
+Hugging Face Inference API call.
 """
 from __future__ import annotations
 

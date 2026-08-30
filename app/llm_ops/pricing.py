@@ -3,9 +3,10 @@ raw token count into a USD figure for the cost dashboard.
 
 Prices are USD per 1,000 tokens and must be kept in sync manually against
 provider pricing pages -- there is no pricing API to poll. Update
-`FRONTIER_MODEL_PRICING` when Anthropic changes list prices; the value is
-deliberately NOT fetched at runtime so a pricing-endpoint outage never
-breaks cost tracking (better to record slightly stale prices than none).
+`FRONTIER_MODEL_PRICING` when Hugging Face's Inference Providers pricing
+changes for the configured model; the value is deliberately NOT fetched
+at runtime so a pricing-endpoint outage never breaks cost tracking
+(better to record slightly stale prices than none).
 """
 from __future__ import annotations
 
@@ -18,9 +19,14 @@ class ModelPricing:
     output_per_1k_usd: float
 
 
-# Anthropic list pricing as of the model's release generation (claude-3-5-sonnet).
+# Hugging Face Inference Providers pricing varies by which underlying
+# provider actually serves a given model (routed per-model, not a single
+# HF-wide rate card) -- these figures are a placeholder estimate for
+# Qwen2.5-72B-Instruct-class serverless inference and MUST be reconciled
+# against the actual configured provider's billing before being trusted
+# for real cost reporting.
 FRONTIER_MODEL_PRICING: dict[str, ModelPricing] = {
-    "anthropic/claude-3-5-sonnet-20241022": ModelPricing(input_per_1k_usd=0.003, output_per_1k_usd=0.015),
+    "huggingface/Qwen/Qwen2.5-72B-Instruct": ModelPricing(input_per_1k_usd=0.0009, output_per_1k_usd=0.0009),
 }
 
 # The "cheap" tier is a self-hosted, QLoRA-fine-tuned model (llm_finetune/)

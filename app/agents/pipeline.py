@@ -61,7 +61,7 @@ async def extract_and_audit_circular(
     max_concurrency: int = 3,
 ) -> list[AuditedComplianceRule]:
     """Run the dual-agent pipeline across every clause chunk of a circular,
-    bounding concurrency to respect the Anthropic rate limit / agent_max_rpm."""
+    bounding concurrency to respect the Hugging Face Inference rate limit / agent_max_rpm."""
     settings = settings or get_settings()
     sibling_payload = [
         {"chunk_id": c.chunk_id, "clause_number": c.clause_number, "section_path": c.section_path, "text": c.text}

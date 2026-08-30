@@ -54,7 +54,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Lazy imports so the module loads without crewai/anthropic in dry-run mode
+# Lazy imports so the module loads without crewai/huggingface_hub in dry-run mode
 # ---------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ async def _run_extraction_suite(
     pairs: list[tuple] = []
     errors: list[dict] = []
 
-    semaphore = asyncio.Semaphore(3)  # respect Anthropic rate limit
+    semaphore = asyncio.Semaphore(3)  # respect Hugging Face Inference rate limit
 
     async def _run_one(scenario):
         async with semaphore:
@@ -649,7 +649,7 @@ async def run_eval(
     else:
         settings = type("S", (), {
             "agent_verbose": False, "agent_max_rpm": 20,
-            "anthropic_api_key": "dry-run",
+            "hf_api_token": "dry-run",
         })()
 
     run_id = run_id or dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
@@ -695,7 +695,7 @@ async def run_eval(
         scenario_count=len(ALL_SCENARIOS[:limit] if limit else ALL_SCENARIOS),
         injection_count=len(ALL_INJECTIONS[:limit] if limit else ALL_INJECTIONS),
         git_sha=_git_sha(),
-        model="anthropic/claude-3-5-sonnet-20241022" + (" (dry-run)" if dry_run else ""),
+        model="huggingface/Qwen/Qwen2.5-72B-Instruct" + (" (dry-run)" if dry_run else ""),
         python_version=sys.version,
     )
 

@@ -260,7 +260,7 @@ jobs:
       # Minimal required secrets for test runs — never real credentials.
       JWT_SECRET_KEY: "ci-test-secret-key-not-for-production"
       OPA_SERVER_URL: "http://localhost:8181"   # not used in unit tests; OPA engine is mocked
-      ANTHROPIC_API_KEY: "dummy-ci-key"
+      HUGGINGFACEHUB_API_TOKEN: "dummy-ci-token"
       SECRETS_BACKEND: "env"
       SANDBOX_ENABLED: "true"
 

@@ -35,8 +35,8 @@
 
 models:
   - type: main
-    engine: anthropic
-    model: claude-3-5-sonnet-20241022
+    engine: huggingface_hub
+    model: Qwen/Qwen2.5-72B-Instruct
 
 rails:
   input:

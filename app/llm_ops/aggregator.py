@@ -106,7 +106,7 @@ class CostAggregator:
             # fact) rather than a claim of precise counterfactual cost.
             avg_input = (row.total_input_tokens / max(1, total_requests - cache_hits)) if total_requests > cache_hits else 500
             avg_output = (row.total_output_tokens / max(1, total_requests - cache_hits)) if total_requests > cache_hits else 300
-            hypothetical_cache_hit_cost = estimate_cost_usd("anthropic/claude-3-5-sonnet-20241022", int(avg_input), int(avg_output))
+            hypothetical_cache_hit_cost = estimate_cost_usd("huggingface/Qwen/Qwen2.5-72B-Instruct", int(avg_input), int(avg_output))
             estimated_without_cache = float(row.total_cost_usd or 0.0) + cache_hits * hypothetical_cache_hit_cost
             estimated_savings = estimated_without_cache - float(row.total_cost_usd or 0.0)
 

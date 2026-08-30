@@ -1,6 +1,6 @@
 """Celery wrapper around app.agents.pipeline.extract_and_audit_clause,
 giving the LLM extraction/audit pass background-job treatment: bounded
-retry-with-backoff-and-jitter for a transient Anthropic API failure (rate
+retry-with-backoff-and-jitter for a transient Hugging Face Inference API failure (rate
 limit, timeout, connection drop), and immediate DLQ routing (never
 retried) for anything else -- a clause the model genuinely cannot
 structure will fail exactly the same way on the fifth attempt as the

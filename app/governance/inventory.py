@@ -19,8 +19,8 @@ from app.governance.schemas import AgentInventoryCreate, AgentInventoryUpdate
 # update this alongside that default if it ever changes, since this
 # registry's whole purpose is to disclose the model ACTUALLY in
 # production use, not a stale snapshot.
-_DEFAULT_MODEL_PROVIDER = "anthropic"
-_DEFAULT_MODEL_WEIGHT_VERSION = "claude-3-5-sonnet-20241022"
+_DEFAULT_MODEL_PROVIDER = "huggingface"
+_DEFAULT_MODEL_WEIGHT_VERSION = "Qwen/Qwen2.5-72B-Instruct"
 
 SEED_AGENTS: list[AgentInventoryCreate] = [
     AgentInventoryCreate(

@@ -59,13 +59,25 @@ ENV PATH="/opt/venv/bin:${PATH}"
 WORKDIR /build
 COPY requirements.txt .
 
-# CPU-only torch explicitly, BEFORE requirements.txt: sentence-transformers
-# otherwise resolves the default (CUDA-bundled) torch wheel -- several GB
-# larger than this service needs, since embedding inference here runs on
-# ordinary CPU worker pods, never a GPU node.
+# CPU-only torch AND torchvision explicitly, BEFORE requirements.txt, in the
+# SAME pip invocation: sentence-transformers otherwise resolves the default
+# (CUDA-bundled) torch wheel -- several GB larger than this service needs,
+# since embedding inference here runs on ordinary CPU worker pods, never a
+# GPU node. torchvision must be pinned here too, not left for
+# requirements.txt to resolve later: unstructured[pdf]'s hi_res strategy
+# (table/layout detection, via unstructured-inference) pulls torchvision in
+# transitively, and if that happens in a separate pip run it resolves from
+# PyPI's default index against whatever's "latest" there -- built against a
+# DIFFERENT libtorch ABI than the CPU-only torch already installed. Both
+# packages import fine individually in that broken state; the mismatch only
+# surfaces at first use, as `RuntimeError: operator torchvision::nms does
+# not exist` inside transformers' DetrImageProcessor (used by
+# unstructured's table-structure model) -- which extract_pdf's hi_res path
+# hits on every upload. Installing both from the CPU index in one command
+# lets pip's resolver pick a mutually ABI-compatible pair.
 RUN pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cpu \
-        torch \
+        torch torchvision \
     && pip install --no-cache-dir -r requirements.txt
 
 #############################################
