@@ -1,8 +1,11 @@
-"""OAuth2 token issuance for Broker_API_Client tenants, and a token
-introspection endpoint. Compliance_Officer / System_Admin users do NOT
-authenticate here -- they hold tokens issued by the enterprise SSO
-provider, verified via JWKS (see app.security.jwt's module docstring);
-this service is only ever the identity source for machine (broker) clients.
+"""OAuth2 token issuance for Broker_API_Client tenants, standalone
+email/password login for Compliance_Officer/System_Admin users (this
+service's own local accounts -- see app.security.local_user_store), and a
+token introspection endpoint. Human users MAY alternatively authenticate
+via an external SSO IdP (Okta/Azure AD/PingIdentity, or SAML through
+app.api.saml_routes) instead of the local login below -- both paths
+converge on the same self-issued JWT shape (app.security.jwt), so every
+other part of the application only ever has to understand one token format.
 """
 from __future__ import annotations
 
@@ -12,9 +15,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import Settings, get_settings
-from app.security.dependencies import get_current_principal
+from app.security.dependencies import get_current_principal, require_roles
 from app.security.jwt import create_access_token
-from app.security.models import ClientCredentialsRequest, Principal, Role, TokenResponse
+from app.security.local_user_store import LocalUserStore
+from app.security.models import ClientCredentialsRequest, LoginRequest, Principal, Role, TokenResponse
 from app.security.secrets import resolve_secret
 from app.security.tenant_store import TenantClientStore
 
@@ -26,6 +30,12 @@ def get_tenant_client_store(settings: Settings = Depends(get_settings)) -> Tenan
     from app.execution.dependencies import get_redis_pool  # reuse the shared process-wide Redis pool
 
     return TenantClientStore(redis_client=get_redis_pool(), key_prefix=settings.tenant_client_key_prefix)
+
+
+def get_local_user_store(settings: Settings = Depends(get_settings)) -> LocalUserStore:
+    from app.execution.dependencies import get_redis_pool  # reuse the shared process-wide Redis pool
+
+    return LocalUserStore(redis_client=get_redis_pool(), key_prefix=settings.local_user_key_prefix)
 
 
 async def _signing_key(settings: Settings) -> str:
@@ -67,6 +77,57 @@ async def issue_token(
         expires_in=settings.jwt_access_token_ttl_seconds,
         scope=" ".join(payload.scope),
     )
+
+
+@router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+async def login(
+    request: LoginRequest,
+    settings: Settings = Depends(get_settings),
+    users: LocalUserStore = Depends(get_local_user_store),
+) -> TokenResponse:
+    """Standalone email/password login for the custom login page: verifies
+    credentials against this service's own local account store (never an
+    external IdP) and mints a self-issued access token, the same
+    create_access_token path app.api.saml_routes bridges a SAML assertion
+    through -- so RBAC/session handling downstream never needs to know
+    which login path a given token came from."""
+    user = await users.authenticate(request.email, request.password)
+    if user is None:
+        # Identical response whether the email is unknown or the password is
+        # wrong -- see LocalUserStore.authenticate's docstring on why.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+
+    signing_key = await _signing_key(settings)
+    access_token, payload = create_access_token(
+        subject=user.email,
+        roles=user.roles,
+        settings=settings,
+        signing_key=signing_key,
+        tenant_id=None,
+    )
+    logger.info("Local login succeeded for subject=%s roles=%s", user.email, [r.value for r in user.roles])
+
+    return TokenResponse(
+        access_token=access_token,
+        expires_in=settings.jwt_access_token_ttl_seconds,
+        scope=" ".join(payload.scope) or None,
+    )
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+async def create_local_user(
+    request: LoginRequest,
+    principal: Principal = Depends(require_roles(Role.SYSTEM_ADMIN)),
+    users: LocalUserStore = Depends(get_local_user_store),
+) -> dict:
+    """Provisions (or resets the password for) a local Compliance_Officer
+    account. System_Admin-only, deliberately -- same "no public self-service
+    signup" convention as app.security.tenant_store's broker registration;
+    a compliance system's human accounts are administrator-provisioned, not
+    self-served."""
+    await users.register(request.email, request.password, roles=[Role.COMPLIANCE_OFFICER])
+    logger.info("Local user provisioned by %s: subject=%s", principal.subject, request.email)
+    return {"email": request.email.strip().lower(), "roles": [Role.COMPLIANCE_OFFICER.value]}
 
 
 @router.get("/me", response_model=Principal)

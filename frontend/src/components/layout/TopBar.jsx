@@ -1,4 +1,4 @@
-import { Bell, LogOut, Search, User } from "lucide-react";
+import { Bell, LogOut, Search } from "lucide-react";
 
 const TITLES = {
   pipeline: [
@@ -23,30 +23,7 @@ const TITLES = {
   ],
 };
 
-function AuthControl({ auth0Configured, isAuthenticated, isLoading, user, onLogin, onLogout }) {
-  if (!auth0Configured) {
-    return (
-      <span
-        title="VITE_AUTH0_DOMAIN / VITE_AUTH0_CLIENT_ID are not set -- see frontend/.env.example"
-        className="rounded-sm border border-amber-200 bg-amber-100 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-amber-800"
-      >
-        Auth not configured
-      </span>
-    );
-  }
-  if (isLoading) {
-    return <div className="h-7 w-16 animate-pulse rounded-sm bg-ink-850" />;
-  }
-  if (!isAuthenticated) {
-    return (
-      <button
-        onClick={onLogin}
-        className="flex items-center gap-1.5 rounded-sm border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
-      >
-        <User className="h-3.5 w-3.5" /> Log in
-      </button>
-    );
-  }
+function AuthControl({ user, onLogout }) {
   return (
     <button
       onClick={onLogout}
@@ -63,11 +40,7 @@ function AuthControl({ auth0Configured, isAuthenticated, isLoading, user, onLogi
 
 export default function TopBar({
   activeView,
-  auth0Configured = true,
-  isAuthenticated = false,
-  isLoading = false,
   user = null,
-  onLogin = () => {},
   onLogout = () => {},
 }) {
   const [title, subtitle] = TITLES[activeView] || ["", ""];
@@ -89,14 +62,7 @@ export default function TopBar({
           <Bell className="h-3.5 w-3.5" />
           <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-red-500" />
         </button>
-        <AuthControl
-          auth0Configured={auth0Configured}
-          isAuthenticated={isAuthenticated}
-          isLoading={isLoading}
-          user={user}
-          onLogin={onLogin}
-          onLogout={onLogout}
-        />
+        <AuthControl user={user} onLogout={onLogout} />
       </div>
     </header>
   );

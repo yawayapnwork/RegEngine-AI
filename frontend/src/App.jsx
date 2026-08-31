@@ -1,13 +1,14 @@
-import { useState } from "react";
-import { useAuth0 } from "@auth0/auth0-react";
+import { useEffect, useState } from "react";
 import Sidebar from "./components/layout/Sidebar";
 import TopBar from "./components/layout/TopBar";
+import LoginPage from "./components/auth/LoginPage";
 import PipelineTracker from "./components/pipeline/PipelineTracker";
 import ClauseSplitView from "./components/splitview/ClauseSplitView";
 import PolicyPlayground from "./components/playground/PolicyPlayground";
 import HITLDashboard from "./components/hitl/HITLDashboard";
 import AuditVault from "./components/vault/AuditVault";
 import { parseAndIndexCircular } from "./api/ingestionApi";
+import { login as loginRequest, decodeToken, isTokenExpired } from "./api/authApi";
 import {
   clauses,
   hitlCases as initialHitlCases,
@@ -15,22 +16,64 @@ import {
   pipelineRuns,
 } from "./mock/mockData";
 
-// LOCAL-DEV-ONLY fallback -- see frontend/.env.example. Never set this in
-// a deployed environment: it bakes a static Bearer token into the public
-// JS bundle. Real auth is Auth0 (below); this only exists so `npm run dev`
-// works without clicking through a login on every restart.
-const DEV_ACCESS_TOKEN = import.meta.env?.VITE_DEV_ACCESS_TOKEN || undefined;
-const AUTH0_AUDIENCE = import.meta.env?.VITE_AUTH0_AUDIENCE;
+// Bearer token issued by this backend's own POST /v1/auth/login
+// (app/api/auth_routes.py) -- persisted across reloads so the user isn't
+// logged out on every refresh (mirrors the old Auth0 SDK's
+// cacheLocation="localstorage" behavior, just handled ourselves now).
+const TOKEN_STORAGE_KEY = "regengine_access_token";
 
-export default function App({ auth0Configured = true }) {
-  const {
-    isAuthenticated,
-    isLoading: authLoading,
-    loginWithRedirect,
-    logout,
-    getAccessTokenSilently,
-    user,
-  } = useAuth0();
+function loadStoredToken() {
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  if (!token) return null;
+  const claims = decodeToken(token);
+  if (!claims || isTokenExpired(claims)) {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    return null;
+  }
+  return { token, claims };
+}
+
+export default function App() {
+  const [session, setSession] = useState(loadStoredToken);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
+
+  const isAuthenticated = Boolean(session);
+  const user = session?.claims
+    ? { email: session.claims.sub, name: session.claims.sub, roles: session.claims.roles }
+    : null;
+
+  // Log a session out on its own once its JWT expires, instead of letting
+  // API calls start silently 401ing.
+  useEffect(() => {
+    if (!session?.claims?.exp) return;
+    const msRemaining = session.claims.exp * 1000 - Date.now();
+    if (msRemaining <= 0) return;
+    const timer = setTimeout(() => {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      setSession(null);
+    }, msRemaining);
+    return () => clearTimeout(timer);
+  }, [session]);
+
+  const handleLogin = async (email, password) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const result = await loginRequest(email, password);
+      localStorage.setItem(TOKEN_STORAGE_KEY, result.access_token);
+      setSession({ token: result.access_token, claims: decodeToken(result.access_token) });
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Login failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setSession(null);
+  };
 
   const [activeView, setActiveView] = useState("pipeline");
   const [hitlCases, setHitlCases] = useState(initialHitlCases);
@@ -43,18 +86,10 @@ export default function App({ auth0Configured = true }) {
     setUploadError(null);
     setUploadResult(null);
     try {
-      let accessToken = DEV_ACCESS_TOKEN;
-      if (auth0Configured && isAuthenticated) {
-        // Auth0 SDK handles caching + silent refresh internally -- this
-        // is cheap to call on every upload, never a network round trip
-        // unless the cached token is actually expired.
-        accessToken = await getAccessTokenSilently(
-          AUTH0_AUDIENCE ? { authorizationParams: { audience: AUTH0_AUDIENCE } } : undefined,
-        );
-      } else if (auth0Configured && !accessToken) {
-        throw new Error("Not logged in. Click \"Log in\" in the top bar first.");
+      if (!session?.token) {
+        throw new Error("Not logged in. Log in first.");
       }
-      const result = await parseAndIndexCircular(file, { accessToken });
+      const result = await parseAndIndexCircular(file, { accessToken: session.token });
       setUploadResult({ filename: file.name, ...result });
       setUploadState("success");
     } catch (err) {
@@ -109,6 +144,10 @@ export default function App({ auth0Configured = true }) {
     (c) => c.status === "pending",
   ).length;
 
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={handleLogin} isLoading={authLoading} error={authError} />;
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-ink-950">
       <Sidebar
@@ -119,12 +158,9 @@ export default function App({ auth0Configured = true }) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar
           activeView={activeView}
-          auth0Configured={auth0Configured}
           isAuthenticated={isAuthenticated}
-          isLoading={authLoading}
           user={user}
-          onLogin={() => loginWithRedirect()}
-          onLogout={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+          onLogout={handleLogout}
         />
         <main className="flex-1 overflow-y-auto scrollbar-thin p-4">
           {activeView === "pipeline" && (

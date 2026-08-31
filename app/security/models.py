@@ -120,6 +120,26 @@ class ClientCredentialsRequest(BaseModel):
     client_secret: str
 
 
+class LoginRequest(BaseModel):
+    """Standalone email/password login -- POST /v1/auth/login. Verified
+    against app.security.local_user_store, entirely independent of any
+    external SSO IdP."""
+
+    email: str
+    password: str
+
+
+class LocalUser(BaseModel):
+    """A locally-provisioned human account (Compliance_Officer/System_Admin),
+    as stored (password hashed, never plaintext) in app.security.local_user_store.
+    Not exposed directly in any API response."""
+
+    email: str
+    password_hash: str
+    roles: list[Role] = Field(default_factory=lambda: [Role.COMPLIANCE_OFFICER])
+    disabled: bool = False
+
+
 class TenantClient(BaseModel):
     """A registered broker tenant's OAuth2 client, as stored (secret
     hashed, never plaintext) in the tenant client store -- see

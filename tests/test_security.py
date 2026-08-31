@@ -28,6 +28,7 @@ from app.security.secrets import (
     SecretNotFoundError,
     get_secrets_provider,
 )
+from app.security.local_user_store import LocalUserStore
 from app.security.tenant_store import TenantClientStore
 
 HS256_SECRET = "test-secret-key-not-for-production"
@@ -168,6 +169,47 @@ class TestTenantClientStore:
         await store.disable("client-1")
 
         assert await store.authenticate("client-1", "s3cr3t") is None
+
+
+# --------------------------------------------------------------------------
+# Local user store (bcrypt-hashed standalone email/password accounts)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestLocalUserStore:
+    async def test_register_then_authenticate_succeeds(self):
+        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+        await store.register("officer@example.com", "s3cr3t")
+
+        user = await store.authenticate("officer@example.com", "s3cr3t")
+
+        assert user is not None
+        assert user.email == "officer@example.com"
+        assert Role.COMPLIANCE_OFFICER in user.roles
+
+    async def test_email_lookup_is_case_insensitive(self):
+        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+        await store.register("Officer@Example.com", "s3cr3t")
+
+        assert await store.authenticate("officer@example.com", "s3cr3t") is not None
+
+    async def test_wrong_password_fails(self):
+        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+        await store.register("officer@example.com", "s3cr3t")
+
+        assert await store.authenticate("officer@example.com", "wrong") is None
+
+    async def test_unknown_email_fails(self):
+        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+        assert await store.authenticate("nobody@example.com", "anything") is None
+
+    async def test_disabled_user_cannot_authenticate(self):
+        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+        await store.register("officer@example.com", "s3cr3t")
+        await store.disable("officer@example.com")
+
+        assert await store.authenticate("officer@example.com", "s3cr3t") is None
 
 
 # --------------------------------------------------------------------------

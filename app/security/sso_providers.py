@@ -60,12 +60,6 @@ def build_sso_provider_registry(settings: Settings) -> dict[str, SSOProviderConf
             audience=settings.sso_pingidentity_audience, algorithms=algorithms, group_claim=settings.sso_pingidentity_group_claim,
         )
 
-    if settings.sso_auth0_issuer and settings.sso_auth0_jwks_url:
-        registry[settings.sso_auth0_issuer] = SSOProviderConfig(
-            name="auth0", issuer=settings.sso_auth0_issuer, jwks_url=settings.sso_auth0_jwks_url,
-            audience=settings.sso_auth0_audience, algorithms=algorithms, group_claim=settings.sso_auth0_group_claim,
-        )
-
     # Backward-compatible single-issuer configuration (jwt_external_issuer/
     # jwt_jwks_url) -- only added if that issuer isn't already registered
     # above under one of the named providers, so a deployment migrating

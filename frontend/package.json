@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@auth0/auth0-react": "^2.24.1",
     "@open-policy-agent/opa-wasm": "^1.10.0",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
