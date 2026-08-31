@@ -12,6 +12,7 @@ timeout, so this returns immediately and a Celery worker
 (app.ingestion.tasks.process_manual_upload_task) does the actual work."""
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -25,8 +26,9 @@ from app.db.session import get_db_session
 from app.ingestion.tasks import poll_sebi_sources_task, process_manual_upload_task
 from app.security.dependencies import get_current_principal, require_roles
 from app.security.models import Principal, Role
-from app.storage.object_store import upload_bytes
+from app.storage.object_store import ObjectStorageNotConfiguredError, upload_bytes
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/ingestion", tags=["ingestion"])
 
 # Infrastructure/agent operation, not a compliance-content decision --
@@ -108,19 +110,43 @@ async def create_upload_job(
 
     job_id = str(uuid.uuid4())
     object_key = f"uploads/{job_id}/{file.filename or 'circular.pdf'}"
-    await upload_bytes(object_key, body, content_type=file.content_type or "application/pdf")
 
-    job = IngestionUploadJob(
-        job_id=job_id,
-        filename=file.filename or "circular.pdf",
-        object_key=object_key,
-        status="queued",
-        created_by=principal.subject,
-    )
-    session.add(job)
-    await session.commit()
+    try:
+        await upload_bytes(object_key, body, content_type=file.content_type or "application/pdf")
 
-    process_manual_upload_task.delay(job_id)
+        job = IngestionUploadJob(
+            job_id=job_id,
+            filename=file.filename or "circular.pdf",
+            object_key=object_key,
+            status="queued",
+            created_by=principal.subject,
+        )
+        session.add(job)
+        await session.commit()
+
+        process_manual_upload_task.delay(job_id)
+    except ObjectStorageNotConfiguredError as exc:
+        # An unhandled exception here would still reach the client as a
+        # 500 -- but crucially it would skip CORSMiddleware's normal
+        # response-header injection (that only wraps a clean response, not
+        # a raw ASGI-level crash), so the browser sees no
+        # Access-Control-Allow-Origin header and reports a generic "Failed
+        # to fetch" instead of this endpoint's actual problem. Catching and
+        # re-raising as HTTPException keeps this on the normal response
+        # path so CORS headers -- and a debuggable error message -- still
+        # reach the caller.
+        logger.error("Manual upload rejected: object storage not configured: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Upload storage is not configured on this deployment.",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - final safety net, never leak internals; see comment above
+        logger.exception("Unhandled error creating upload job for '%s'", file.filename)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal error while starting the upload job.",
+        ) from exc
+
     return UploadJobResponse(job_id=job_id, status="queued")
 
 
