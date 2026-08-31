@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     @apply bg-ink-950 text-slate-800 antialiased font-sans;
     font-feature-settings: "tnum" 1, "cv11" 1;

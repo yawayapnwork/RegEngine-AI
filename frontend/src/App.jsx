@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./components/layout/Sidebar";
 import TopBar from "./components/layout/TopBar";
-import LoginPage from "./components/auth/LoginPage";
+import LandingPage from "./components/landing/LandingPage";
+import AuthModal from "./components/auth/AuthModal";
 import PipelineTracker from "./components/pipeline/PipelineTracker";
 import ClauseSplitView from "./components/splitview/ClauseSplitView";
 import PolicyPlayground from "./components/playground/PolicyPlayground";
@@ -22,12 +23,17 @@ import {
 // cacheLocation="localstorage" behavior, just handled ourselves now).
 const TOKEN_STORAGE_KEY = "regengine_access_token";
 
+// "Remember me" (AuthModal) decides which of these two a login writes to:
+// localStorage survives browser restarts, sessionStorage clears when the
+// tab closes. Read order matters -- localStorage first, since a token
+// there is meant to persist even if this is also a fresh tab.
 function loadStoredToken() {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY);
   if (!token) return null;
   const claims = decodeToken(token);
   if (!claims || isTokenExpired(claims)) {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     return null;
   }
   return { token, claims };
@@ -37,6 +43,13 @@ export default function App() {
   const [session, setSession] = useState(loadStoredToken);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState(null);
+  const [authModal, setAuthModal] = useState({ open: false, mode: "login" });
+
+  const openAuthModal = (mode) => {
+    setAuthError(null);
+    setAuthModal({ open: true, mode });
+  };
+  const closeAuthModal = () => setAuthModal((prev) => ({ ...prev, open: false }));
 
   const isAuthenticated = Boolean(session);
   const user = session?.claims
@@ -51,18 +64,23 @@ export default function App() {
     if (msRemaining <= 0) return;
     const timer = setTimeout(() => {
       localStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
       setSession(null);
     }, msRemaining);
     return () => clearTimeout(timer);
   }, [session]);
 
-  const handleLogin = async (email, password) => {
+  const handleLogin = async (email, password, rememberMe = true) => {
     setAuthLoading(true);
     setAuthError(null);
     try {
       const result = await loginRequest(email, password);
-      localStorage.setItem(TOKEN_STORAGE_KEY, result.access_token);
+      const store = rememberMe ? localStorage : sessionStorage;
+      store.setItem(TOKEN_STORAGE_KEY, result.access_token);
       setSession({ token: result.access_token, claims: decodeToken(result.access_token) });
+      // isAuthenticated flips on the next render, at which point the
+      // landing page (and this modal along with it) stops rendering --
+      // no explicit close needed on success.
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Login failed.");
     } finally {
@@ -70,7 +88,10 @@ export default function App() {
     }
   };
 
-  const handleSignup = async (email, password) => {
+  // AuthModal's signup form also collects fullName/orgType, but POST
+  // /v1/auth/signup (app.security.models.LoginRequest) only takes
+  // email+password today -- see AuthModal's own comment at the call site.
+  const handleSignup = async ({ email, password }) => {
     setAuthLoading(true);
     setAuthError(null);
     try {
@@ -86,7 +107,9 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     setSession(null);
+    setAuthModal({ open: false, mode: "login" });
   };
 
   const [activeView, setActiveView] = useState("pipeline");
@@ -159,7 +182,20 @@ export default function App() {
   ).length;
 
   if (!isAuthenticated) {
-    return <LoginPage onLogin={handleLogin} onSignup={handleSignup} isLoading={authLoading} error={authError} />;
+    return (
+      <>
+        <LandingPage onOpenAuth={openAuthModal} />
+        <AuthModal
+          isOpen={authModal.open}
+          initialMode={authModal.mode}
+          onClose={closeAuthModal}
+          onLogin={handleLogin}
+          onSignup={handleSignup}
+          isLoading={authLoading}
+          error={authError}
+        />
+      </>
+    );
   }
 
   return (
