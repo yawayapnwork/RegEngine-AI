@@ -37,7 +37,7 @@ export default function PdfUploadZone({ onFileSelected, disabled = false }) {
         {disabled ? "Upload in progress..." : "Drop a SEBI Master Circular PDF, or click to browse"}
       </p>
       <p className="ml-auto font-mono text-2xs text-slate-400">
-        POST /v1/circulars/parse-and-index &middot; max 50MB
+        POST /v1/ingestion/uploads &middot; max 50MB
       </p>
       <input
         ref={inputRef}

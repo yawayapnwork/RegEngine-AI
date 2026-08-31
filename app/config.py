@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     qdrant_upsert_batch_size: int = 64
     qdrant_timeout_seconds: float = 30.0
 
+    # --- Object storage (app.storage.object_store) ---
+    # S3-compatible (Backblaze B2 / Cloudflare R2 / AWS S3) staging area for
+    # manually-uploaded PDFs: the web process uploads here and hands the
+    # Celery worker (process_manual_upload_task) just the object key, since
+    # a multi-ten-MB file can't travel through a Redis/Celery task argument.
+    object_storage_endpoint_url: str | None = None
+    object_storage_bucket: str | None = None
+    object_storage_access_key_id: str | None = None
+    object_storage_secret_access_key: str | None = None
+
     # --- Neo4j Legal Knowledge Graph (app.graph) ---
     # Off by default: a deployment that never enables this needs no Neo4j
     # instance at all, and app.compiler.tasks's sync hook becomes a no-op

@@ -12,6 +12,15 @@ to run every `ingestion_poll_interval_seconds`. Each run:
      discovery of the rest of the batch, and so per-document retries don't
      re-run the whole poll cycle.
 
+`process_manual_upload_task` is the equivalent path for a user-uploaded PDF
+(`POST /v1/ingestion/uploads`, `app.api.ingestion_routes`) instead of an
+auto-discovered one: the web process stages the file in object storage
+(`app.storage.object_store`) and creates an `IngestionUploadJob` row before
+enqueuing this task, since the file itself is too large to pass as a task
+argument. This task fetches it by key, runs the same parse -> index pipeline,
+and updates that row so the frontend can poll it instead of blocking on one
+long-lived HTTP request.
+
 Celery tasks run outside an asyncio event loop; each task opens exactly one
 event loop for its unit of work via `asyncio.run`.
 
@@ -29,8 +38,14 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+from app.db.models import IngestionUploadJob
 from app.execution.celery_app import celery_app
 from app.ingestion.change_detector import SeenDocumentStore
 from app.ingestion.exceptions import DocumentDownloadError, IngestionError, RobotsDisallowedError
@@ -49,6 +64,9 @@ from app.parsing.exceptions import (
 from app.resilience.celery_helpers import route_to_dlq_sync
 from app.resilience.models import FailureCategory
 from app.resilience.retry_policy import is_transient
+from app.services.pipeline import parse_pdf_bytes
+from app.storage.object_store import download_bytes
+from app.vectorstore.qdrant_store import index_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -248,3 +266,114 @@ def process_discovered_document_task(self, discovered_dict: dict, change_kind: s
             attempt_count=attempt,
         )
         raise
+
+
+@asynccontextmanager
+async def _short_lived_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """A fresh engine (and its connection pool) scoped to exactly one
+    `asyncio.run()` call, disposed before that call returns -- deliberately
+    NOT `app.db.session.get_engine`/`get_session_factory`, which are
+    process-wide `@lru_cache`'d singletons meant for a single long-lived
+    event loop (uvicorn's). Each Celery task invocation gets its own fresh
+    event loop via `asyncio.run()`; a pooled asyncpg connection created in
+    one such loop is unusable (and crashes with "Event loop is closed") the
+    moment a *different* asyncio.run() call -- a different task, or even a
+    second asyncio.run() within the same task -- tries to reuse it from the
+    cached engine. A short-lived, per-call engine sidesteps that entirely."""
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+    try:
+        yield async_sessionmaker(bind=engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+async def _set_upload_job_status(job_id: str, **fields: object) -> None:
+    async with _short_lived_session_factory() as session_factory, session_factory() as session:
+        result = await session.execute(select(IngestionUploadJob).where(IngestionUploadJob.job_id == job_id))
+        job = result.scalar_one_or_none()
+        if job is None:
+            logger.error("IngestionUploadJob '%s' vanished mid-processing -- nothing to update.", job_id)
+            return
+        for key, value in fields.items():
+            setattr(job, key, value)
+        await session.commit()
+
+
+async def _process_manual_upload(job_id: str) -> int:
+    """Fetches the job's staged PDF from object storage and runs it through
+    the same parse -> index pipeline `process_discovered_document` uses.
+    Returns the number of clause chunks indexed. Raises on failure -- the
+    caller (the Celery task below) is responsible for retry/DLQ
+    classification and for recording the terminal `failed` status."""
+    settings = get_settings()
+
+    async with _short_lived_session_factory() as session_factory, session_factory() as session:
+        result = await session.execute(select(IngestionUploadJob).where(IngestionUploadJob.job_id == job_id))
+        job = result.scalar_one_or_none()
+        if job is None:
+            raise IngestionError(f"IngestionUploadJob '{job_id}' does not exist.")
+        job.status = "processing"
+        await session.commit()
+        filename, object_key = job.filename, job.object_key
+
+    content = await download_bytes(object_key)
+    parsed = await parse_pdf_bytes(content, filename=filename, settings=settings)
+    await index_chunks(parsed.chunks, settings, recreate_collection=False)
+    return len(parsed.chunks)
+
+
+@celery_app.task(
+    name="app.ingestion.tasks.process_manual_upload_task",
+    bind=True,
+    max_retries=None,  # enforced manually below; see the retry() call
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+)
+def process_manual_upload_task(self, job_id: str) -> dict:
+    settings = get_settings()
+    payload = {"job_id": job_id}
+
+    try:
+        chunks_indexed = asyncio.run(_process_manual_upload(job_id))
+    except Exception as exc:  # noqa: BLE001 - classify every failure explicitly below (permanent / transient / DLQ)
+        attempt = self.request.retries + 1
+
+        if isinstance(exc, _PERMANENT_PARSING_ERRORS):
+            logger.error("Unparseable upload '%s' (attempt %d, not retrying): %s", job_id, attempt, exc)
+            asyncio.run(_set_upload_job_status(job_id, status="failed", error_message=str(exc)))
+            route_to_dlq_sync(
+                category=FailureCategory.PDF_PARSING,
+                task_name="app.ingestion.tasks.process_manual_upload_task",
+                payload=payload,
+                exc=exc,
+                original_task_id=self.request.id,
+                attempt_count=attempt,
+            )
+            raise
+
+        max_attempts = settings.retry_max_attempts_network
+        if is_transient(exc) and attempt < max_attempts:
+            logger.warning(
+                "Transient failure processing upload '%s' (attempt %d/%d): %s -- retrying with backoff.",
+                job_id, attempt, max_attempts, exc,
+            )
+            raise self.retry(exc=exc) from exc
+
+        category = FailureCategory.VECTOR_INGESTION if isinstance(exc, (EmbeddingError, IndexingError)) else FailureCategory.PDF_PARSING
+        logger.error("Upload pipeline failed for '%s' after %d attempt(s), not retrying further: %s", job_id, attempt, exc)
+        asyncio.run(_set_upload_job_status(job_id, status="failed", error_message=str(exc)))
+        route_to_dlq_sync(
+            category=category,
+            task_name="app.ingestion.tasks.process_manual_upload_task",
+            payload=payload,
+            exc=exc,
+            original_task_id=self.request.id,
+            attempt_count=attempt,
+        )
+        raise
+
+    logger.info("Upload '%s' complete: %d clause chunks indexed", job_id, chunks_indexed)
+    asyncio.run(_set_upload_job_status(job_id, status="completed", chunks_indexed=chunks_indexed))
+    return {"job_id": job_id, "chunks_indexed": chunks_indexed}

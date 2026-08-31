@@ -583,3 +583,57 @@ class User(Base):
         UniqueConstraint("email", name="uq_users_email"),
         Index("ix_users_email", "email"),
     )
+
+
+# --------------------------------------------------------------------------
+# Async manual-upload ingestion jobs -- app.ingestion.tasks.process_manual_upload_task
+# --------------------------------------------------------------------------
+
+_INGESTION_UPLOAD_STATUSES = ("queued", "processing", "completed", "failed")
+
+
+class IngestionUploadJob(Base):
+    """Tracks one manually-uploaded PDF from POST /v1/ingestion/uploads
+    through to completion, so the upload request can return immediately
+    (202) and the frontend can poll GET /v1/ingestion/uploads/{job_id}
+    instead of blocking on one long-lived HTTP request while the actual
+    parse -> index pipeline runs in a Celery worker.
+
+    The raw PDF bytes live in object storage (app.storage.object_store),
+    not in this table -- `object_key` is just the pointer the worker uses
+    to fetch them. No tenant_id column, mirroring User: SEBI circulars are
+    shared regulatory baseline data uploaded by a Compliance_Officer/
+    System_Admin, not per-tenant content (see app.api.routes'
+    `_require_ingestion_role`).
+    """
+
+    __tablename__ = "ingestion_upload_jobs"
+
+    id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+
+    # Business key returned to clients (POST /v1/ingestion/uploads' job_id) --
+    # a UUID string, not the surrogate id, matching this schema's existing
+    # convention (see HITLReview.review_id, User.user_id).
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    object_key: Mapped[str] = mapped_column(Text, nullable=False)
+
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="queued")
+    chunks_indexed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[str | None] = mapped_column(String(320), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_ingestion_upload_jobs_job_id"),
+        Index("ix_ingestion_upload_jobs_status", "status"),
+        CheckConstraint(f"status IN {_INGESTION_UPLOAD_STATUSES!r}", name="status"),
+    )

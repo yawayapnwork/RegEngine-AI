@@ -17,6 +17,8 @@ CPU-bound `-Q regengine_compiler` pool.
 """
 from __future__ import annotations
 
+import ssl
+
 from celery import Celery
 
 from app.config import get_settings
@@ -29,6 +31,16 @@ celery_app = Celery(
     backend=settings.redis_url,
 )
 
+# Celery's own redis broker/backend (unlike this app's other rediss://
+# consumers, e.g. app.execution.dependencies.get_redis_pool) refuses to
+# start against a rediss:// URL at all unless ssl_cert_reqs is set via this
+# dedicated config -- it doesn't infer a default. Configured here rather
+# than as a query param on REDIS_URL so it doesn't leak into (and break)
+# every other client sharing that same URL.
+if settings.redis_url.startswith("rediss://"):
+    _redis_ssl_options = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
+    celery_app.conf.update(broker_use_ssl=_redis_ssl_options, redis_backend_use_ssl=_redis_ssl_options)
+
 celery_app.conf.update(
     task_default_queue=settings.celery_task_default_queue,
     task_routes={
@@ -37,6 +49,7 @@ celery_app.conf.update(
         "app.execution.tasks.dispatch_webhook_task": {"queue": settings.celery_webhook_queue},
         "app.ingestion.tasks.poll_sebi_sources_task": {"queue": settings.celery_ingestion_queue},
         "app.ingestion.tasks.process_discovered_document_task": {"queue": settings.celery_ingestion_queue},
+        "app.ingestion.tasks.process_manual_upload_task": {"queue": settings.celery_ingestion_queue},
         "app.agents.tasks.extract_and_audit_clause_task": {"queue": settings.celery_agents_queue},
         "app.compiler.tasks.compile_audited_rule_task": {"queue": settings.celery_compiler_queue},
         "app.vectorstore.tasks.index_chunks_task": {"queue": settings.celery_vectorstore_queue},

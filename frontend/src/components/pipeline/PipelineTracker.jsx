@@ -4,13 +4,19 @@ import StatusBadge from "../shared/StatusBadge";
 import PdfUploadZone from "./PdfUploadZone";
 import PipelineStage from "./PipelineStage";
 
+const UPLOADING_LABELS = {
+  uploading: "Uploading...",
+  queued: "Queued — waiting for a worker to pick this up...",
+  processing: "Processing — running OCR/extraction and indexing (large circulars can take a while)...",
+};
+
 function UploadStatusBanner({ uploadState, uploadResult, uploadError }) {
   if (uploadState === "idle") return null;
 
-  if (uploadState === "uploading") {
+  if (uploadState in UPLOADING_LABELS) {
     return (
       <div className="flex items-center gap-2 rounded-sm border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-slate-600">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading and parsing — this runs synchronously and can take a while for a large circular...
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {UPLOADING_LABELS[uploadState]}
       </div>
     );
   }
@@ -24,9 +30,7 @@ function UploadStatusBanner({ uploadState, uploadResult, uploadError }) {
   return (
     <div className="flex items-center gap-2 rounded-sm border border-green-200 bg-green-100 px-3 py-2 text-sm text-green-800">
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-      Indexed <span className="font-mono">{uploadResult?.filename}</span> into{" "}
-      <span className="font-mono">{uploadResult?.collection}</span> — {uploadResult?.upserted} chunk(s) upserted
-      {uploadResult?.skipped_duplicates ? `, ${uploadResult.skipped_duplicates} duplicate(s) skipped` : ""}.
+      Indexed <span className="font-mono">{uploadResult?.filename}</span> — {uploadResult?.chunksIndexed} clause chunk(s) indexed.
     </div>
   );
 }
@@ -97,7 +101,7 @@ function RunRow({ run }) {
 export default function PipelineTracker({ runs, onUpload, uploadState = "idle", uploadResult = null, uploadError = null }) {
   return (
     <div className="flex flex-col gap-4">
-      <PdfUploadZone onFileSelected={onUpload} disabled={uploadState === "uploading"} />
+      <PdfUploadZone onFileSelected={onUpload} disabled={uploadState in UPLOADING_LABELS} />
       <UploadStatusBanner uploadState={uploadState} uploadResult={uploadResult} uploadError={uploadError} />
 
       <Card className="overflow-hidden">

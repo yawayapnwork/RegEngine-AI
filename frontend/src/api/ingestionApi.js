@@ -46,3 +46,45 @@ export async function parseAndIndexCircular(
   }
   return body;
 }
+
+// Async upload flow -- POST /v1/ingestion/uploads (app/api/ingestion_routes.py).
+// Unlike parseAndIndexCircular above, this returns immediately (202) with a
+// job_id: the actual hi-res OCR + embedding pipeline runs in a Celery
+// worker, since it can run far longer than any HTTP proxy's request
+// timeout would tolerate. Callers poll getUploadJobStatus for progress.
+export async function createUploadJob(file, { baseUrl = DEFAULT_BASE_URL, accessToken } = {}) {
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+
+  const url = new URL(`${baseUrl}/v1/ingestion/uploads`, window.location.origin);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: formData,
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new IngestionApiError(body?.detail || `Upload failed with status ${response.status}.`, response.status, body);
+  }
+  return body; // { job_id, status }
+}
+
+export async function getUploadJobStatus(jobId, { baseUrl = DEFAULT_BASE_URL, accessToken } = {}) {
+  const url = new URL(`${baseUrl}/v1/ingestion/uploads/${jobId}`, window.location.origin);
+
+  const response = await fetch(url, {
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new IngestionApiError(body?.detail || `Status check failed with status ${response.status}.`, response.status, body);
+  }
+  return body; // { job_id, filename, status, chunks_indexed, error_message }
+}

@@ -8,7 +8,7 @@ import ClauseSplitView from "./components/splitview/ClauseSplitView";
 import PolicyPlayground from "./components/playground/PolicyPlayground";
 import HITLDashboard from "./components/hitl/HITLDashboard";
 import AuditVault from "./components/vault/AuditVault";
-import { parseAndIndexCircular } from "./api/ingestionApi";
+import { createUploadJob, getUploadJobStatus } from "./api/ingestionApi";
 import { login as loginRequest, signup as signupRequest, decodeToken, isTokenExpired } from "./api/authApi";
 import {
   clauses,
@@ -118,6 +118,12 @@ export default function App() {
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState(null);
 
+  // Submits the PDF and polls for completion instead of blocking on one
+  // HTTP request -- a large circular's hi-res OCR + embedding pipeline can
+  // run far longer than any request/proxy timeout would tolerate. See
+  // app/api/ingestion_routes.py's module docstring for the backend side.
+  const POLL_INTERVAL_MS = 4000;
+
   const handleUpload = async (file) => {
     setUploadState("uploading");
     setUploadError(null);
@@ -126,9 +132,23 @@ export default function App() {
       if (!session?.token) {
         throw new Error("Not logged in. Log in first.");
       }
-      const result = await parseAndIndexCircular(file, { accessToken: session.token });
-      setUploadResult({ filename: file.name, ...result });
-      setUploadState("success");
+      const { job_id: jobId } = await createUploadJob(file, { accessToken: session.token });
+      setUploadState("queued");
+
+      const poll = async () => {
+        const job = await getUploadJobStatus(jobId, { accessToken: session.token });
+        if (job.status === "completed") {
+          setUploadResult({ filename: job.filename, chunksIndexed: job.chunks_indexed });
+          setUploadState("success");
+        } else if (job.status === "failed") {
+          setUploadError(job.error_message || "Processing failed.");
+          setUploadState("error");
+        } else {
+          setUploadState(job.status); // "queued" | "processing"
+          setTimeout(poll, POLL_INTERVAL_MS);
+        }
+      };
+      setTimeout(poll, POLL_INTERVAL_MS);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed.");
       setUploadState("error");
