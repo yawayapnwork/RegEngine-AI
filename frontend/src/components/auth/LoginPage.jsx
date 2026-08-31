@@ -1,13 +1,25 @@
 import { useState } from "react";
-import { Lock, LogIn, ShieldCheck } from "lucide-react";
+import { Lock, LogIn, ShieldCheck, UserPlus } from "lucide-react";
 
-export default function LoginPage({ onLogin, isLoading = false, error = null }) {
+export default function LoginPage({ onLogin, onSignup, isLoading = false, error = null }) {
+  const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [signupNotice, setSignupNotice] = useState(null);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password) return;
+    setSignupNotice(null);
+    if (mode === "signup") {
+      const ok = await onSignup(email, password);
+      if (ok) {
+        setSignupNotice("Account created. You can now log in.");
+        setMode("login");
+        setPassword("");
+      }
+      return;
+    }
     onLogin(email, password);
   };
 
@@ -18,7 +30,9 @@ export default function LoginPage({ onLogin, isLoading = false, error = null }) 
           <ShieldCheck className="h-5 w-5 text-blue-500" />
           <div>
             <h1 className="text-sm font-semibold text-slate-900">RegEngine AI</h1>
-            <p className="text-xs text-slate-500">Sign in to the compliance dashboard.</p>
+            <p className="text-xs text-slate-500">
+              {mode === "login" ? "Sign in to the compliance dashboard." : "Create a Compliance Officer account."}
+            </p>
           </div>
         </div>
 
@@ -45,8 +59,9 @@ export default function LoginPage({ onLogin, isLoading = false, error = null }) 
             <input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               required
+              minLength={mode === "signup" ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
@@ -54,6 +69,11 @@ export default function LoginPage({ onLogin, isLoading = false, error = null }) 
             />
           </div>
 
+          {signupNotice && (
+            <div className="rounded-sm border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700">
+              {signupNotice}
+            </div>
+          )}
           {error && (
             <div className="rounded-sm border border-red-300 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
               {error}
@@ -67,19 +87,30 @@ export default function LoginPage({ onLogin, isLoading = false, error = null }) 
           >
             {isLoading ? (
               <>
-                <Lock className="h-3.5 w-3.5 animate-pulse" /> Signing in...
+                <Lock className="h-3.5 w-3.5 animate-pulse" /> {mode === "login" ? "Signing in..." : "Creating account..."}
+              </>
+            ) : mode === "login" ? (
+              <>
+                <LogIn className="h-3.5 w-3.5" /> Log in
               </>
             ) : (
               <>
-                <LogIn className="h-3.5 w-3.5" /> Log in
+                <UserPlus className="h-3.5 w-3.5" /> Sign up
               </>
             )}
           </button>
         </form>
 
-        <p className="mt-4 text-2xs text-slate-400">
-          Accounts are provisioned by a System Admin. Contact your administrator if you don't have credentials.
-        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setMode((m) => (m === "login" ? "signup" : "login"));
+            setSignupNotice(null);
+          }}
+          className="mt-4 text-2xs text-slate-500 hover:text-blue-700 hover:underline"
+        >
+          {mode === "login" ? "Need an account? Sign up." : "Already have an account? Log in."}
+        </button>
       </div>
     </div>
   );

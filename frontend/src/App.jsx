@@ -8,7 +8,7 @@ import PolicyPlayground from "./components/playground/PolicyPlayground";
 import HITLDashboard from "./components/hitl/HITLDashboard";
 import AuditVault from "./components/vault/AuditVault";
 import { parseAndIndexCircular } from "./api/ingestionApi";
-import { login as loginRequest, decodeToken, isTokenExpired } from "./api/authApi";
+import { login as loginRequest, signup as signupRequest, decodeToken, isTokenExpired } from "./api/authApi";
 import {
   clauses,
   hitlCases as initialHitlCases,
@@ -65,6 +65,20 @@ export default function App() {
       setSession({ token: result.access_token, claims: decodeToken(result.access_token) });
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Login failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignup = async (email, password) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await signupRequest(email, password);
+      return true;
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Sign up failed.");
+      return false;
     } finally {
       setAuthLoading(false);
     }
@@ -145,7 +159,7 @@ export default function App() {
   ).length;
 
   if (!isAuthenticated) {
-    return <LoginPage onLogin={handleLogin} isLoading={authLoading} error={authError} />;
+    return <LoginPage onLogin={handleLogin} onSignup={handleSignup} isLoading={authLoading} error={authError} />;
   }
 
   return (

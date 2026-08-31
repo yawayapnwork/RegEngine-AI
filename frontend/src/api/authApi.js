@@ -27,6 +27,20 @@ export async function login(email, password, { baseUrl = DEFAULT_BASE_URL } = {}
   return body; // { access_token, token_type, expires_in, scope }
 }
 
+export async function signup(email, password, { baseUrl = DEFAULT_BASE_URL } = {}) {
+  const response = await fetch(new URL(`${baseUrl}/v1/auth/signup`, window.location.origin), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new AuthApiError(body?.detail || `Sign up failed with status ${response.status}.`, response.status);
+  }
+  return body; // { message, user_id }
+}
+
 // Decodes a JWT's claims without verifying the signature -- purely for
 // client-side display (whoami chip, role-gated UI). The backend is the
 // only party that ever trusts these claims; this is not an auth check.

@@ -13,12 +13,14 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.db.session import get_db_session
 from app.security.dependencies import get_current_principal, require_roles
 from app.security.jwt import create_access_token
-from app.security.local_user_store import LocalUserStore
-from app.security.models import ClientCredentialsRequest, LoginRequest, Principal, Role, TokenResponse
+from app.security.local_user_store import EmailAlreadyRegisteredError, LocalUserStore
+from app.security.models import ClientCredentialsRequest, LoginRequest, Principal, Role, SignupResponse, TokenResponse
 from app.security.secrets import resolve_secret
 from app.security.tenant_store import TenantClientStore
 
@@ -32,10 +34,8 @@ def get_tenant_client_store(settings: Settings = Depends(get_settings)) -> Tenan
     return TenantClientStore(redis_client=get_redis_pool(), key_prefix=settings.tenant_client_key_prefix)
 
 
-def get_local_user_store(settings: Settings = Depends(get_settings)) -> LocalUserStore:
-    from app.execution.dependencies import get_redis_pool  # reuse the shared process-wide Redis pool
-
-    return LocalUserStore(redis_client=get_redis_pool(), key_prefix=settings.local_user_key_prefix)
+def get_local_user_store(session: AsyncSession = Depends(get_db_session)) -> LocalUserStore:
+    return LocalUserStore(session)
 
 
 async def _signing_key(settings: Settings) -> str:
@@ -79,6 +79,25 @@ async def issue_token(
     )
 
 
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
+async def signup(
+    request: LoginRequest,
+    users: LocalUserStore = Depends(get_local_user_store),
+) -> SignupResponse:
+    """Self-service account creation for the custom login page's sign-up
+    flow: hashes the password (bcrypt, via LocalUserStore) and persists a
+    new `User` row. Always provisions Compliance_Officer -- the least-
+    privileged human role; a System_Admin account is never handed out
+    through public signup, only via POST /v1/auth/users."""
+    try:
+        user_id = await users.register(request.email, request.password, roles=[Role.COMPLIANCE_OFFICER])
+    except EmailAlreadyRegisteredError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    logger.info("Signup succeeded: user_id=%s", user_id)
+    return SignupResponse(user_id=user_id)
+
+
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 async def login(
     request: LoginRequest,
@@ -120,14 +139,20 @@ async def create_local_user(
     principal: Principal = Depends(require_roles(Role.SYSTEM_ADMIN)),
     users: LocalUserStore = Depends(get_local_user_store),
 ) -> dict:
-    """Provisions (or resets the password for) a local Compliance_Officer
-    account. System_Admin-only, deliberately -- same "no public self-service
-    signup" convention as app.security.tenant_store's broker registration;
-    a compliance system's human accounts are administrator-provisioned, not
-    self-served."""
-    await users.register(request.email, request.password, roles=[Role.COMPLIANCE_OFFICER])
+    """Provisions a local Compliance_Officer account on an administrator's
+    behalf -- the System_Admin-only counterpart to public signup, for
+    provisioning an account for someone else (or, unlike POST
+    /v1/auth/signup, promoting to System_Admin is only ever done by editing
+    a `User` row directly -- there is deliberately no API surface that lets
+    even a System_Admin self-elevate a new account straight to
+    System_Admin over a network call)."""
+    try:
+        user_id = await users.register(request.email, request.password, roles=[Role.COMPLIANCE_OFFICER])
+    except EmailAlreadyRegisteredError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     logger.info("Local user provisioned by %s: subject=%s", principal.subject, request.email)
-    return {"email": request.email.strip().lower(), "roles": [Role.COMPLIANCE_OFFICER.value]}
+    return {"user_id": user_id, "email": request.email.strip().lower(), "roles": [Role.COMPLIANCE_OFFICER.value]}
 
 
 @router.get("/me", response_model=Principal)

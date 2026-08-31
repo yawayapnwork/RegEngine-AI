@@ -534,3 +534,52 @@ class KillSwitchEvent(Base):
         CheckConstraint(f"action IN {_KILL_SWITCH_ACTIONS!r}", name="action"),
         CheckConstraint("(scope = 'global') = (tenant_id IS NULL)", name="tenant_id_matches_scope"),
     )
+
+
+# --------------------------------------------------------------------------
+# Local (standalone) auth accounts -- app.security.local_user_store
+# --------------------------------------------------------------------------
+
+_USER_ROLES = ("Compliance_Officer", "Broker_API_Client", "System_Admin")
+
+
+class User(Base):
+    """A locally-provisioned human account (Compliance_Officer/System_Admin)
+    that authenticates via email + password against POST /v1/auth/login
+    (app.api.auth_routes) instead of an external SSO IdP. Deliberately has
+    no `tenant_id` column -- app.security.models' Role docstring documents
+    that human roles are never tenant-scoped (only Broker_API_Client OAuth2
+    clients are, via app.security.tenant_store); a Compliance_Officer or
+    System_Admin who happens to work with a specific tenant's data is
+    authorized per-request via app.security.dependencies.require_tenant_scope,
+    not by a fixed column on their account.
+
+    `password_hash` is a bcrypt digest -- see app.security.local_user_store
+    for the hashing/verification helpers; this model never handles a
+    plaintext password itself.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+
+    # Business key returned to clients (POST /v1/auth/signup's `user_id`) --
+    # a UUID string, not the surrogate id, matching this schema's existing
+    # convention (see HITLReview.review_id, AgentInventory.agent_key).
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    roles: Mapped[list[str]] = mapped_column(_JSON_TYPE, nullable=False, default=lambda: ["Compliance_Officer"])
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa_text("false"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_users_user_id"),
+        # Case-insensitive uniqueness is enforced at the application layer
+        # (app.security.local_user_store lowercases every email before a
+        # read or write), so a plain unique index on the stored (already
+        # lowercased) column is sufficient here.
+        UniqueConstraint("email", name="uq_users_email"),
+        Index("ix_users_email", "email"),
+    )

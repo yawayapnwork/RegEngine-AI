@@ -414,13 +414,6 @@ class Settings(BaseSettings):
 
     sso_external_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
 
-    # --- Local (standalone) username/password auth for Compliance_Officer /
-    # System_Admin users who aren't federated through an external SSO IdP.
-    # See app.security.local_user_store -- a Redis-backed store, same shape
-    # as tenant_client_key_prefix's broker credential store below, just for
-    # human accounts instead of machine ones.
-    local_user_key_prefix: str = "regengine:local_users"
-
     # --- Automated Directory Sync: AD/Okta/Azure AD group -> RBAC role ---
     # Evaluated on every token decode (claims-based, zero-latency, the
     # standard OIDC pattern) -- see app.security.directory_sync. The

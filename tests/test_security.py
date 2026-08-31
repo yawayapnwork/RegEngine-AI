@@ -13,10 +13,14 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+import pytest_asyncio
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import Settings
+from app.db.base import Base
+from app.db.models import User as _User  # noqa: F401 -- registers User on Base.metadata for the in-memory schema below
 from app.security.crypto import PayloadDecryptionError, decrypt_payload, encrypt_payload, generate_tenant_key
 from app.security.dependencies import get_current_principal, require_roles
 from app.security.jwt import TokenExpiredError, TokenInvalidError, create_access_token, decode_access_token
@@ -28,7 +32,7 @@ from app.security.secrets import (
     SecretNotFoundError,
     get_secrets_provider,
 )
-from app.security.local_user_store import LocalUserStore
+from app.security.local_user_store import EmailAlreadyRegisteredError, LocalUserStore
 from app.security.tenant_store import TenantClientStore
 
 HS256_SECRET = "test-secret-key-not-for-production"
@@ -172,14 +176,29 @@ class TestTenantClientStore:
 
 
 # --------------------------------------------------------------------------
-# Local user store (bcrypt-hashed standalone email/password accounts)
+# Local user store (Postgres-backed, bcrypt-hashed standalone accounts)
 # --------------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def local_users_db_engine():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def local_users_db_session(local_users_db_engine):
+    factory = async_sessionmaker(local_users_db_engine, expire_on_commit=False)
+    async with factory() as session:
+        yield session
 
 
 @pytest.mark.asyncio
 class TestLocalUserStore:
-    async def test_register_then_authenticate_succeeds(self):
-        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+    async def test_register_then_authenticate_succeeds(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
         await store.register("officer@example.com", "s3cr3t")
 
         user = await store.authenticate("officer@example.com", "s3cr3t")
@@ -188,28 +207,41 @@ class TestLocalUserStore:
         assert user.email == "officer@example.com"
         assert Role.COMPLIANCE_OFFICER in user.roles
 
-    async def test_email_lookup_is_case_insensitive(self):
-        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+    async def test_email_lookup_is_case_insensitive(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
         await store.register("Officer@Example.com", "s3cr3t")
 
         assert await store.authenticate("officer@example.com", "s3cr3t") is not None
 
-    async def test_wrong_password_fails(self):
-        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+    async def test_wrong_password_fails(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
         await store.register("officer@example.com", "s3cr3t")
 
         assert await store.authenticate("officer@example.com", "wrong") is None
 
-    async def test_unknown_email_fails(self):
-        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+    async def test_unknown_email_fails(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
         assert await store.authenticate("nobody@example.com", "anything") is None
 
-    async def test_disabled_user_cannot_authenticate(self):
-        store = LocalUserStore(_FakeRedisKV(), key_prefix="test:local_users")
+    async def test_disabled_user_cannot_authenticate(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
         await store.register("officer@example.com", "s3cr3t")
         await store.disable("officer@example.com")
 
         assert await store.authenticate("officer@example.com", "s3cr3t") is None
+
+    async def test_duplicate_email_raises(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
+        await store.register("officer@example.com", "s3cr3t")
+
+        with pytest.raises(EmailAlreadyRegisteredError):
+            await store.register("officer@example.com", "different")
+
+    async def test_register_returns_a_user_id(self, local_users_db_session):
+        store = LocalUserStore(local_users_db_session)
+        user_id = await store.register("officer@example.com", "s3cr3t")
+
+        assert isinstance(user_id, str) and user_id
 
 
 # --------------------------------------------------------------------------

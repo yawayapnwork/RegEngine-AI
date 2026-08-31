@@ -129,6 +129,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class SignupResponse(BaseModel):
+    """POST /v1/auth/signup's response -- confirms creation without
+    returning a session; the caller still has to POST /v1/auth/login
+    afterward, same as any standalone signup/login split."""
+
+    message: str = "User registered successfully"
+    user_id: str
+
+
 class LocalUser(BaseModel):
     """A locally-provisioned human account (Compliance_Officer/System_Admin),
     as stored (password hashed, never plaintext) in app.security.local_user_store.
