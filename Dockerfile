@@ -12,6 +12,17 @@
 # app/execution/opa_engine.py module docstring for why: a persistent
 # server process, not a per-request subprocess). Its version is pinned
 # once, in docker-compose.yml and helm/regengine-ai/values.yaml.
+#
+# Air-gapped / restricted-egress deployments: the `builder` stage below
+# pre-warms unstructured's hi_res layout-model weights (+ NLTK tokenizer
+# data) at BUILD time and the `runtime` stage bakes them into the image, so
+# the running container never needs network egress for them. This means
+# the image itself MUST be built somewhere with internet access (once per
+# unstructured version bump) before it's promoted into a restricted
+# environment -- building this Dockerfile from inside that restricted
+# environment will fail at the pre-warming RUN step. See app/parsing/
+# extractor.py's _model_download_error for the runtime-side symptom if
+# that pre-warming is ever skipped, and README's Production notes.
 
 #############################################
 # Stage: base -- shared OS runtime deps + non-root user, used by every
@@ -44,6 +55,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Fixed, non-default cache locations for the ML model weights unstructured's
+# hi_res strategy (detectron2 layout/table model, via huggingface_hub) and
+# its text-splitting NLTK data pull down on first use -- set here (shared by
+# `builder` and `runtime`) so the `builder` stage below can pre-warm them at
+# BUILD time into a path the `runtime` stage then COPYs verbatim, instead of
+# every container's first upload paying for (and, on restricted-egress
+# networks, hanging or failing on) a first-use download. See app/parsing/
+# extractor.py's _model_download_error for what a missing download here
+# looks like from the app's side if this pre-warming step is ever skipped.
+ENV HF_HOME=/opt/model-cache/huggingface \
+    NLTK_DATA=/opt/model-cache/nltk_data
 
 #############################################
 # Stage: builder -- compiles/installs Python deps into an isolated venv so
@@ -83,6 +106,25 @@ RUN pip install --no-cache-dir \
         torch torchvision \
     && pip install --no-cache-dir -r requirements.txt
 
+# Pre-warm the hi_res strategy's model weights (+ NLTK tokenizer data) into
+# $HF_HOME/$NLTK_DATA above, by actually running partition_pdf(strategy=
+# "hi_res") once against a throwaway one-page PDF built on the fly with
+# Pillow (already a dependency; no fixture file needs to ship in this repo).
+# REQUIRES NETWORK ACCESS AT BUILD TIME. An air-gapped/restricted-egress
+# deployment must build this image somewhere with egress (once, or whenever
+# unstructured's pinned version changes its model), then ship/promote the
+# resulting image -- the runtime container itself never needs egress for
+# this. See README's Production notes for the full explanation.
+RUN python -c "\
+import os, tempfile; \
+from PIL import Image; \
+from unstructured.partition.pdf import partition_pdf; \
+path = os.path.join(tempfile.mkdtemp(), 'warmup.pdf'); \
+Image.new('RGB', (200, 200), 'white').save(path, 'PDF'); \
+partition_pdf(filename=path, strategy='hi_res', infer_table_structure=True); \
+print('hi_res model weights pre-warmed into ' + os.environ['HF_HOME']); \
+"
+
 #############################################
 # Stage: runtime -- final image. OS deps from `base`, Python deps from
 # `builder`, app source, non-root user, one entrypoint for every role.
@@ -90,6 +132,10 @@ RUN pip install --no-cache-dir \
 FROM base AS runtime
 
 COPY --from=builder /opt/venv /opt/venv
+# The hi_res weights + NLTK data `builder` pre-warmed into $HF_HOME/
+# $NLTK_DATA (set on `base`, inherited here) -- this is what makes them
+# baked into the image rather than downloaded on first upload.
+COPY --from=builder /opt/model-cache /opt/model-cache
 ENV PATH="/opt/venv/bin:${PATH}" \
     SERVICE_ROLE=web
 
@@ -106,7 +152,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
     # only needs this one path writable via a mounted volume (see
     # helm/regengine-ai/templates/deployment.yaml).
     && mkdir -p /app/data/ingested_pdfs \
-    && chown -R regengine:regengine /app
+    && chown -R regengine:regengine /app /opt/model-cache
 
 USER regengine
 EXPOSE 8000

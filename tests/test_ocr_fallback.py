@@ -15,7 +15,7 @@ import pytest
 
 from app.config import Settings
 from app.models import ClauseChunk
-from app.parsing.exceptions import ScannedDocumentError
+from app.parsing.exceptions import ExtractionBackendError, ScannedDocumentError
 
 
 @pytest.fixture
@@ -97,6 +97,74 @@ async def test_scanned_pdf_raises_when_ocr_also_fails(monkeypatch, settings, tmp
 
     with pytest.raises(ScannedDocumentError):
         await extractor.extract_pdf(file_bytes=_pdf_bytes(), source_path=src, filename="blank.pdf", settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_hi_res_model_download_failure_raises_extraction_backend_error(monkeypatch, settings, tmp_path) -> None:
+    """A network/download-shaped failure loading hi_res's model weights
+    (during the fast -> hi_res escalation) must surface as a clear, typed
+    ExtractionBackendError -- not the raw connection error, and without
+    silently falling through to OCR (which depends on model weights too
+    and would just fail the same way, one page at a time)."""
+    import app.parsing.extractor as extractor
+
+    def fake_partition(path, strategy):
+        if strategy == "fast":
+            return [{"text": "", "category": "UncategorizedText", "page_number": 1, "coordinates": None, "text_as_html": None}]
+        assert strategy == "hi_res"
+        raise ConnectionError(
+            "HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded: Failed to "
+            "establish a new connection: [Errno -3] Temporary failure in name resolution"
+        )
+
+    monkeypatch.setattr(extractor, "_partition_with_unstructured", fake_partition)
+
+    async def ocr_should_not_run(source_path, filename, settings_):
+        raise AssertionError("OCR fallback must not run once a model-download failure is already diagnosed")
+
+    monkeypatch.setattr(extractor, "_ocr_fallback", ocr_should_not_run)
+
+    src = tmp_path / "network_restricted.pdf"
+    src.write_bytes(_pdf_bytes())
+
+    with pytest.raises(ExtractionBackendError) as excinfo:
+        await extractor.extract_pdf(
+            file_bytes=_pdf_bytes(), source_path=src, filename="network_restricted.pdf", settings=settings
+        )
+
+    message = str(excinfo.value)
+    assert "model weights" in message
+    assert "pre-warm" in message
+    assert "HF_HUB_OFFLINE" in message
+
+
+@pytest.mark.asyncio
+async def test_ocr_page_model_download_failure_raises_extraction_backend_error(monkeypatch, settings) -> None:
+    """Same classification, at the OCR fallback's model-loading call site
+    (app.localization.ocr's PaddleOCR/Tesseract backends, if a download is
+    ever attempted there) -- a network-shaped failure must surface as
+    ExtractionBackendError, not a raw exception from deep inside a
+    third-party OCR library."""
+    import app.parsing.extractor as extractor
+
+    monkeypatch.setattr(extractor, "_rasterize_pdf", lambda path, dpi: [_FakePageImage(1)])
+
+    def fake_ocr_page(image_path, settings_):
+        raise RuntimeError(
+            "huggingface_hub.utils._errors.LocalEntryNotFoundError: An error happened while trying to "
+            "locate the file on the Hub and we cannot find the requested files in the local cache. "
+            "Please check your internet connection."
+        )
+
+    monkeypatch.setattr(extractor, "_ocr_page", fake_ocr_page)
+
+    with pytest.raises(ExtractionBackendError) as excinfo:
+        await extractor._ocr_fallback(Path("unused.pdf"), "doc.pdf", settings)
+
+    message = str(excinfo.value)
+    assert "model weights" in message
+    assert "pre-warm" in message
+    assert "HF_HUB_OFFLINE" in message
 
 
 class _FakePageImage:

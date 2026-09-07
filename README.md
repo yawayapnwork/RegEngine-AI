@@ -341,6 +341,18 @@ DB-agnostic; `pg_advisory_xact_lock` concurrency control is exercised only again
   check that log line to confirm what's actually configured.
 - **Webhook receivers** should verify the `X-RegEngine-Signature-256` HMAC header before trusting a decision
   notification.
+- **Air-gapped / restricted-egress deployments**: `app/parsing/extractor.py`'s hi_res layout-detection
+  escalation and OCR fallback both depend on ML model weights (unstructured's detectron2 layout model;
+  PaddleOCR's, if ever preferred for regional-language OCR) that are normally fetched from Hugging Face
+  Hub / a CDN on first use. The `Dockerfile`'s `builder` stage pre-warms these into the image at build time
+  (`HF_HOME`/`NLTK_DATA` under `/opt/model-cache`, copied into `runtime`), so a running container never
+  needs egress for them — but that means **the image itself must be built somewhere with internet access**
+  (once, or whenever `unstructured`'s pinned version changes its model) before being promoted into a
+  restricted environment; building from inside that environment will fail at the pre-warming step. If this
+  pre-warming is ever skipped and a deployment genuinely has no egress, extraction fails fast with a typed
+  `ExtractionBackendError` naming the missing weights and pointing back at this pre-warming step (or setting
+  `HF_HUB_OFFLINE=1` once weights are already cached some other way) — not a raw, confusing
+  connection/timeout error or an indefinite hang.
 - **Scaling**: `regengine_batch`, `regengine_cdc`, and `regengine_webhooks` are separate Celery queues so a
   large SFTP batch can't starve latency-sensitive webhook delivery — scale worker pools per queue
   independently.

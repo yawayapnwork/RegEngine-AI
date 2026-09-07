@@ -44,6 +44,59 @@ _ISSUE_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# unstructured's "hi_res" strategy (its detectron2 layout model) and
+# PaddleOCR (if ever preferred for a regional-language OCR fallback -- see
+# app.localization.ocr) both fetch ML model weights from Hugging Face Hub /
+# their own CDN on first use. In a network-restricted deployment this
+# doesn't fail with a clear "no internet" error -- it hangs or raises a
+# generic connection/timeout error deep inside a third-party library that
+# looks, from here, like a parsing bug. These markers let the hi_res
+# escalation and OCR fallback below (the two model-loading call sites in
+# this module) recognize that shape of failure and re-raise it as an
+# actionable, typed ExtractionBackendError instead of whatever raw
+# exception urllib3/requests/huggingface_hub happened to throw.
+_MODEL_DOWNLOAD_ERROR_MARKERS = (
+    "huggingface_hub",
+    "hf_hub",
+    "hfvalidationerror",
+    "connectionerror",
+    "maxretryerror",
+    "newconnectionerror",
+    "failed to establish a new connection",
+    "getaddrinfo failed",
+    "name or service not known",
+    "temporary failure in name resolution",
+    "read timed out",
+    "connecttimeout",
+    "connect timeout",
+    "no route to host",
+    "sslerror",
+    "urllib3",
+    "proxyerror",
+)
+
+
+def _is_model_download_failure(exc: BaseException) -> bool:
+    """Best-effort classification of an exception as "couldn't fetch ML
+    model weights over the network" rather than some other parsing
+    failure, by sniffing the exception's type name and message for the
+    markers huggingface_hub/urllib3/requests leave behind. Heuristic, not
+    exhaustive -- a false negative just falls through to this module's
+    existing, less specific error handling; a false positive is
+    vanishingly unlikely given how distinctive these markers are."""
+    text = f"{type(exc).__module__}.{type(exc).__qualname__}: {exc}".lower()
+    return any(marker in text for marker in _MODEL_DOWNLOAD_ERROR_MARKERS)
+
+
+def _model_download_error(stage: str, exc: BaseException) -> ExtractionBackendError:
+    return ExtractionBackendError(
+        f"{stage} could not load its ML model weights -- this looks like a failed network download "
+        f"rather than a parsing bug (underlying error: {exc!r}). If this deployment has restricted or "
+        "no internet egress, pre-warm the model weights into the Docker image at build time (see the "
+        "Dockerfile's model pre-warming step) or set HF_HUB_OFFLINE=1 with the weights already cached "
+        "on disk, instead of relying on a first-use download at runtime."
+    )
+
 
 def _validate_pdf_bytes(data: bytes) -> None:
     if not data:
@@ -267,6 +320,12 @@ async def _ocr_one_page(
             await asyncio.to_thread(page_image.save, tmp_path)
             text = await asyncio.to_thread(_ocr_page, tmp_path, settings)
         except Exception as exc:  # noqa: BLE001 - one page's OCR failure must not abort the rest of the document
+            if _is_model_download_failure(exc):
+                # Not a per-page problem -- every remaining page would fail
+                # identically (and identically slowly) for the same reason,
+                # so abort the whole document with a clear diagnosis instead
+                # of retrying the same doomed download once per page.
+                raise _model_download_error("OCR fallback's text-recognition backend", exc) from exc
             logger.warning("OCR fallback: page %d of '%s' failed: %r", page_num, filename or source_path, exc)
             return None
         finally:
@@ -395,6 +454,14 @@ async def extract_pdf(
                 f"hi_res retry for '{filename or 'document'}' exceeded {settings.parse_timeout_seconds}s timeout."
             ) from exc
         except Exception as exc:  # noqa: BLE001 - hi_res retry failing is not fatal; OCR is still the last resort
+            if _is_model_download_failure(exc):
+                # OCR (the next fallback) depends on model weights too (see
+                # app.localization.ocr) -- if hi_res couldn't reach the
+                # network for its weights, silently falling through would
+                # just repeat the same failure there. Fail fast and clearly
+                # instead of surfacing a misleading "scanned document"
+                # error once OCR fails for the same underlying reason.
+                raise _model_download_error("The 'hi_res' Unstructured strategy (detectron2 layout model)", exc) from exc
             logger.warning("hi_res retry failed for '%s': %r", filename or source_path, exc)
         else:
             if _has_text(hi_res_elements):
