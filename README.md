@@ -85,9 +85,17 @@ requirements.txt
 | PostgreSQL 14+ | Audit ledger | Apply `sql/ledger_schema.sql` |
 | Redis 6+ | Celery broker/backend, policy registry, HITL queue | |
 | Qdrant | Vector index for parsed clauses | Local (`docker run qdrant/qdrant`) or hosted |
+| S3-compatible object storage | Manual PDF uploads (`POST /v1/ingestion/uploads`) | Local (`docker compose up` starts a `minio` service, bucket auto-created) or hosted (Backblaze B2/Cloudflare R2/AWS S3) — without it this endpoint returns 503 |
 
 
 ## Quickstart
+
+Steps 1-4 below run each piece directly on the host. `docker compose up --build` (see `docker-compose.yml`)
+instead brings up the API, worker, beat, Postgres, Redis, Qdrant, OPA, Tika, and MinIO (object storage for
+manual PDF uploads, bucket auto-created on first boot) together — `cp .env.example .env`, fill in
+`HUGGINGFACEHUB_API_TOKEN`/`HF_TOKEN`, and run it. Without the `minio` service (or equivalent hosted
+S3-compatible storage configured via the `OBJECT_STORAGE_*` variables below), `POST /v1/ingestion/uploads`
+returns 503.
 
 ### 1. Backend
 
@@ -149,6 +157,7 @@ a working local-dev default — nothing is required to boot the service against 
 | Variable | Default | Purpose |
 |---|---|---|
 | `qdrant_url` / `qdrant_api_key` / `qdrant_collection` | `http://localhost:6333` / — / `sebi_master_circulars` | Vector store for parsed clauses |
+| `object_storage_endpoint_url` / `object_storage_bucket` / `object_storage_access_key_id` / `object_storage_secret_access_key` | — (all four required) | S3-compatible storage for manually-uploaded PDFs (`app/storage/object_store.py`). All four must be set or `POST /v1/ingestion/uploads` returns 503 "Upload storage is not configured on this deployment" — `docker compose up` provides working local-dev values via its `minio` service, see `.env.example` |
 | `extraction_backend` / `unstructured_strategy` | `unstructured` / `hi_res` | PDF layout extraction backend |
 | `max_upload_mb` / `parse_timeout_seconds` / `parse_concurrency` | `50` / `180` / `4` | Ingestion limits |
 | `opa_server_url` / `opa_request_timeout_seconds` | `http://localhost:8181` / `2.0` | Embedded OPA engine endpoint |
