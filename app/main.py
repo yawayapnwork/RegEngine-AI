@@ -23,6 +23,7 @@ from app.api.diffing_routes import router as diffing_router
 from app.api.explainability_routes import router as explainability_router
 from app.api.incident_routes import router as incident_router
 from app.api.ingestion_routes import router as ingestion_router
+from app.api.internal_routes import router as internal_router
 from app.api.llm_cost_routes import router as llm_cost_router
 from app.api.governance_routes import router as governance_router
 from app.api.routes import router
@@ -251,6 +252,7 @@ app.include_router(zkp_router)
 app.include_router(governance_router)
 app.include_router(translation_parity_router)
 app.include_router(grievance_router)
+app.include_router(internal_router)
 
 
 @app.exception_handler(ParsingError)

@@ -562,6 +562,19 @@ class Settings(BaseSettings):
     # app/main.py.
     cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
+    # --- Cron-triggered queue drain (POST /v1/internal/drain-queue) ---
+    # Cost-free substitute for a standing Celery worker process on
+    # deployments with no dedicated worker dyno: an external scheduler
+    # (e.g. cron-job.org) hits this endpoint on an interval, and each hit
+    # runs a real `celery worker` as a time-boxed subprocess to drain
+    # whatever is currently queued, then exits. Unset (the default)
+    # disables the endpoint entirely -- 404, not "unauthenticated" -- so a
+    # deployment that DOES run a standing worker never exposes it by
+    # accident. Set to a long random value and give the same value to the
+    # scheduler as the X-Cron-Secret header.
+    internal_cron_secret: str | None = None
+    internal_cron_drain_seconds: int = 45
+
     # --- Observability: OpenTelemetry tracing ---
     otel_enabled: bool = True
     otel_service_name: str = "regengine-ai"
