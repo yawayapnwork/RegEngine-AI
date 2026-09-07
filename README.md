@@ -332,6 +332,13 @@ DB-agnostic; `pg_advisory_xact_lock` concurrency control is exercised only again
   `app/ledger/integration.py`).
 - **Secrets**: `ledger_database_url` and `webhook_hmac_secret` should come from your
   secrets manager in any non-local environment, never a committed `.env`.
+- **CORS is a common silent-failure trap on a split deployment** (frontend on Vercel/Render/Netlify/a custom
+  domain, API elsewhere): if uploads or other API calls fail with no server-side error and no request logged
+  at all — the browser blocked it at preflight before it ever reached this service — check
+  `CORS_ALLOWED_ORIGINS` first. It defaults to `["http://localhost:5173"]` (local dev only); a deployed
+  frontend's actual origin must be added explicitly, there's no placeholder production URL it falls back to.
+  The app also logs its active CORS allowlist (or a warning that it's empty) at `WARNING` level on startup —
+  check that log line to confirm what's actually configured.
 - **Webhook receivers** should verify the `X-RegEngine-Signature-256` HMAC header before trusting a decision
   notification.
 - **Scaling**: `regengine_batch`, `regengine_cdc`, and `regengine_webhooks` are separate Celery queues so a

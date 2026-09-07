@@ -180,12 +180,24 @@ app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 # never gets sent). CORSMiddleware only adds headers to non-preflight
 # requests; it never bypasses auth for them.
 if settings.cors_allowed_origins:
+    logger.warning(
+        "CORS: allowing cross-origin requests from %s. If a deployed frontend's domain isn't "
+        "in this list, set CORS_ALLOWED_ORIGINS to include it.",
+        settings.cors_allowed_origins,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+else:
+    logger.warning(
+        "CORS: cors_allowed_origins is empty -- no CORSMiddleware added. Any cross-origin browser "
+        "request (a frontend on a different domain than this API) will be silently blocked by the "
+        "browser with no server-side symptom: the request never reaches a route handler, so nothing "
+        "gets logged here. Set CORS_ALLOWED_ORIGINS if the frontend is deployed on a different domain."
     )
 
 from app.api.webhook_routes import router as webhook_router
