@@ -306,6 +306,49 @@ class TestSecretsProvider:
 
 
 # --------------------------------------------------------------------------
+# Production startup check: refuse to boot with a known JWT secret
+# --------------------------------------------------------------------------
+
+
+class TestJwtSecretStartupCheck:
+    """app.main._check_jwt_secret_configured -- the boot-time guard against
+    environment=production still signing tokens with jwt_secret_key's
+    hardcoded development default. Exercises the check function directly
+    rather than importing/reloading app.main, since that module's
+    module-level side effects (other routers, background subscribers)
+    aren't this suite's concern -- see this file's module docstring."""
+
+    def test_production_with_default_secret_raises(self):
+        from app.main import _check_jwt_secret_configured
+
+        settings = _settings(environment="production", jwt_secret_key=Settings.model_fields["jwt_secret_key"].default)
+        with pytest.raises(RuntimeError, match="production"):
+            _check_jwt_secret_configured(settings)
+
+    def test_production_with_real_secret_passes(self):
+        from app.main import _check_jwt_secret_configured
+
+        settings = _settings(environment="production", jwt_secret_key=HS256_SECRET)
+        _check_jwt_secret_configured(settings)  # must not raise
+
+    def test_staging_with_default_secret_warns_but_does_not_raise(self, caplog):
+        from app.main import _check_jwt_secret_configured
+
+        settings = _settings(environment="staging", jwt_secret_key=Settings.model_fields["jwt_secret_key"].default)
+        with caplog.at_level("WARNING"):
+            _check_jwt_secret_configured(settings)  # must not raise
+        assert any("staging" in record.message for record in caplog.records)
+
+    def test_development_with_default_secret_is_a_no_op(self, caplog):
+        from app.main import _check_jwt_secret_configured
+
+        settings = _settings(environment="development", jwt_secret_key=Settings.model_fields["jwt_secret_key"].default)
+        with caplog.at_level("WARNING"):
+            _check_jwt_secret_configured(settings)  # must not raise
+        assert caplog.records == []
+
+
+# --------------------------------------------------------------------------
 # Payload encryption
 # --------------------------------------------------------------------------
 

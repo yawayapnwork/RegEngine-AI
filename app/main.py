@@ -30,7 +30,7 @@ from app.api.grievance_routes import router as grievance_router
 from app.api.sandbox_routes import router as sandbox_router
 from app.api.translation_parity_routes import router as translation_parity_router
 from app.api.zkp_routes import router as zkp_router
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.session import get_session_factory
 from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
 from app.execution.hitl_queue import HITLQueue
@@ -54,6 +54,35 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+_DEFAULT_JWT_SECRET_KEY = Settings.model_fields["jwt_secret_key"].default
+
+
+def _check_jwt_secret_configured(settings: Settings) -> None:
+    """Fail loud at boot, not silently at request time: a "production"
+    deployment that never overrode jwt_secret_key is one where anyone
+    who's read this codebase can forge a valid Broker_API_Client/
+    Compliance_Officer/System_Admin token, since the signing key is a
+    known literal. "staging" only warns -- it isn't forced to provision a
+    real secret, but should be nudged to before it's exposed to anything
+    resembling real traffic. "development" enforces nothing."""
+    if settings.jwt_secret_key != _DEFAULT_JWT_SECRET_KEY:
+        return
+    if settings.environment == "production":
+        raise RuntimeError(
+            "environment=production but jwt_secret_key is still the hardcoded development default "
+            "('changeme-dev-only-use-secrets-backend-in-prod'). Set JWT_SECRET_KEY to a real secret "
+            "(or configure secrets_backend to resolve one) before starting this service in production."
+        )
+    if settings.environment == "staging":
+        logger.warning(
+            "environment=staging and jwt_secret_key is still the hardcoded development default -- "
+            "tokens signed with this secret can be forged by anyone who has read this codebase. Set "
+            "JWT_SECRET_KEY to a real secret before this environment sees anything resembling real traffic."
+        )
+
+
+_check_jwt_secret_configured(settings)
 
 
 @contextlib.asynccontextmanager

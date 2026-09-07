@@ -395,6 +395,17 @@ class Settings(BaseSettings):
     smtp_from_address: str = "regengine-alerts@example.com"
     compliance_officer_email_list: list[str] = Field(default_factory=list)
 
+    # --- Security: environment ---
+    # Distinguishes local dev from staging/production so the app can enforce
+    # environment-specific safety checks it has no other way to make -- e.g.
+    # refusing to boot in production with jwt_secret_key still set to its
+    # known, hardcoded default (see the startup check in app/main.py, right
+    # after Settings is constructed). Sourced from ENVIRONMENT; "development"
+    # (the default) enforces nothing extra, "staging" warns instead of
+    # failing outright, "production" fails loud at boot instead of silently
+    # accepting forged tokens at request time.
+    environment: str = "development"  # "development" | "staging" | "production"
+
     # --- Security: JWT / OAuth2 ---
     # Self-issued tokens (Broker_API_Client, via POST /v1/auth/token).
     jwt_algorithm: str = "HS256"  # or "RS256"; see app/security/jwt.py
