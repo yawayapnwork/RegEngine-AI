@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pytest
+
 from app.config import Settings
 from app.models import CircularMetadata, DocumentElement, ElementKind
 from app.parsing.chunker import chunk_elements
 from app.parsing.hashing import sha256_of_clause, sha256_of_text
 from app.parsing.hierarchy import HierarchyTracker, detect_clause_number, is_section_header
+
+
+def _pdf_bytes() -> bytes:
+    return b"%PDF-1.4\n%fake pdf for extraction-strategy-escalation tests\n"
 
 
 def test_detect_clause_number_variants() -> None:
@@ -77,6 +83,85 @@ def test_chunking_keeps_clause_intact_and_attaches_footnote() -> None:
     assert clause_b_chunk.footnotes and "amended" in clause_b_chunk.footnotes[0]
     assert clause_b_chunk.circular_number == "SEBI/HO/MRD/2024/1"
     assert len(clause_b_chunk.sha256) == 64
+
+
+@pytest.mark.asyncio
+async def test_extract_pdf_default_strategy_is_fast_and_skips_hi_res(monkeypatch, tmp_path) -> None:
+    """A normal text-layer PDF must be extracted with the default "fast"
+    Unstructured strategy (app.config.Settings.unstructured_strategy) and
+    never need the "hi_res" escalation -- hi_res is only for a fast-path
+    result that trips the "no extractable text" check."""
+    import app.parsing.extractor as extractor
+
+    settings = Settings(_env_file=None)
+    assert settings.unstructured_strategy == "fast"
+
+    calls: list[str] = []
+
+    def fake_partition(path, strategy):
+        calls.append(strategy)
+        return [
+            {
+                "text": "Every stockbroker shall collect an upfront margin of not less than 20%.",
+                "category": "UncategorizedText",
+                "page_number": 1,
+                "coordinates": None,
+                "text_as_html": None,
+            }
+        ]
+
+    monkeypatch.setattr(extractor, "_partition_with_unstructured", fake_partition)
+
+    src = tmp_path / "text_layer.pdf"
+    src.write_bytes(_pdf_bytes())
+
+    metadata, elements = await extractor.extract_pdf(
+        file_bytes=_pdf_bytes(), source_path=src, filename="text_layer.pdf", settings=settings
+    )
+
+    assert calls == ["fast"]
+    assert len(elements) == 1
+
+
+@pytest.mark.asyncio
+async def test_extract_pdf_escalates_fast_to_hi_res_before_ocr(monkeypatch, tmp_path) -> None:
+    """"fast" trips the "no element has non-whitespace text" check ->
+    extract_pdf must retry with "hi_res" and use its result, without ever
+    falling through to the (last-resort) OCR fallback."""
+    import app.parsing.extractor as extractor
+
+    settings = Settings(_env_file=None)
+
+    def fake_partition(path, strategy):
+        if strategy == "fast":
+            return [{"text": "", "category": "UncategorizedText", "page_number": 1, "coordinates": None, "text_as_html": None}]
+        assert strategy == "hi_res"
+        return [
+            {
+                "text": "Every stockbroker shall collect an upfront margin of not less than 20%.",
+                "category": "UncategorizedText",
+                "page_number": 1,
+                "coordinates": None,
+                "text_as_html": None,
+            }
+        ]
+
+    monkeypatch.setattr(extractor, "_partition_with_unstructured", fake_partition)
+
+    async def ocr_should_not_run(source_path, filename, settings_):
+        raise AssertionError("OCR fallback must not run once hi_res recovers text")
+
+    monkeypatch.setattr(extractor, "_ocr_fallback", ocr_should_not_run)
+
+    src = tmp_path / "unusual_layout.pdf"
+    src.write_bytes(_pdf_bytes())
+
+    metadata, elements = await extractor.extract_pdf(
+        file_bytes=_pdf_bytes(), source_path=src, filename="unusual_layout.pdf", settings=settings
+    )
+
+    assert len(elements) == 1
+    assert "upfront margin" in elements[0].text
 
 
 def test_is_section_header_heuristic() -> None:

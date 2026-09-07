@@ -344,7 +344,41 @@ async def extract_pdf(
     # no recoverable text in any of them -- so "zero elements" alone
     # under-detects the scanned case. Checking for "no element has non-
     # whitespace text" catches both shapes with one branch.
-    if not raw_elements or not any(el["text"].strip() for el in raw_elements):
+    def _has_text(elements: list[dict]) -> bool:
+        return bool(elements) and any(el["text"].strip() for el in elements)
+
+    # "fast" (the default -- see unstructured_strategy in app.config) skips
+    # detectron2 layout detection, so it can occasionally miss text on a
+    # layout it doesn't handle well even though the PDF has a real text
+    # layer. Before assuming that's a scanned/image-only PDF and paying for
+    # OCR, retry once with "hi_res" -- much cheaper than OCR and often
+    # enough to recover text "fast" under-extracted.
+    if (
+        not _has_text(raw_elements)
+        and settings.extraction_backend == "unstructured"
+        and settings.unstructured_strategy == "fast"
+    ):
+        logger.info(
+            "'%s' produced no extractable text with the 'fast' Unstructured strategy -- retrying with "
+            "'hi_res' before falling back to OCR.",
+            filename or "<unnamed upload>",
+        )
+        try:
+            hi_res_elements = await asyncio.wait_for(
+                asyncio.to_thread(_partition_with_unstructured, str(source_path), "hi_res"),
+                timeout=settings.parse_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ParseTimeoutError(
+                f"hi_res retry for '{filename or 'document'}' exceeded {settings.parse_timeout_seconds}s timeout."
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - hi_res retry failing is not fatal; OCR is still the last resort
+            logger.warning("hi_res retry failed for '%s': %r", filename or source_path, exc)
+        else:
+            if _has_text(hi_res_elements):
+                raw_elements = hi_res_elements
+
+    if not _has_text(raw_elements):
         logger.warning(
             "'%s' produced %d element(s) with no extractable text -- likely a scanned/image-only PDF; "
             "attempting OCR fallback.",

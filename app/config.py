@@ -23,7 +23,16 @@ class Settings(BaseSettings):
     # --- Extraction backend ---
     # "unstructured" (hi_res, layout aware) or "tika" (fallback, faster, weaker layout fidelity)
     extraction_backend: str = "unstructured"
-    unstructured_strategy: str = "hi_res"  # hi_res | fast | ocr_only
+    # "fast" (text-layer extraction only, no layout model) is the default because
+    # most SEBI/RBI/IRDAI/PFRDA circulars are native-text, digitally-published
+    # PDFs that don't need detectron2 layout detection -- "hi_res" runs it over
+    # every page and is the main reason ingestion used to take minutes instead
+    # of seconds. app.parsing.extractor.extract_pdf escalates fast -> hi_res ->
+    # OCR: a "fast" result with no extractable text is retried once with
+    # "hi_res" (catches layouts fast's simpler extraction misses) before OCR
+    # (the actual last resort, for scanned/image-only pages neither text-layer
+    # strategy can read).
+    unstructured_strategy: str = "fast"  # hi_res | fast | ocr_only
     tika_server_url: str = "http://localhost:9998"
 
     # --- Chunking ---
