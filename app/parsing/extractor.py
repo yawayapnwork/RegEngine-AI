@@ -251,23 +251,16 @@ def _ocr_page(image_path: str, settings: Settings) -> str:
     return result.full_text
 
 
-async def _ocr_fallback(source_path: Path, filename: str | None, settings: Settings) -> list[dict]:
-    """Last-resort text recovery for a scanned/image-only PDF: rasterize
-    each page and OCR it, returning elements in the same shape
-    `_partition_with_unstructured`/`_partition_with_tika` produce so the
-    rest of `extract_pdf` (metadata detection, DocumentElement building)
-    is unaffected by which backend actually supplied the text. A page
-    whose OCR fails or comes back empty is skipped, not fatal -- the
-    caller decides whether the OVERALL result has enough text to proceed
-    (same "no element has non-whitespace text" check as the primary path)."""
-    try:
-        pages = await asyncio.to_thread(_rasterize_pdf, str(source_path), 300)
-    except Exception as exc:  # noqa: BLE001 - pdf2image/poppler failure never fatal to the caller; just yields no OCR text
-        logger.error("OCR fallback: failed to rasterize '%s': %r", filename or source_path, exc)
-        return []
-
-    out: list[dict] = []
-    for page_num, page_image in enumerate(pages, start=1):
+async def _ocr_one_page(
+    page_num: int, page_image, filename: str | None, source_path: Path, settings: Settings, semaphore: asyncio.Semaphore
+) -> dict | None:
+    """OCRs a single rasterized page, gated by `semaphore` (bounds how many
+    pages hold a rasterized image + in-flight OCR call at once --
+    settings.ocr_page_concurrency). Returns None (never raises) if this
+    page's OCR fails or comes back empty, so one bad page can't sink the
+    rest of the document -- same isolation as the previous sequential loop,
+    just per-task instead of per-iteration."""
+    async with semaphore:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp_path = tmp.name
         try:
@@ -275,21 +268,50 @@ async def _ocr_fallback(source_path: Path, filename: str | None, settings: Setti
             text = await asyncio.to_thread(_ocr_page, tmp_path, settings)
         except Exception as exc:  # noqa: BLE001 - one page's OCR failure must not abort the rest of the document
             logger.warning("OCR fallback: page %d of '%s' failed: %r", page_num, filename or source_path, exc)
-            continue
+            return None
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
-        if text.strip():
-            out.append(
-                {
-                    "text": text,
-                    "category": "UncategorizedText",
-                    "page_number": page_num,
-                    "coordinates": None,
-                    "text_as_html": None,
-                }
-            )
-    return out
+    if not text.strip():
+        return None
+    return {
+        "text": text,
+        "category": "UncategorizedText",
+        "page_number": page_num,
+        "coordinates": None,
+        "text_as_html": None,
+    }
+
+
+async def _ocr_fallback(source_path: Path, filename: str | None, settings: Settings) -> list[dict]:
+    """Last-resort text recovery for a scanned/image-only PDF: rasterize
+    every page and OCR them concurrently (bounded by
+    settings.ocr_page_concurrency, since 100+ pages OCR'd strictly in
+    series was the second-largest contributor to slow ingestion after the
+    hi_res default), returning elements in the same shape
+    `_partition_with_unstructured`/`_partition_with_tika` produce so the
+    rest of `extract_pdf` (metadata detection, DocumentElement building)
+    is unaffected by which backend actually supplied the text. A page
+    whose OCR fails or comes back empty is skipped, not fatal -- the
+    caller decides whether the OVERALL result has enough text to proceed
+    (same "no element has non-whitespace text" check as the primary path).
+    `asyncio.gather` returns results in the order its awaitables were
+    passed in, regardless of completion order, so the output list stays in
+    page_number order even though pages complete OCR out of order."""
+    try:
+        pages = await asyncio.to_thread(_rasterize_pdf, str(source_path), 300)
+    except Exception as exc:  # noqa: BLE001 - pdf2image/poppler failure never fatal to the caller; just yields no OCR text
+        logger.error("OCR fallback: failed to rasterize '%s': %r", filename or source_path, exc)
+        return []
+
+    semaphore = asyncio.Semaphore(max(1, settings.ocr_page_concurrency))
+    results = await asyncio.gather(
+        *(
+            _ocr_one_page(page_num, page_image, filename, source_path, settings, semaphore)
+            for page_num, page_image in enumerate(pages, start=1)
+        )
+    )
+    return [element for element in results if element is not None]
 
 
 def _bbox(raw: dict) -> BoundingBox | None:

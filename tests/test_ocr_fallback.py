@@ -8,6 +8,7 @@ heavy backends" convention, one level up the call stack.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -98,30 +99,35 @@ async def test_scanned_pdf_raises_when_ocr_also_fails(monkeypatch, settings, tmp
         await extractor.extract_pdf(file_bytes=_pdf_bytes(), source_path=src, filename="blank.pdf", settings=settings)
 
 
+class _FakePageImage:
+    """Stand-in for a pdf2image page: `save` writes its own page number
+    into the file so a downstream fake `_ocr_page` (which only receives
+    the tmp file path, not this object) can identify which page it's
+    processing -- necessary now that pages OCR concurrently, so a test
+    can't rely on call order to know which page is which."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def save(self, path: str) -> None:
+        Path(path).write_bytes(str(self.n).encode())
+
+
 @pytest.mark.asyncio
 async def test_ocr_fallback_skips_a_page_that_fails_without_aborting_the_document(monkeypatch, settings) -> None:
     """One page's OCR call raising must not abort the rest of the
-    document -- app.parsing.extractor._ocr_fallback's page loop must
-    `continue`, not propagate."""
+    document -- app.parsing.extractor._ocr_one_page must isolate a single
+    page's failure (returning None) rather than propagating and aborting
+    the concurrent asyncio.gather over every page."""
     import app.parsing.extractor as extractor
 
-    class FakeImage:
-        def __init__(self, n):
-            self.n = n
-
-        def save(self, path):
-            Path(path).write_bytes(b"fake-png")
-
-    monkeypatch.setattr(extractor, "_rasterize_pdf", lambda path, dpi: [FakeImage(1), FakeImage(2)])
+    monkeypatch.setattr(extractor, "_rasterize_pdf", lambda path, dpi: [_FakePageImage(1), _FakePageImage(2)])
 
     def fake_ocr_page(image_path, settings_):
-        # First page's OCR blows up; second page succeeds.
-        if not hasattr(fake_ocr_page, "calls"):
-            fake_ocr_page.calls = 0
-        fake_ocr_page.calls += 1
-        if fake_ocr_page.calls == 1:
+        page_num = int(Path(image_path).read_bytes().decode())
+        if page_num == 1:
             raise RuntimeError("tesseract exploded on page 1")
-        return "Recovered text from page 2."
+        return f"Recovered text from page {page_num}."
 
     monkeypatch.setattr(extractor, "_ocr_page", fake_ocr_page)
 
@@ -129,6 +135,65 @@ async def test_ocr_fallback_skips_a_page_that_fails_without_aborting_the_documen
     assert len(elements) == 1
     assert elements[0]["page_number"] == 2
     assert "page 2" in elements[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_ocr_fallback_runs_pages_concurrently(monkeypatch, settings) -> None:
+    """Pages must be OCR'd concurrently (bounded by
+    settings.ocr_page_concurrency), not strictly one at a time -- N pages
+    each taking `delay` should together take close to one `delay`, not
+    N * delay."""
+    import app.parsing.extractor as extractor
+
+    page_count = 5
+    delay = 0.2
+    monkeypatch.setattr(
+        extractor, "_rasterize_pdf", lambda path, dpi: [_FakePageImage(i) for i in range(1, page_count + 1)]
+    )
+
+    def fake_ocr_page(image_path, settings_):
+        time.sleep(delay)
+        page_num = int(Path(image_path).read_bytes().decode())
+        return f"Recovered text from page {page_num}."
+
+    monkeypatch.setattr(extractor, "_ocr_page", fake_ocr_page)
+
+    assert settings.ocr_page_concurrency >= page_count  # default (6) covers this test's 5 pages
+
+    start = time.monotonic()
+    elements = await extractor._ocr_fallback(Path("unused.pdf"), "doc.pdf", settings)
+    elapsed = time.monotonic() - start
+
+    assert len(elements) == page_count
+    # Serial execution would take >= page_count * delay (1.0s here); running
+    # concurrently should land close to a single page's delay plus overhead.
+    assert elapsed < page_count * delay * 0.6
+
+
+@pytest.mark.asyncio
+async def test_ocr_fallback_preserves_page_order_regardless_of_completion_order(monkeypatch, settings) -> None:
+    """Output must come back in ascending page_number order even when
+    pages finish OCR out of order -- asyncio.gather preserves the order
+    tasks were passed in, not completion order."""
+    import app.parsing.extractor as extractor
+
+    page_count = 4
+    monkeypatch.setattr(
+        extractor, "_rasterize_pdf", lambda path, dpi: [_FakePageImage(i) for i in range(1, page_count + 1)]
+    )
+
+    def fake_ocr_page(image_path, settings_):
+        page_num = int(Path(image_path).read_bytes().decode())
+        # Earlier pages sleep longer, so they finish LAST -- if the result
+        # order tracked completion order instead of input order, this would
+        # come back reversed.
+        time.sleep(0.05 * (page_count + 1 - page_num))
+        return f"Recovered text from page {page_num}."
+
+    monkeypatch.setattr(extractor, "_ocr_page", fake_ocr_page)
+
+    elements = await extractor._ocr_fallback(Path("unused.pdf"), "doc.pdf", settings)
+    assert [e["page_number"] for e in elements] == list(range(1, page_count + 1))
 
 
 def test_localize_chunks_passthrough_when_disabled() -> None:

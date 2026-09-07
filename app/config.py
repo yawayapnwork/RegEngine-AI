@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # strategy can read).
     unstructured_strategy: str = "fast"  # hi_res | fast | ocr_only
     tika_server_url: str = "http://localhost:9998"
+    # Pages OCR'd concurrently per document in app.parsing.extractor._ocr_fallback
+    # (the last-resort path for scanned/image-only PDFs). Higher = faster
+    # wall-clock time on large (100+ page) documents, at the cost of more
+    # memory/CPU held at once (each concurrent page keeps a rasterized image
+    # plus an in-flight OCR call) -- tune down on memory-constrained workers.
+    ocr_page_concurrency: int = Field(default=6, description="Max pages OCR'd concurrently per document")
 
     # --- Chunking ---
     chunk_max_chars: int = 2400
