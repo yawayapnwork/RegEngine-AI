@@ -85,7 +85,11 @@ def create_access_token(
     """Mints a self-issued access token. `signing_key` is the resolved
     HS256 secret or RS256 private key PEM -- the caller (app.api.auth_routes)
     fetches it via app.security.secrets, never reads settings.jwt_secret_key
-    directly, so key material always flows through one auditable path."""
+    directly, so key material always flows through one auditable path.
+
+    `amr` (RFC 8176) records verified authentication methods. It defaults to
+    empty list and is NEVER automatically populated with 'mfa' by this function;
+    only verified authentication events (or explicit demo mode login) provide AMR."""
     now = dt.datetime.now(dt.timezone.utc)
     ttl = ttl_seconds or settings.jwt_access_token_ttl_seconds
     payload = TokenPayload(

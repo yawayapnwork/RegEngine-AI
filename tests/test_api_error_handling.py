@@ -110,7 +110,7 @@ def _wire_app_redis(app_instance, fake_redis):
 @pytest_asyncio.fixture
 async def error_test_env():
     settings = Settings(
-        environment="test",
+        environment="development",
         database_url="sqlite+aiosqlite:///:memory:",
         ledger_database_url="sqlite+aiosqlite:///:memory:",
         jwt_secret_key="test-secret-key-at-least-32-chars-long-for-jwt-signing",

@@ -88,6 +88,30 @@ def _check_jwt_secret_configured(settings: Settings) -> None:
 _check_jwt_secret_configured(settings)
 
 
+def _check_demo_mode_configured(settings: Settings) -> None:
+    """Categorically reject demo mode in staging and production at startup,
+    and log conspicuous warning banners when active in development."""
+    if not settings.demo_mode:
+        return
+    if settings.environment in ("production", "staging"):
+        raise RuntimeError(
+            f"FATAL: DEMO_MODE is enabled in environment='{settings.environment}'! "
+            "Demo MFA bypass is strictly prohibited in production and staging."
+        )
+    logger.warning(
+        "\n"
+        "====================================================================\n"
+        "!!! WARNING: DEMO MODE IS ACTIVE (DEMO_MODE=true) !!!\n"
+        "MFA step-up enforcement is bypassed and local login tokens carry\n"
+        "synthetic MFA claims (amr=['pwd', 'mfa']).\n"
+        "NEVER run demo mode in production or staging environments!\n"
+        "===================================================================="
+    )
+
+
+_check_demo_mode_configured(settings)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Starts two background tasks for this process's lifetime:

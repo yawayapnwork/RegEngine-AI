@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -430,7 +430,24 @@ class Settings(BaseSettings):
     # (the default) enforces nothing extra, "staging" warns instead of
     # failing outright, "production" fails loud at boot instead of silently
     # accepting forged tokens at request time.
-    environment: str = "development"  # "development" | "staging" | "production"
+    environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "environment"),
+        description="Deployment tier: 'development' | 'staging' | 'production'.",
+    )
+
+    # --- Security: demo mode ---
+    # Explicit opt-in for demo mode, isolated strictly to development.
+    # When True in development, local login issues synthetic step-up MFA claims
+    # (amr=['pwd', 'mfa']) and step-up MFA verification is bypassed for compliance
+    # approvals without an external IdP.
+    # Categorically prohibited in staging and production (fails closed at validation
+    # and service startup). Default is False.
+    demo_mode: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("DEMO_MODE", "demo_mode"),
+        description="Explicit demo mode toggle. Prohibited in staging and production.",
+    )
 
     # --- Security: JWT / OAuth2 ---
     # Self-issued tokens (Broker_API_Client, via POST /v1/auth/token).
@@ -527,8 +544,9 @@ class Settings(BaseSettings):
         default_factory=lambda: ["mfa", "otp", "hwk", "swk", "sms", "face", "fpt"]
     )
     step_up_redirect_base_url: str | None = None  # IdP re-auth URL template surfaced to the client on a 401 step-up challenge
-    # When False in development mode, local Compliance_Officer logins can approve policies
-    # without requiring an external IdP MFA challenge. Always strictly enforced in staging/production.
+    # Legacy toggle retained for backward compatibility. In hardened mode, MFA bypass
+    # strictly requires demo_mode=True. Combining demo_mode=True with step_up_mfa_enforce_in_dev=True
+    # is ambiguous and will fail closed at settings validation.
     step_up_mfa_enforce_in_dev: bool = False
 
     # --- SAML 2.0 (app.api.saml_routes, via python3-saml) ---
@@ -931,6 +949,29 @@ class Settings(BaseSettings):
     # every other optional subsystem in this file.
     chaos_monkey_enabled: bool = False
     chaos_monkey_postmortem_dir: str = "chaos/postmortems"
+
+    @model_validator(mode="after")
+    def _validate_environment_and_demo_mode(self) -> Settings:
+        normalized_env = self.environment.strip().lower() if isinstance(self.environment, str) else ""
+        valid_envs = {"development", "staging", "production"}
+        if normalized_env not in valid_envs:
+            raise ValueError(
+                f"Invalid or ambiguous environment '{self.environment}'. Must be one of {sorted(valid_envs)}."
+            )
+        self.environment = normalized_env
+
+        if self.demo_mode and self.environment in {"staging", "production"}:
+            raise ValueError(
+                f"DEMO_MODE=True is strictly prohibited in environment='{self.environment}'. "
+                "Demo mode and MFA bypass may only be enabled in 'development'."
+            )
+
+        if self.demo_mode and self.step_up_mfa_enforce_in_dev:
+            raise ValueError(
+                "Ambiguous configuration: demo_mode=True conflicts with step_up_mfa_enforce_in_dev=True. "
+                "Set step_up_mfa_enforce_in_dev=False when demo_mode=True."
+            )
+        return self
 
 
 @lru_cache(maxsize=1)

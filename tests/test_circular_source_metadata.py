@@ -125,7 +125,7 @@ def _wire_app_redis(app_instance, fake_redis):
 @pytest_asyncio.fixture
 async def metadata_test_env(tmp_path: Path):
     settings = Settings(
-        environment="test",
+        environment="development",
         database_url="sqlite+aiosqlite:///:memory:",
         ledger_database_url="sqlite+aiosqlite:///:memory:",
         jwt_secret_key="test_secret_for_source_metadata_testing_min_32_chars!",

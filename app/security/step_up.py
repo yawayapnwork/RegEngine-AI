@@ -81,10 +81,15 @@ async def require_step_up_mfa(
         # that dependency ever being misconfigured, not the primary check.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Step-up MFA is not applicable to machine credentials.")
 
-    # In development/demo, allow local Compliance_Officer to proceed if
-    # step_up_mfa_enforce_in_dev is False (default). In staging/production,
-    # or if step_up_mfa_enforce_in_dev is True, strict OIDC step-up MFA is enforced.
-    if settings.environment == "development" and not settings.step_up_mfa_enforce_in_dev:
+    # Explicit isolated demo path: only permitted when demo_mode is True AND environment is development.
+    # ENVIRONMENT=development alone does NOT bypass step-up MFA.
+    # Normal development, staging, and production strictly enforce step-up MFA.
+    if settings.demo_mode and settings.environment == "development":
+        logger.warning(
+            "DEMO MODE ACTIVE: Bypassing step-up MFA verification for subject=%s roles=%s.",
+            principal.subject,
+            [r.value for r in principal.roles],
+        )
         return principal
 
     if principal.auth_time is None:

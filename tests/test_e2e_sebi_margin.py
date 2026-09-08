@@ -334,7 +334,7 @@ async def test_complete_sebi_margin_e2e_workflow() -> None:
             "storage_backend": "local",
             "llm_provider": "offline",
             "jwt_secret_key": "test-insecure-secret-key-32-chars-long",
-            "step_up_mfa_enforce_in_dev": False,
+            "demo_mode": True,
         }
     )
 

@@ -118,11 +118,19 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
     now = dt.datetime.now(dt.timezone.utc)
-    # In development/demo, grant step-up MFA claims (amr=["pwd", "mfa"]) on local login
-    # so human compliance officers can approve policies without external IdP infrastructure.
-    # In production/staging, local login only carries single-factor "pwd".
-    dev_mfa = settings.environment == "development"
-    amr = ["pwd", "mfa"] if dev_mfa else ["pwd"]
+    # MFA bypass is strictly isolated to explicit demo mode (demo_mode=True in development).
+    # ENVIRONMENT=development alone does NOT grant fake MFA claims.
+    # In normal development, staging, and production, local login only carries single-factor "pwd".
+    is_demo_bypass = settings.demo_mode and settings.environment == "development"
+    if is_demo_bypass:
+        logger.warning(
+            "DEMO MODE ACTIVE: Issuing synthetic step-up MFA claims (amr=['pwd', 'mfa']) for user=%s. "
+            "MFA was NOT actually performed. This must NEVER be enabled in production or staging.",
+            user.email,
+        )
+        amr = ["pwd", "mfa"]
+    else:
+        amr = ["pwd"]
 
     signing_key = await _signing_key(settings)
     access_token, payload = create_access_token(
