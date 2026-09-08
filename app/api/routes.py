@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -246,20 +246,44 @@ async def get_circular_status_alias(
     status_code=status.HTTP_200_OK,
 )
 async def list_circulars(
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=500,
+        description="Maximum number of circulars to return. If omitted, returns all circulars.",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of circulars to skip for pagination.",
+    ),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> list[dict[str, Any]]:
-    """List all ingested regulatory circulars with their live lifecycle status."""
+    """List ingested regulatory circulars with their live lifecycle status, using batched aggregate queries."""
     from sqlalchemy import select
     from app.db.models import Circular
 
-    result = await session.execute(select(Circular).order_by(Circular.created_at.desc()))
-    circulars = result.scalars().all()
+    # 1. Apply pagination before aggregation
+    stmt = select(Circular).order_by(Circular.created_at.desc())
+    if offset > 0:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
 
+    result = await session.execute(stmt)
+    circulars = list(result.scalars().all())
+
+    if not circulars:
+        return []
+
+    # 2. Batch-compute status, active rules, pending reviews, and clause counts in constant queries
     orchestrator = E2EOrchestrator(settings)
+    statuses = await orchestrator.get_circular_statuses_batch(session, circulars)
+
     items = []
     for c in circulars:
-        c_status = await orchestrator.get_circular_status(session, c.id)
+        c_status = statuses.get(c.id, {})
         items.append({
             "id": c.id,
             "circular_number": c.circular_number,
@@ -272,10 +296,10 @@ async def list_circulars(
             "extracted_text_sha256": c.raw_text_digest,
             "raw_text_digest": c.raw_text_digest,
             "created_at": c.created_at.isoformat() if c.created_at else None,
-            "status": c_status.status if c_status else "unknown",
-            "clause_count": c_status.clause_count if c_status else 0,
-            "active_rules": c_status.active_rules if c_status else 0,
-            "pending_reviews": c_status.pending_reviews if c_status else 0,
+            "status": c_status.get("status", "unknown"),
+            "clause_count": c_status.get("clause_count", 0),
+            "active_rules": c_status.get("active_rules", 0),
+            "pending_reviews": c_status.get("pending_reviews", 0),
         })
     return items
 

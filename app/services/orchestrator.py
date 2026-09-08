@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.pipeline import extract_and_audit_clause
@@ -1070,4 +1070,104 @@ class E2EOrchestrator:
             ],
             clause_status_counts=dict(clause_status_counts),
         )
+
+    async def get_circular_statuses_batch(
+        self,
+        session: AsyncSession,
+        circulars: list[Circular],
+    ) -> dict[int, dict[str, Any]]:
+        """Batch-computes circular status summaries (status, clause_count, active_rules, pending_reviews)
+        for a collection of circulars using grouped SQL aggregations, avoiding N+1 queries.
+        """
+        if not circulars:
+            return {}
+
+        circular_ids = [c.id for c in circulars]
+
+        # 1. Grouped clause counts per circular
+        clause_stmt = (
+            select(
+                Clause.circular_id,
+                func.count(Clause.id).label("clause_count"),
+            )
+            .where(Clause.circular_id.in_(circular_ids))
+            .group_by(Clause.circular_id)
+        )
+        clause_counts = {cid: cnt for cid, cnt in (await session.execute(clause_stmt)).all()}
+
+        # 2. Grouped rule counts (active rules and total rules)
+        rule_stmt = (
+            select(
+                Clause.circular_id,
+                func.count(case((CompiledRule.is_active.is_(True), 1))).label("active_rules"),
+                func.count(CompiledRule.id).label("total_rules"),
+            )
+            .select_from(Clause)
+            .join(CompiledRule, CompiledRule.clause_id == Clause.id)
+            .where(Clause.circular_id.in_(circular_ids))
+            .group_by(Clause.circular_id)
+        )
+        rule_counts: dict[int, dict[str, int]] = {}
+        for cid, active_cnt, total_cnt in (await session.execute(rule_stmt)).all():
+            rule_counts[cid] = {"active_rules": active_cnt, "total_rules": total_cnt}
+
+        # 3. Grouped review counts (pending, resolved, rejected)
+        review_stmt = (
+            select(
+                Clause.circular_id,
+                func.count(case((HITLReview.status.in_(("PENDING", "IN_REVIEW")), 1))).label("pending_reviews"),
+                func.count(case((HITLReview.status == "RESOLVED", 1))).label("resolved_reviews"),
+                func.count(case((HITLReview.status == "REJECTED", 1))).label("rejected_reviews"),
+            )
+            .select_from(Clause)
+            .join(HITLReview, HITLReview.clause_id == Clause.id)
+            .where(Clause.circular_id.in_(circular_ids))
+            .group_by(Clause.circular_id)
+        )
+        review_counts: dict[int, dict[str, int]] = {}
+        for cid, pending_cnt, resolved_cnt, rejected_cnt in (await session.execute(review_stmt)).all():
+            review_counts[cid] = {
+                "pending_reviews": pending_cnt,
+                "resolved_reviews": resolved_cnt,
+                "rejected_reviews": rejected_cnt,
+            }
+
+        summaries: dict[int, dict[str, Any]] = {}
+        for c in circulars:
+            cid = c.id
+            c_clause_count = clause_counts.get(cid, 0)
+            c_rules = rule_counts.get(cid, {"active_rules": 0, "total_rules": 0})
+            c_reviews = review_counts.get(
+                cid, {"pending_reviews": 0, "resolved_reviews": 0, "rejected_reviews": 0}
+            )
+
+            active_rules = c_rules["active_rules"]
+            pending_reviews = c_reviews["pending_reviews"]
+            resolved_reviews = c_reviews["resolved_reviews"]
+            has_rejected = c_reviews["rejected_reviews"] > 0
+
+            # Legacy status mapping for backward compatibility (mirrors get_circular_status exactly)
+            if c.processing_state == ProcessingState.DEPLOYED.value:
+                legacy_status = "deployed"
+            elif c.processing_state == ProcessingState.APPROVED.value:
+                legacy_status = "approved"
+            elif c.processing_state == ProcessingState.FAILED.value or has_rejected:
+                legacy_status = "failed"
+            elif c.processing_state == ProcessingState.AWAITING_HITL.value or pending_reviews > 0:
+                legacy_status = "review_required"
+            elif active_rules > 0:
+                legacy_status = "deployed"
+            elif resolved_reviews > 0:
+                legacy_status = "approved"
+            else:
+                legacy_status = "processing"
+
+            summaries[cid] = {
+                "status": legacy_status,
+                "clause_count": c_clause_count,
+                "active_rules": active_rules,
+                "pending_reviews": pending_reviews,
+            }
+
+        return summaries
 
