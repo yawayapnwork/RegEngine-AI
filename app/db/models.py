@@ -81,6 +81,24 @@ _HITL_SEVERITIES = ("blocking", "advisory")
 _HITL_REVIEW_STATUSES = ("PENDING", "IN_REVIEW", "RESOLVED", "REJECTED", "REVISION_REQUIRED")
 _COMPILED_RULE_HITL_STATUSES = ("NONE", "ADVISORY", "BLOCKING", "RESOLVED")
 _TENANT_TYPES = ("stockbroker", "amc", "depository", "other")
+_CIRCULAR_PROCESSING_STATES = (
+    "INGESTED",
+    "EXTRACTING",
+    "EXTRACTED",
+    "COMPILING",
+    "AWAITING_HITL",
+    "APPROVED",
+    "DEPLOYED",
+    "FAILED",
+)
+_CLAUSE_PROCESSING_STATUSES = (
+    "PENDING",
+    "EXTRACTING",
+    "EXTRACTED",
+    "COMPILING",
+    "COMPILED",
+    "FAILED",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -206,10 +224,15 @@ class Circular(Base):
     # SHA-256 of the original uploaded raw document bytes (e.g. PDF container)
     # computed before any parsing, decoding, or text extraction.
     source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
     # SHA-256 of the full raw parsed text, ahead of chunking. Lets a re-poll
     # of an already-ingested circular short-circuit without re-parsing.
     raw_text_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Resumable state machine tracking
+    processing_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="INGESTED"
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @property
     def extracted_text_sha256(self) -> str:
@@ -227,6 +250,11 @@ class Circular(Base):
     clauses: Mapped[list["Clause"]] = relationship(
         back_populates="circular", cascade="all, delete-orphan"
     )
+    state_transitions: Mapped[list["CircularStateTransition"]] = relationship(
+        back_populates="circular",
+        cascade="all, delete-orphan",
+        order_by="CircularStateTransition.created_at",
+    )
 
     __table_args__ = (
         UniqueConstraint("circular_number", name="uq_circulars_circular_number"),
@@ -234,6 +262,7 @@ class Circular(Base):
         Index("ix_circulars_issue_date", "issue_date"),
         Index("ix_circulars_source_filename", "source_filename"),
         Index("ix_circulars_source_document_sha256", "source_document_sha256"),
+        Index("ix_circulars_processing_state", "processing_state"),
         # Tenant-scoped range scan index (the dominant audit-report query shape).
         Index("ix_circulars_tenant_id", "tenant_id", "issue_date"),
         # Partial index: fast lookup of shared circulars visible to all tenants.
@@ -246,6 +275,10 @@ class Circular(Base):
         CheckConstraint(
             "source_document_sha256 IS NULL OR length(source_document_sha256) = 64",
             name="source_document_sha256_len",
+        ),
+        CheckConstraint(
+            f"processing_state IN {_CIRCULAR_PROCESSING_STATES!r}",
+            name="processing_state",
         ),
     )
 
@@ -296,6 +329,12 @@ class Clause(Base):
         nullable=False, server_default=sa_text("false")
     )
 
+    # Per-clause processing status
+    processing_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="PENDING"
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -314,8 +353,54 @@ class Clause(Base):
         Index("ix_clauses_sha256", "sha256"),
         Index("ix_clauses_circular_id_clause_number", "circular_id", "clause_number"),
         Index("ix_clauses_tenant_id", "tenant_id", "circular_id"),
+        Index("ix_clauses_processing_status", "processing_status"),
         CheckConstraint("length(sha256) = 64", name="sha256_len"),
         CheckConstraint(f"element_kind IN {_ELEMENT_KINDS!r}", name="element_kind"),
+        CheckConstraint(
+            f"processing_status IN {_CLAUSE_PROCESSING_STATUSES!r}",
+            name="processing_status",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# CircularStateTransition
+# ---------------------------------------------------------------------------
+
+class CircularStateTransition(Base):
+    """Durable audit trail of each lifecycle state transition for a Circular."""
+
+    __tablename__ = "circular_state_transitions"
+
+    id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+    circular_id: Mapped[int] = mapped_column(
+        _ID_TYPE, ForeignKey("circulars.id", ondelete="CASCADE"), nullable=False
+    )
+    from_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    to_state: Mapped[str] = mapped_column(String(32), nullable=False)
+    triggered_by: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default="orchestrator"
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[dict | None] = mapped_column(_JSON_TYPE, nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    circular: Mapped["Circular"] = relationship(back_populates="state_transitions")
+
+    __table_args__ = (
+        Index("ix_circular_state_transitions_circular_id", "circular_id"),
+        Index("ix_circular_state_transitions_created_at", "created_at"),
+        CheckConstraint(
+            f"to_state IN {_CIRCULAR_PROCESSING_STATES!r}",
+            name="to_state",
+        ),
+        CheckConstraint(
+            f"from_state IS NULL OR from_state IN {_CIRCULAR_PROCESSING_STATES!r}",
+            name="from_state",
+        ),
     )
 
 

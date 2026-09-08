@@ -21,7 +21,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CompiledRule, HITLReview
+from app.db.models import Circular, CircularStateTransition, Clause, CompiledRule, HITLReview
 from app.execution.policy_publisher import PolicyPublisher
 
 logger = logging.getLogger(__name__)
@@ -218,6 +218,48 @@ class HITLReviewService:
                 review.resolution_notes = notes
                 review.resolved_at = now_utc
 
+            # Check if this resolves all pending reviews for the parent circular
+            if review.clause_id:
+                clause = await session.get(Clause, review.clause_id)
+                if clause and clause.circular_id:
+                    circular = await session.get(Circular, clause.circular_id)
+                    if circular and circular.processing_state == "AWAITING_HITL":
+                        circular_clause_ids = list(
+                            (
+                                await session.execute(
+                                    select(Clause.id).where(Clause.circular_id == circular.id)
+                                )
+                            ).scalars().all()
+                        )
+                        if circular_clause_ids:
+                            all_circ_reviews = list(
+                                (
+                                    await session.execute(
+                                        select(HITLReview).where(HITLReview.clause_id.in_(circular_clause_ids))
+                                    )
+                                ).scalars().all()
+                            )
+                            unresolved = [
+                                r for r in all_circ_reviews
+                                if (r.id == review.id and review.status != APPROVED_STATUS)
+                                or (r.id != review.id and r.status in UNRESOLVED_STATUSES)
+                            ]
+                            disqualified = [
+                                r for r in all_circ_reviews
+                                if r.status in DISQUALIFYING_STATUSES
+                            ]
+                            if not unresolved and not disqualified:
+                                circular.processing_state = "APPROVED"
+                                session.add(
+                                    CircularStateTransition(
+                                        circular_id=circular.id,
+                                        from_state="AWAITING_HITL",
+                                        to_state="APPROVED",
+                                        triggered_by=principal_subject,
+                                        details={"review_id": review_id, "reason": "All HITL reviews approved"},
+                                    )
+                                )
+
             await session.commit()
             await session.refresh(review)
             if compiled_rule is not None:
@@ -286,6 +328,25 @@ class HITLReviewService:
             review.resolution_notes = notes
             review.resolved_at = now_utc
 
+            if review.clause_id:
+                clause = await session.get(Clause, review.clause_id)
+                if clause and clause.circular_id:
+                    circular = await session.get(Circular, clause.circular_id)
+                    if circular and circular.processing_state != "FAILED":
+                        old_state = circular.processing_state
+                        circular.processing_state = "FAILED"
+                        circular.error_message = f"HITL review '{review.review_id}' rejected by {principal_subject}"
+                        session.add(
+                            CircularStateTransition(
+                                circular_id=circular.id,
+                                from_state=old_state,
+                                to_state="FAILED",
+                                triggered_by=principal_subject,
+                                error_message=circular.error_message,
+                                details={"review_id": review.review_id},
+                            )
+                        )
+
             await session.commit()
             await session.refresh(review)
             logger.info(
@@ -336,6 +397,23 @@ class HITLReviewService:
             review.compliance_officer_id = principal_subject
             review.resolution_notes = notes
             review.resolved_at = now_utc
+
+            if review.clause_id:
+                clause = await session.get(Clause, review.clause_id)
+                if clause and clause.circular_id:
+                    circular = await session.get(Circular, clause.circular_id)
+                    if circular and circular.processing_state in ("AWAITING_HITL", "APPROVED"):
+                        old_state = circular.processing_state
+                        circular.processing_state = "EXTRACTING"
+                        session.add(
+                            CircularStateTransition(
+                                circular_id=circular.id,
+                                from_state=old_state,
+                                to_state="EXTRACTING",
+                                triggered_by=principal_subject,
+                                details={"review_id": review.review_id, "reason": "Revision requested"},
+                            )
+                        )
 
             await session.commit()
             await session.refresh(review)
