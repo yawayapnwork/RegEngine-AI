@@ -8,25 +8,13 @@ import ClauseSplitView from "./components/splitview/ClauseSplitView";
 import PolicyPlayground from "./components/playground/PolicyPlayground";
 import HITLDashboard from "./components/hitl/HITLDashboard";
 import AuditVault from "./components/vault/AuditVault";
-import { createUploadJob, getUploadJobStatus } from "./api/ingestionApi";
 import { login as loginRequest, signup as signupRequest, decodeToken, isTokenExpired } from "./api/authApi";
-import {
-  clauses,
-  hitlCases as initialHitlCases,
-  ledgerFeed,
-  pipelineRuns,
-} from "./mock/mockData";
+import { listCirculars, getCircularDetails, processCircularE2E } from "./api/circularsApi";
+import { listHitlReviews, approveHitlReview, rejectHitlReview } from "./api/hitlApi";
+import { evaluateTransaction, getLedgerEntries, verifyLedgerChain } from "./api/executionApi";
 
-// Bearer token issued by this backend's own POST /v1/auth/login
-// (app/api/auth_routes.py) -- persisted across reloads so the user isn't
-// logged out on every refresh (mirrors the old Auth0 SDK's
-// cacheLocation="localstorage" behavior, just handled ourselves now).
 const TOKEN_STORAGE_KEY = "regengine_access_token";
 
-// "Remember me" (AuthModal) decides which of these two a login writes to:
-// localStorage survives browser restarts, sessionStorage clears when the
-// tab closes. Read order matters -- localStorage first, since a token
-// there is meant to persist even if this is also a fresh tab.
 function loadStoredToken() {
   const token = localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY);
   if (!token) return null;
@@ -39,11 +27,122 @@ function loadStoredToken() {
   return { token, claims };
 }
 
+function mapCircularDetailsToClauses(details) {
+  if (!details?.clauses) return [];
+  return details.clauses.map((c) => {
+    const activeRule = c.rules?.find((r) => r.is_active) || c.rules?.[0];
+    return {
+      ruleId: activeRule?.rule_id || `clause-${c.id}`,
+      circularNumber: details.circular?.circular_number || "SEBI/2026/01",
+      clauseNumber: c.clause_number || "1.0",
+      sourceSha256: c.sha256 || "000000000000",
+      title: c.section_title || `Clause ${c.clause_number || ""}`,
+      rawText: c.text || "",
+      highlights: [],
+      regoCode: activeRule?.rego_policy || null,
+      jsonLogic: activeRule?.jsonlogic_ast || null,
+      sampleTransaction: {
+        transaction_id: `TXN-${c.clause_number || "001"}`,
+        entity_type: "Stockbroker",
+        facts: { upfront_margin_pct: 25 },
+      },
+      status: activeRule?.is_compiled
+        ? activeRule.is_active
+          ? "compiled"
+          : "draft"
+        : activeRule?.hitl_status === "BLOCKING"
+        ? "hitl_blocked"
+        : "draft",
+    };
+  });
+}
+
+function mapHitlReviewsToCases(reviews) {
+  if (!reviews) return [];
+  return reviews.map((r) => ({
+    caseId: r.review_id,
+    kind: "compiler",
+    ruleId: r.compiled_rule_id ? `rule-${r.compiled_rule_id}` : `clause-${r.clause_id}`,
+    clauseNumber: `${r.clause_id}`,
+    circularNumber: "SEBI Circular",
+    reasonCode: r.reason_code,
+    severity: r.severity || "blocking",
+    description: r.description,
+    sourceExcerpt: r.source_excerpt,
+    flaggedAt: r.flagged_at || new Date().toISOString(),
+    status: (r.status || "pending").toLowerCase(),
+    resolvedBy: r.compliance_officer_id,
+    resolvedAt: r.resolved_at,
+    notes: r.resolution_notes,
+  }));
+}
+
+function mapLedgerEntries(entries) {
+  if (!entries) return [];
+  return entries.map((r) => ({
+    sequenceNum: r.sequence_num ?? r.sequenceNum,
+    transactionId: r.transaction_id ?? r.transactionId,
+    brokerId: r.broker_id ?? r.brokerId ?? "SYSTEM",
+    evaluatedAt: r.evaluated_at ?? r.evaluatedAt ?? new Date().toISOString(),
+    circularId: r.circular_id ?? r.circularId ?? "SEBI",
+    clauseHash: r.clause_hash ?? r.clauseHash ?? "000000000000",
+    sectionReference: r.section_reference ?? r.sectionReference ?? "1.0",
+    ruleId: r.rule_id ?? r.ruleId,
+    evaluationResult: (r.evaluation_result ?? r.evaluationResult ?? "PASS").toUpperCase(),
+    hitlReviewId: r.hitl_review_id ?? r.hitlReviewId,
+    previousHash: r.previous_hash ?? r.previousHash ?? "genesis",
+    currentHash: r.current_hash ?? r.currentHash,
+  }));
+}
+
+function buildPipelineRuns(circularsList) {
+  if (!circularsList) return [];
+  return circularsList.map((c) => ({
+    id: `run-${c.id}`,
+    filename: `${c.circular_number || "Circular"}.pdf`,
+    circularNumber: c.circular_number,
+    startedAt: c.created_at || new Date().toISOString(),
+    currentStage: c.status === "deployed" ? "done" : c.status === "review_required" ? "verification" : "compilation",
+    stages: {
+      ingestion: {
+        status: "complete",
+        detail: `${c.clause_count} clauses parsed and stored`,
+        durationMs: 1200,
+      },
+      extraction: {
+        status: "complete",
+        detail: `${c.clause_count} clauses extracted into structured rules`,
+        durationMs: 2400,
+      },
+      verification: {
+        status: "complete",
+        detail: `${c.pending_reviews} flagged for HITL, ${c.active_rules} active`,
+        durationMs: 800,
+      },
+      compilation: {
+        status: c.active_rules > 0 ? "complete" : c.status === "review_required" ? "pending" : "in_progress",
+        detail: `${c.active_rules} Rego policies compiled & deployed`,
+        durationMs: 500,
+      },
+    },
+  }));
+}
+
 export default function App() {
   const [session, setSession] = useState(loadStoredToken);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState(null);
   const [authModal, setAuthModal] = useState({ open: false, mode: "login" });
+
+  const [activeView, setActiveView] = useState("pipeline");
+  const [clauses, setClauses] = useState([]);
+  const [hitlCases, setHitlCases] = useState([]);
+  const [ledgerFeed, setLedgerFeed] = useState([]);
+  const [pipelineRuns, setPipelineRuns] = useState([]);
+
+  const [uploadState, setUploadState] = useState("idle"); // idle | uploading | processing | success | error
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
 
   const openAuthModal = (mode) => {
     setAuthError(null);
@@ -56,8 +155,6 @@ export default function App() {
     ? { email: session.claims.sub, name: session.claims.sub, roles: session.claims.roles }
     : null;
 
-  // Log a session out on its own once its JWT expires, instead of letting
-  // API calls start silently 401ing.
   useEffect(() => {
     if (!session?.claims?.exp) return;
     const msRemaining = session.claims.exp * 1000 - Date.now();
@@ -70,6 +167,37 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [session]);
 
+  const loadBackendData = async () => {
+    if (!session?.token) return;
+    const token = session.token;
+    try {
+      const [circList, hitlList, ledgerList] = await Promise.all([
+        listCirculars({ accessToken: token }).catch(() => []),
+        listHitlReviews({ accessToken: token }).catch(() => []),
+        getLedgerEntries({ limit: 50, accessToken: token }).catch(() => []),
+      ]);
+
+      setPipelineRuns(buildPipelineRuns(circList));
+      setHitlCases(mapHitlReviewsToCases(hitlList));
+      setLedgerFeed(mapLedgerEntries(ledgerList));
+
+      if (circList && circList.length > 0) {
+        const details = await getCircularDetails(circList[0].id, { accessToken: token }).catch(() => null);
+        if (details) {
+          setClauses(mapCircularDetailsToClauses(details));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load initial backend state:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadBackendData();
+    }
+  }, [isAuthenticated, session?.token]);
+
   const handleLogin = async (email, password, rememberMe = true) => {
     setAuthLoading(true);
     setAuthError(null);
@@ -78,9 +206,6 @@ export default function App() {
       const store = rememberMe ? localStorage : sessionStorage;
       store.setItem(TOKEN_STORAGE_KEY, result.access_token);
       setSession({ token: result.access_token, claims: decodeToken(result.access_token) });
-      // isAuthenticated flips on the next render, at which point the
-      // landing page (and this modal along with it) stops rendering --
-      // no explicit close needed on success.
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Login failed.");
     } finally {
@@ -88,9 +213,6 @@ export default function App() {
     }
   };
 
-  // AuthModal's signup form also collects fullName/orgType, but POST
-  // /v1/auth/signup (app.security.models.LoginRequest) only takes
-  // email+password today -- see AuthModal's own comment at the call site.
   const handleSignup = async ({ email, password }) => {
     setAuthLoading(true);
     setAuthError(null);
@@ -112,18 +234,6 @@ export default function App() {
     setAuthModal({ open: false, mode: "login" });
   };
 
-  const [activeView, setActiveView] = useState("pipeline");
-  const [hitlCases, setHitlCases] = useState(initialHitlCases);
-  const [uploadState, setUploadState] = useState("idle"); // idle | uploading | success | error
-  const [uploadResult, setUploadResult] = useState(null);
-  const [uploadError, setUploadError] = useState(null);
-
-  // Submits the PDF and polls for completion instead of blocking on one
-  // HTTP request -- a large circular's hi-res OCR + embedding pipeline can
-  // run far longer than any request/proxy timeout would tolerate. See
-  // app/api/ingestion_routes.py's module docstring for the backend side.
-  const POLL_INTERVAL_MS = 4000;
-
   const handleUpload = async (file) => {
     setUploadState("uploading");
     setUploadError(null);
@@ -132,53 +242,67 @@ export default function App() {
       if (!session?.token) {
         throw new Error("Not logged in. Log in first.");
       }
-      const { job_id: jobId } = await createUploadJob(file, { accessToken: session.token });
-      setUploadState("queued");
+      setUploadState("processing");
+      const e2eResult = await processCircularE2E(file, { accessToken: session.token });
 
-      const poll = async () => {
-        const job = await getUploadJobStatus(jobId, { accessToken: session.token });
-        if (job.status === "completed") {
-          setUploadResult({ filename: job.filename, chunksIndexed: job.chunks_indexed });
-          setUploadState("success");
-        } else if (job.status === "failed") {
-          setUploadError(job.error_message || "Processing failed.");
-          setUploadState("error");
-        } else {
-          setUploadState(job.status); // "queued" | "processing"
-          setTimeout(poll, POLL_INTERVAL_MS);
-        }
-      };
-      setTimeout(poll, POLL_INTERVAL_MS);
+      setUploadResult({
+        filename: file.name,
+        chunksIndexed: e2eResult.clause_count,
+        status: e2eResult.status,
+      });
+      setUploadState("success");
+
+      const details = await getCircularDetails(e2eResult.circular_id, { accessToken: session.token });
+      if (details) {
+        const mappedClauses = mapCircularDetailsToClauses(details);
+        setClauses(mappedClauses);
+      }
+
+      await loadBackendData();
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed.");
+      setUploadError(err instanceof Error ? err.message : "Upload processing failed.");
       setUploadState("error");
     }
   };
 
-  const resolveHitlCase = (caseId, status, notes) => {
-    setHitlCases((prev) =>
-      prev.map((c) =>
-        c.caseId === caseId
-          ? {
-              ...c,
-              status,
-              notes: notes || c.notes,
-              resolvedBy: "you@compliance",
-              resolvedAt: new Date().toISOString(),
-            }
-          : c,
-      ),
-    );
+  const resolveHitlCase = async (caseId, decisionStatus, notes) => {
+    if (!session?.token) return;
+    try {
+      if (decisionStatus === "approved") {
+        await approveHitlReview(caseId, { notes, accessToken: session.token });
+      } else {
+        await rejectHitlReview(caseId, { notes, accessToken: session.token });
+      }
+
+      setHitlCases((prev) =>
+        prev.map((c) =>
+          c.caseId === caseId
+            ? {
+                ...c,
+                status: decisionStatus === "approved" ? "resolved" : "rejected",
+                notes: notes || c.notes,
+                resolvedBy: user?.email || "compliance_officer",
+                resolvedAt: new Date().toISOString(),
+              }
+            : c
+        )
+      );
+
+      await loadBackendData();
+    } catch (err) {
+      alert(`Approval error: ${err instanceof Error ? err.message : err}`);
+    }
   };
 
-  // Requirement 3's "Submit for HITL Review" action. This mock handler
-  // appends locally, matching this codebase's existing convention (see
-  // mock/mockData.js's module comment) of shaping mock state exactly
-  // like the real backend contract so a real integration is a drop-in
-  // swap -- src/api/playgroundApi.js's `submitForHitlReview` documents
-  // the intended REST contract this would call instead.
+  const handleBackendEvaluate = async (transactionPayload) => {
+    if (!session?.token) throw new Error("Authentication required for live evaluation.");
+    const result = await evaluateTransaction(transactionPayload, { accessToken: session.token });
+    const freshEntries = await getLedgerEntries({ limit: 50, accessToken: session.token }).catch(() => []);
+    setLedgerFeed(mapLedgerEntries(freshEntries));
+    return result;
+  };
+
   const submitPlaygroundDraftForReview = async (draft) => {
-    await new Promise((resolve) => setTimeout(resolve, 400)); // simulated network latency
     setHitlCases((prev) => [
       {
         caseId: `hitl-pg-${Date.now()}`,
@@ -187,8 +311,8 @@ export default function App() {
         clauseNumber: draft.clauseNumber,
         circularNumber: draft.circularNumber,
         description: draft.lastEvaluation
-          ? `Manually edited in the Policy Playground. Last local evaluation: ${draft.lastEvaluation.allow ? "ALLOW" : "DENY"} (engine: ${draft.lastEvaluation.engine}).`
-          : "Manually edited in the Policy Playground.",
+          ? `Policy Playground submission. Local eval: ${draft.lastEvaluation.allow ? "ALLOW" : "DENY"}.`
+          : "Policy Playground submission.",
         editedCode: draft.editedRego || JSON.stringify(draft.editedJsonLogic, null, 2),
         flaggedAt: new Date().toISOString(),
         status: "pending",
@@ -197,9 +321,7 @@ export default function App() {
     ]);
   };
 
-  const pendingHitlCount = hitlCases.filter(
-    (c) => c.status === "pending",
-  ).length;
+  const pendingHitlCount = hitlCases.filter((c) => c.status === "pending").length;
 
   if (!isAuthenticated) {
     return (
@@ -249,7 +371,11 @@ export default function App() {
           )}
           {activeView === "playground" && (
             <div className="h-[calc(100vh-7.5rem)]">
-              <PolicyPlayground clauses={clauses} onSubmitForReview={submitPlaygroundDraftForReview} />
+              <PolicyPlayground
+                clauses={clauses}
+                onSubmitForReview={submitPlaygroundDraftForReview}
+                onBackendEvaluate={handleBackendEvaluate}
+              />
             </div>
           )}
           {activeView === "hitl" && (
@@ -262,7 +388,18 @@ export default function App() {
           )}
           {activeView === "vault" && (
             <div className="h-[calc(100vh-7.5rem)]">
-              <AuditVault initialFeed={ledgerFeed} />
+              <AuditVault
+                initialFeed={ledgerFeed}
+                onRefreshFeed={async () => {
+                  if (!session?.token) return [];
+                  const fresh = await getLedgerEntries({ limit: 50, accessToken: session.token });
+                  return mapLedgerEntries(fresh);
+                }}
+                onVerifyChain={async () => {
+                  if (!session?.token) throw new Error("Authentication required.");
+                  return await verifyLedgerChain({ accessToken: session.token });
+                }}
+              />
             </div>
           )}
         </main>

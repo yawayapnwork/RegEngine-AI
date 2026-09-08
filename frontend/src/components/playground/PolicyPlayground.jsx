@@ -29,7 +29,7 @@ function safeJsonParse(text) {
  * alike), so there is no debounce here; that IS the "zero-latency
  * feedback" Requirement 2 asks for.
  */
-export default function PolicyPlayground({ clauses, onSubmitForReview }) {
+export default function PolicyPlayground({ clauses = [], onSubmitForReview, onBackendEvaluate }) {
   const [selectedRuleId, setSelectedRuleId] = useState(clauses[0]?.ruleId);
   const [activeHighlightIndex, setActiveHighlightIndex] = useState(null);
   const [editorTab, setEditorTab] = useState("jsonlogic");
@@ -44,14 +44,28 @@ export default function PolicyPlayground({ clauses, onSubmitForReview }) {
 
   // Reset the editors from the newly-selected clause's compiled output.
   useEffect(() => {
+    if (!clause) return;
     setRegoText(clause.regoCode || "");
     setJsonLogicText(clause.jsonLogic ? JSON.stringify(clause.jsonLogic, null, 2) : "");
-    setPayloadText(JSON.stringify(clause.sampleTransaction || { entity_type: "Stockbroker", facts: {} }, null, 2));
+    setPayloadText(JSON.stringify(clause.sampleTransaction || { transaction_id: "TXN-EVAL-001", entity_type: "Stockbroker", facts: { upfront_margin_pct: 25 } }, null, 2));
     setSubmitState("idle");
     setSubmitError(null);
     wasm.clearWasmBundle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clause.ruleId]);
+  }, [clause?.ruleId]);
+
+  if (!clauses || clauses.length === 0 || !clause) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-center">
+        <div className="max-w-md rounded border border-ink-700 bg-ink-900 p-6 shadow-sm">
+          <h3 className="text-base font-semibold text-slate-800">No Policies in Playground</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Upload and approve a regulatory circular to evaluate transactions against compiled OPA policies.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const parsedJsonLogic = useMemo(() => safeJsonParse(jsonLogicText || "null"), [jsonLogicText]);
   const parsedPayload = useMemo(() => safeJsonParse(payloadText || "null"), [payloadText]);
@@ -113,6 +127,7 @@ export default function PolicyPlayground({ clauses, onSubmitForReview }) {
         submitError={submitError}
         onSubmitForReview={handleSubmitForReview}
         canSubmit={canSubmit}
+        onBackendEvaluate={onBackendEvaluate}
       />
     </div>
   );

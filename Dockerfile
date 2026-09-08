@@ -28,7 +28,7 @@
 # Stage: base -- shared OS runtime deps + non-root user, used by every
 # later stage so builder and runtime never drift on system package versions.
 #############################################
-FROM python:3.11-slim-bookworm AS base
+FROM python:3.12-slim-bookworm AS base
 
 # poppler-utils, tesseract-ocr, libmagic1, libgl1, libglib2.0-0:
 #   runtime requirements of unstructured[pdf]'s hi_res layout/OCR strategy,
@@ -141,6 +141,7 @@ ENV PATH="/opt/venv/bin:${PATH}" \
 
 WORKDIR /app
 COPY app/ ./app/
+COPY pyproject.toml ./
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY sql/ ./sql/

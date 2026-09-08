@@ -47,6 +47,10 @@ _INSTRUCTION_OVERRIDE_PATTERNS: tuple[str, ...] = (
     r"ignore\s+(all\s+|the\s+)?(previous|above|prior)\s+instructions?",
     r"disregard\s+(all\s+|the\s+)?(previous|above|prior)\s+instructions?",
     r"system\s*(prompt|override)\b",
+    r"approve\s+(this\s+)?(rule|policy|clause|extraction)\b",
+    r"set\s+(all\s+|any\s+)?(upfront\s+)?margin(s)?\s*(threshold\s+)?(value\s+)?to\s+(0|zero)",
+    r"disable\s+(all\s+)?(verification|auditing|checks?|quotes?|guards?|security)\b",
+    r"bypass\s+(the\s+)?(hitl|human[\s-]+in[\s-]+the[\s-]+loop)(\s+review)?",
     r"new\s+instructions?\s+(follow|below)",
     r"you\s+are\s+now\s+(in\s+)?(developer|debug|admin|unrestricted)\s+mode",
     r"you\s+are\s+no\s+longer\s+(an?\s+)?extraction\s+agent",
@@ -56,8 +60,6 @@ _INSTRUCTION_OVERRIDE_PATTERNS: tuple[str, ...] = (
     r"set\s+fidelity_score\s+to\s+1\.?0?",
     r"output\s+your\s+(full\s+)?system\s+prompt",
     r"reveal\s+your\s+(system\s+)?instructions",
-    r"bypass\s+(the\s+)?hitl\s+review",
-    r"set\s+(any\s+)?(upfront\s+)?margin\s+(threshold\s+)?(value\s+)?to\s+0",
 )
 _COMPILED_OVERRIDE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _INSTRUCTION_OVERRIDE_PATTERNS]
 
@@ -142,3 +144,29 @@ def wrap_with_prompt_boundary(text: str, tag: str = "source_clause_text") -> tup
     opening = f"<{tag}_{nonce}>"
     closing = f"</{tag}_{nonce}>"
     return f"{opening}\n{text}\n{closing}", nonce
+
+
+def sanitize_metadata_field(value: str | None) -> str | None:
+    """Sanitizes metadata fields (e.g. circular_number, clause_number,
+    section_path, filename) by normalizing unicode, removing invisible
+    characters, and redacting known prompt-injection payloads."""
+    if not value or not isinstance(value, str):
+        return value
+    return sanitize_source_text(value).cleaned_text
+
+
+def sanitize_rag_chunk(chunk_dict: dict) -> dict:
+    """Sanitizes a sibling/RAG chunk dictionary (text, section_path, clause_number,
+    chunk_id) before embedding it into agent prompt context."""
+    sanitized = dict(chunk_dict)
+    if "text" in sanitized and isinstance(sanitized["text"], str):
+        sanitized["text"] = sanitize_source_text(sanitized["text"]).cleaned_text
+    if "clause_number" in sanitized and isinstance(sanitized["clause_number"], str):
+        sanitized["clause_number"] = sanitize_metadata_field(sanitized["clause_number"])
+    if "section_path" in sanitized:
+        sp = sanitized["section_path"]
+        if isinstance(sp, list):
+            sanitized["section_path"] = [sanitize_metadata_field(s) if isinstance(s, str) else s for s in sp]
+        elif isinstance(sp, str):
+            sanitized["section_path"] = sanitize_metadata_field(sp)
+    return sanitized

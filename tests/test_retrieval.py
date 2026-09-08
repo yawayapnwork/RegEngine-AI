@@ -109,6 +109,7 @@ class _FakeGraphSession:
         return _FakeResult(self._records)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 class TestHybridSearch:
     async def test_vector_only_search_returns_real_ranked_hits(self) -> None:

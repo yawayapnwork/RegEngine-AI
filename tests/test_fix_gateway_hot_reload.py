@@ -15,6 +15,15 @@ import pytest
 from app.db.models import Circular, Clause, CompiledRule
 from app.execution.policy_events import PolicyEvent, PolicyEventType
 from app.fix_gateway.hot_reload import FixGatewayHotReloadSubscriber, FixPolicyStore
+from app.fix_gateway.policy_manifest import _import_native
+
+
+@pytest.fixture(autouse=True)
+def _check_native():
+    try:
+        _import_native()
+    except (ImportError, ModuleNotFoundError):
+        pytest.skip("regengine_native extension is not built in this environment.")
 
 
 def _compiled_rule(rule_id: str, jsonlogic_ast: dict, circular_number: str = "SEBI/HO/MIRSD/2024/100", clause_number: str = "4.2.b") -> CompiledRule:

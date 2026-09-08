@@ -100,9 +100,9 @@ class TestDefaultViolatingFacts:
         assert facts == {"upfront_margin_pct": 15.0}
 
     def test_lt_threshold_gets_a_higher_value(self):
-        thresholds = [NumericalThreshold(metric="Leverage Ratio", operator=ComparisonOperator.LT, value=10, unit="x", verbatim_evidence="x")]
+        thresholds = [NumericalThreshold(metric="Single Borrower Exposure", operator=ComparisonOperator.LT, value=10, unit="%", verbatim_evidence="x")]
         facts = cli._default_violating_facts(thresholds)
-        assert facts["leverage_ratio"] == 15.0
+        assert facts["single_borrower_exposure_pct"] == 15.0
 
     def test_range_threshold_uses_upper_bound_plus_margin(self):
         thresholds = [

@@ -10,6 +10,7 @@ other part of the application only ever has to understand one token format.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -116,6 +117,13 @@ async def login(
         # wrong -- see LocalUserStore.authenticate's docstring on why.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
+    now = dt.datetime.now(dt.timezone.utc)
+    # In development/demo, grant step-up MFA claims (amr=["pwd", "mfa"]) on local login
+    # so human compliance officers can approve policies without external IdP infrastructure.
+    # In production/staging, local login only carries single-factor "pwd".
+    dev_mfa = settings.environment == "development"
+    amr = ["pwd", "mfa"] if dev_mfa else ["pwd"]
+
     signing_key = await _signing_key(settings)
     access_token, payload = create_access_token(
         subject=user.email,
@@ -123,6 +131,8 @@ async def login(
         settings=settings,
         signing_key=signing_key,
         tenant_id=None,
+        auth_time=now,
+        amr=amr,
     )
     logger.info("Local login succeeded for subject=%s roles=%s", user.email, [r.value for r in user.roles])
 

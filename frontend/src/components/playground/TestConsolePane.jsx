@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Loader2, Send, ShieldQuestion, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Play, Send, ShieldQuestion, XCircle } from "lucide-react";
 import Card from "../shared/Card";
 import CodeEditor from "./CodeEditor";
 
@@ -37,9 +37,8 @@ function ResultBanner({ result }) {
   );
 }
 
-/** Right panel (Requirement 1 + 2): the test transaction payload editor
- * and the real-time evaluation result, plus Requirement 3's "Submit for
- * HITL Review" workflow. */
+import { useState } from "react";
+
 export default function TestConsolePane({
   payloadText,
   onPayloadTextChange,
@@ -49,11 +48,41 @@ export default function TestConsolePane({
   submitError,
   onSubmitForReview,
   canSubmit,
+  onBackendEvaluate,
 }) {
+  const [backendResult, setBackendResult] = useState(null);
+  const [backendLoading, setBackendLoading] = useState(false);
+  const [backendError, setBackendError] = useState(null);
+
+  const handleBackendEval = async () => {
+    if (!onBackendEvaluate) return;
+    try {
+      setBackendLoading(true);
+      setBackendError(null);
+      const parsed = JSON.parse(payloadText);
+      const res = await onBackendEvaluate(parsed);
+      setBackendResult(res);
+    } catch (err) {
+      setBackendError(err instanceof Error ? err.message : "Live evaluation failed.");
+    } finally {
+      setBackendLoading(false);
+    }
+  };
+
   return (
     <Card className="flex flex-col overflow-hidden">
-      <div className="border-b border-ink-700 px-4 py-3">
+      <div className="border-b border-ink-700 px-4 py-3 flex items-center justify-between">
         <span className="text-sm font-medium text-slate-700">Test Transaction Payload</span>
+        {onBackendEvaluate && (
+          <button
+            onClick={handleBackendEval}
+            disabled={Boolean(payloadParseError) || backendLoading}
+            className="flex items-center gap-1.5 rounded-sm border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-40"
+          >
+            {backendLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            Live OPA Evaluate
+          </button>
+        )}
       </div>
 
       <div className="h-48 shrink-0 border-b border-ink-700">
@@ -62,7 +91,7 @@ export default function TestConsolePane({
           value={payloadText}
           onChange={onPayloadTextChange}
           tone={payloadParseError ? "error" : "default"}
-          placeholder='{"entity_type": "Stockbroker", "facts": {"upfront_margin_pct": 15}}'
+          placeholder='{"transaction_id": "TXN-001", "entity_type": "Stockbroker", "facts": {"upfront_margin_pct": 25}}'
         />
       </div>
       {payloadParseError && (
@@ -72,7 +101,63 @@ export default function TestConsolePane({
       )}
 
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto scrollbar-thin p-4">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Evaluation Result</span>
+        {backendResult && (
+          <div className="rounded-sm border border-indigo-200 bg-indigo-50/50 p-3 mb-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xs font-semibold uppercase tracking-wide text-indigo-800">
+                Backend OPA Execution Result
+              </span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-2xs font-bold ${
+                  backendResult.decision === "allow"
+                    ? "bg-green-100 text-green-800"
+                    : "bg-red-100 text-red-800"
+                }`}
+              >
+                {backendResult.decision === "allow" ? "COMPLIANT (ALLOW)" : "NON-COMPLIANT (DENY)"}
+              </span>
+            </div>
+            <div className="space-y-1 text-xs text-slate-700">
+              <p>
+                <span className="font-medium text-slate-500">Transaction ID:</span> {backendResult.transaction_id}
+              </p>
+              {backendResult.matched_policies?.[0] && (
+                <>
+                  <p>
+                    <span className="font-medium text-slate-500">Rule ID:</span>{" "}
+                    <span className="font-mono">{backendResult.matched_policies[0].rule_id}</span>
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-500">Clause:</span>{" "}
+                    &sect;{backendResult.matched_policies[0].clause_number || "3.2.1"}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-500">Policy Package:</span>{" "}
+                    <span className="font-mono text-2xs">{backendResult.matched_policies[0].package}</span>
+                  </p>
+                  {backendResult.matched_policies[0].violations?.length > 0 && (
+                    <div className="mt-1 border-t border-indigo-100 pt-1">
+                      <span className="font-medium text-red-700">Failed Conditions:</span>
+                      <ul className="list-inside list-disc text-red-600 mt-0.5">
+                        {backendResult.matched_policies[0].violations.map((v, i) => (
+                          <li key={i}>{v}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {backendError && (
+          <div className="rounded-sm border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+            {backendError}
+          </div>
+        )}
+
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Local Playground Evaluation</span>
         <ResultBanner result={result} />
 
         {result?.violations?.length > 0 && (
@@ -85,13 +170,6 @@ export default function TestConsolePane({
                 </li>
               ))}
             </ul>
-          </div>
-        )}
-
-        {result?.raw !== undefined && (
-          <div className="rounded-sm border border-ink-700 bg-ink-850 p-3">
-            <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-slate-500">Raw decision object</p>
-            <pre className="overflow-x-auto text-xs text-slate-500">{JSON.stringify(result.raw, null, 2)}</pre>
           </div>
         )}
       </div>

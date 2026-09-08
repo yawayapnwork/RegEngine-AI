@@ -25,6 +25,8 @@ def _var(path: str) -> dict:
 
 
 def _threshold_var_path(threshold: NumericalThreshold) -> str:
+    if threshold.canonical_fact:
+        return f"facts.{threshold.canonical_fact}"
     return f"facts.{metric_field_name(threshold.metric, threshold.unit)}"
 
 

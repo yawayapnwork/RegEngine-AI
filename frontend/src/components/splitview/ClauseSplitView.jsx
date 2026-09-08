@@ -5,7 +5,7 @@ import StatusBadge from "../shared/StatusBadge";
 import RawTextPane from "./RawTextPane";
 import RegoPane from "./RegoPane";
 
-export default function ClauseSplitView({ clauses }) {
+export default function ClauseSplitView({ clauses = [] }) {
   const [selectedRuleId, setSelectedRuleId] = useState(clauses[0]?.ruleId);
   const [activeIndex, setActiveIndex] = useState(null);
   const clause = clauses.find((c) => c.ruleId === selectedRuleId) ?? clauses[0];
@@ -14,6 +14,20 @@ export default function ClauseSplitView({ clauses }) {
     setSelectedRuleId(ruleId);
     setActiveIndex(null);
   };
+
+  if (!clauses || clauses.length === 0 || !clause) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-center">
+        <Card className="max-w-md p-6">
+          <FileText className="mx-auto mb-3 h-8 w-8 text-slate-400" />
+          <h3 className="text-base font-semibold text-slate-800">No Clauses Extracted Yet</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Upload a SEBI PDF in the Pipeline tab to parse circular clauses, extract compliance logic, and view the compiled Rego policies.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full gap-3">

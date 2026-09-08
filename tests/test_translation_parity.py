@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.slow
+
 from app.config import get_settings
 from app.models import ClauseChunk
 from app.translation_parity.alignment import align_clauses

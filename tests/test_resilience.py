@@ -7,6 +7,7 @@ repo's test suite); no live Celery worker, Redis, or Postgres needed.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 
 import httpx
@@ -242,6 +243,7 @@ class TestDeadLetterQueueSendAndGet:
 class TestDeadLetterQueueListingAndFiltering:
     async def test_list_all_returns_newest_first(self, dlq):
         first = await dlq.send(category=FailureCategory.PDF_PARSING, task_name="t", payload={}, exc=ValueError("a"))
+        await asyncio.sleep(0.01)
         second = await dlq.send(category=FailureCategory.LLM_EXTRACTION, task_name="t", payload={}, exc=ValueError("b"))
 
         entries = await dlq.list()

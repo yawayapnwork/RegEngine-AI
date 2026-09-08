@@ -79,6 +79,8 @@ def create_access_token(
     tenant_id: str | None = None,
     scope: list[str] | None = None,
     ttl_seconds: int | None = None,
+    auth_time: dt.datetime | None = None,
+    amr: list[str] | None = None,
 ) -> tuple[str, TokenPayload]:
     """Mints a self-issued access token. `signing_key` is the resolved
     HS256 secret or RS256 private key PEM -- the caller (app.api.auth_routes)
@@ -96,6 +98,8 @@ def create_access_token(
         iat=now,
         exp=now + dt.timedelta(seconds=ttl),
         jti=str(uuid.uuid4()),
+        auth_time=auth_time,
+        amr=amr or [],
     )
     # Built manually rather than payload.model_dump(mode="json"): that mode
     # serializes iat/exp to ISO-8601 strings, but PyJWT's encoder requires
@@ -115,6 +119,10 @@ def create_access_token(
         "exp": payload.exp,
         "jti": payload.jti,
     }
+    if payload.auth_time is not None:
+        claims["auth_time"] = int(payload.auth_time.timestamp())
+    if payload.amr:
+        claims["amr"] = payload.amr
     encoded = jwt.encode(claims, signing_key, algorithm=settings.jwt_algorithm)
     return encoded, payload
 

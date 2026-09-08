@@ -199,6 +199,7 @@ def nllb_settings() -> Settings:
     return Settings(localization_enabled=True, localization_translation_backend="nllb")
 
 
+@pytest.mark.slow
 class TestNLLBTranslation:
     def test_translates_hindi_margin_clause_preserving_the_number(self, nllb_settings):
         from app.localization.translation import get_translation_backend
@@ -226,6 +227,7 @@ class TestNLLBTranslation:
             get_translation_backend(Settings(localization_translation_backend="bogus"))
 
 
+@pytest.mark.slow
 class TestCrossLingualVerifier:
     def test_faithful_translation_scores_above_threshold(self, nllb_settings):
         similarity = compute_cross_lingual_similarity(HINDI_MARGIN_CLAUSE, ENGLISH_MARGIN_CLAUSE, nllb_settings.localization_similarity_model_id)
@@ -281,6 +283,7 @@ class TestDetectRegionalLanguage:
         assert detect_regional_language("!@#$ %^&* 1234") is None
 
 
+@pytest.mark.slow
 class TestProcessRegionalText:
     def test_end_to_end_hindi_clause(self, nllb_settings):
         result = process_regional_text(HINDI_MARGIN_CLAUSE, nllb_settings, entity_phrases=["स्टॉक ब्रोकर"])

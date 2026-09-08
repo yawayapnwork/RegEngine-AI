@@ -58,7 +58,8 @@ import json
 
 from app.agents.schemas import ComparisonOperator, ExtractedComplianceRule, NumericalThreshold
 from app.compiler.models import CompiledRego
-from app.compiler.naming import clause_slug, circular_slug, metric_field_name, rego_package_name
+from app.compiler.naming import UndefinedFactError, clause_slug, circular_slug, metric_field_name, rego_package_name
+from app.regulatory.facts import get_canonical_fact
 from app.regulatory.taxonomy import resolve_domain
 
 _INDENT = "    "
@@ -91,6 +92,12 @@ def _entity_guard(rule: ExtractedComplianceRule) -> str | None:
 
 
 def _threshold_field(threshold: NumericalThreshold) -> str:
+    if threshold.canonical_fact:
+        if not get_canonical_fact(threshold.canonical_fact):
+            raise UndefinedFactError(
+                f"Threshold specifies undefined canonical fact '{threshold.canonical_fact}'"
+            )
+        return threshold.canonical_fact
     return metric_field_name(threshold.metric, threshold.unit)
 
 

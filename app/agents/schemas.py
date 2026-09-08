@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.regulatory.taxonomy import Regulator
 
@@ -65,12 +65,31 @@ class NumericalThreshold(BaseModel):
     rounded, or defaulted by the model."""
 
     metric: str = Field(..., description="What is being measured, e.g. 'Upfront Margin'.")
+    canonical_fact: str | None = Field(
+        None, description="Canonical fact identifier from the regulatory taxonomy, e.g. 'upfront_margin_pct'."
+    )
     operator: ComparisonOperator
     value: float = Field(..., description="Primary numeric value, e.g. 20 for '>= 20%'.")
     value_upper: float | None = Field(None, description="Upper bound, only set when operator == RANGE.")
     unit: str = Field(..., description="Unit of the value, e.g. '%', 'INR crore', 'days'.")
     applies_to: str | None = Field(None, description="Entity or instrument the threshold applies to, if scoped.")
     verbatim_evidence: str = Field(..., description="Exact quoted span from the source text containing this number.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_canonical_fact(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("canonical_fact") and data.get("metric"):
+                from app.regulatory.facts import resolve_canonical_fact
+                res = resolve_canonical_fact(
+                    data.get("metric"),
+                    data.get("unit"),
+                    data.get("value"),
+                    data.get("value_upper"),
+                )
+                if res.is_valid and res.canonical_identifier:
+                    data["canonical_fact"] = res.canonical_identifier
+        return data
 
     @field_validator("value_upper")
     @classmethod

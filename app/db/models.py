@@ -73,6 +73,9 @@ _HITL_REASON_CODES = (
     "no_deterministic_logic",
     "conflicting_thresholds",
     "unresolved_entity",
+    "unknown_fact_metric",
+    "invalid_metric_unit",
+    "invalid_threshold_value",
 )
 _HITL_SEVERITIES = ("blocking", "advisory")
 _HITL_REVIEW_STATUSES = ("PENDING", "IN_REVIEW", "RESOLVED", "REJECTED")

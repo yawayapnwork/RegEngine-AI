@@ -81,6 +81,12 @@ async def require_step_up_mfa(
         # that dependency ever being misconfigured, not the primary check.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Step-up MFA is not applicable to machine credentials.")
 
+    # In development/demo, allow local Compliance_Officer to proceed if
+    # step_up_mfa_enforce_in_dev is False (default). In staging/production,
+    # or if step_up_mfa_enforce_in_dev is True, strict OIDC step-up MFA is enforced.
+    if settings.environment == "development" and not settings.step_up_mfa_enforce_in_dev:
+        return principal
+
     if principal.auth_time is None:
         raise _step_up_challenge(settings, "no_auth_time_claim")
 

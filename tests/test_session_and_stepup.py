@@ -38,9 +38,11 @@ class _FakeRedis:
 
 def _settings(**overrides) -> Settings:
     base = dict(
+        environment="production",
         jwt_algorithm="HS256", jwt_secret_key="test-secret-key-not-for-production",
         session_idle_timeout_seconds=900, session_absolute_timeout_seconds=28800,
         step_up_mfa_max_age_seconds=300, step_up_required_amr_values=["mfa", "otp"],
+        step_up_mfa_enforce_in_dev=True,
     )
     base.update(overrides)
     return Settings(**base)
@@ -146,3 +148,83 @@ class TestStepUpMFA:
         with pytest.raises(HTTPException) as exc_info:
             await require_step_up_mfa(principal=principal, settings=settings)
         assert exc_info.value.status_code == 403
+
+    async def test_development_compliance_officer_can_approve(self) -> None:
+        """In development/demo mode, a local Compliance Officer can approve without external IdP MFA."""
+        dev_settings = _settings(environment="development", step_up_mfa_enforce_in_dev=False)
+        principal = _principal(auth_time=None, amr=[])
+        result = await require_step_up_mfa(principal=principal, settings=dev_settings)
+        assert result is principal
+
+    async def test_development_login_token_carries_step_up_mfa_claims(self) -> None:
+        """create_access_token with dev login claims round-trips through JWT decode and satisfies step-up."""
+        from app.security.jwt import create_access_token, decode_access_token
+        from app.security.auth import authenticate_token
+
+        dev_settings = _settings(environment="development", step_up_mfa_enforce_in_dev=False, jwt_issuer="regengine-ai", jwt_audience="regengine-ai-api")
+        now = dt.datetime.now(dt.timezone.utc)
+        token, _ = create_access_token(
+            subject="officer.jane@regengine.dev",
+            roles=[Role.COMPLIANCE_OFFICER],
+            settings=dev_settings,
+            signing_key=dev_settings.jwt_secret_key,
+            auth_time=now,
+            amr=["pwd", "mfa"],
+        )
+        payload = decode_access_token(token, dev_settings, local_verification_key=dev_settings.jwt_secret_key)
+        assert payload.auth_time is not None
+        assert "mfa" in payload.amr
+
+    async def test_unauthorized_user_cannot_approve(self) -> None:
+        """Machine credentials or unauthorized callers are forbidden from approval."""
+        from app.security.dependencies import require_roles
+
+        # Machine credential is explicitly rejected by step-up MFA
+        settings = _settings(environment="development", step_up_mfa_enforce_in_dev=False)
+        machine_principal = _principal(roles=[Role.BROKER_API_CLIENT], tenant_id="BROKER123")
+        with pytest.raises(HTTPException) as exc_info:
+            await require_step_up_mfa(principal=machine_principal, settings=settings)
+        assert exc_info.value.status_code == 403
+
+        # Non-compliance officer role is rejected by require_roles
+        role_check = require_roles(Role.COMPLIANCE_OFFICER)
+        admin_principal = _principal(roles=[Role.SYSTEM_ADMIN])
+        with pytest.raises(HTTPException) as exc_info:
+            await role_check(principal=admin_principal)
+        assert exc_info.value.status_code == 403
+
+    async def test_production_still_requires_step_up_mfa(self) -> None:
+        """In production, single-factor password-only local login is rejected by step-up MFA."""
+        prod_settings = _settings(environment="production", step_up_mfa_enforce_in_dev=True)
+        now = dt.datetime.now(dt.timezone.utc)
+        principal = _principal(auth_time=now, amr=["pwd"])
+        with pytest.raises(HTTPException) as exc_info:
+            await require_step_up_mfa(principal=principal, settings=prod_settings)
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["reason"] == "mfa_not_satisfied"
+
+    async def test_forged_or_missing_claims_rejected_in_production(self) -> None:
+        """In production, missing auth_time, stale auth_time, and invalid amr are rejected."""
+        prod_settings = _settings(environment="production", step_up_mfa_enforce_in_dev=True, step_up_mfa_max_age_seconds=60)
+
+        # Missing auth_time
+        p_no_auth = _principal(auth_time=None, amr=["mfa"])
+        with pytest.raises(HTTPException) as exc:
+            await require_step_up_mfa(principal=p_no_auth, settings=prod_settings)
+        assert exc.value.status_code == 401
+        assert exc.value.detail["reason"] == "no_auth_time_claim"
+
+        # Stale auth_time
+        p_stale = _principal(auth_time=dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1), amr=["mfa"])
+        with pytest.raises(HTTPException) as exc:
+            await require_step_up_mfa(principal=p_stale, settings=prod_settings)
+        assert exc.value.status_code == 401
+        assert exc.value.detail["reason"] == "auth_event_too_old"
+
+        # Unrecognized / insufficient amr
+        p_wrong_amr = _principal(auth_time=dt.datetime.now(dt.timezone.utc), amr=["single_factor", "sms_unverified"])
+        with pytest.raises(HTTPException) as exc:
+            await require_step_up_mfa(principal=p_wrong_amr, settings=prod_settings)
+        assert exc.value.status_code == 401
+        assert exc.value.detail["reason"] == "mfa_not_satisfied"
+

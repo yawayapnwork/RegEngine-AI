@@ -315,19 +315,26 @@ async def step_ingest(pdf_source: str | None, settings: Settings) -> tuple[Parse
 
 async def step_extract_and_audit(chunk: ClauseChunk, settings: Settings, offline: bool) -> AuditedComplianceRule:
     _step_header(2)
+    from app.agents.providers import MissingAPIKeyError, get_provider
+
     if offline:
-        console.print("[yellow]--offline-agents set: skipping CrewAI/Hugging Face, using a canned rule.[/yellow]")
-        audited = _canned_audited_rule(chunk)
+        settings.llm_provider = "offline"
+
+    provider = get_provider(settings)
+    if provider.provider_type.value == "offline":
+        console.print("[yellow]Using deterministic local rule extractor (offline demo mode, no external LLM API key required).[/yellow]")
     else:
-        if not settings.hf_api_token:
-            raise PipelineError(
-                "HUGGINGFACEHUB_API_TOKEN is not set. Configure it in .env, or re-run with --offline-agents "
-                "to use a canned rule instead of the live CrewAI extraction/audit agents."
-            )
-        try:
-            audited = await extract_and_audit_clause(chunk, settings=settings)
-        except Exception as exc:  # noqa: BLE001 - surface any agent/LLM failure as a diagnosed pipeline error
-            raise PipelineError(f"Extraction/audit agent pipeline failed: {exc!r}") from exc
+        console.print(f"[cyan]Using configured external LLM provider: [bold]{provider.provider_type.value}[/bold][/cyan]")
+
+    try:
+        audited = await extract_and_audit_clause(chunk, settings=settings)
+    except MissingAPIKeyError as exc:
+        raise PipelineError(
+            f"{exc} Configure it in .env, or re-run with --offline-agents (or LLM_PROVIDER=offline) "
+            "to run deterministically without an external LLM API key."
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - surface any agent/LLM failure as a diagnosed pipeline error
+        raise PipelineError(f"Extraction/audit agent pipeline failed: {exc!r}") from exc
 
     table = Table(show_header=False, box=None)
     table.add_row("Rule ID", audited.rule.rule_id)
@@ -512,8 +519,11 @@ async def run_pipeline(
 )
 @click.option(
     "--offline-agents", is_flag=True, default=False,
-    help="Skip the live CrewAI/Hugging Face extraction+audit agents and use a canned, deterministic "
-         "'Upfront Margin >= 20%' rule instead. Use this when HUGGINGFACEHUB_API_TOKEN isn't configured.",
+    help="Skip external LLM APIs and run the deterministic rule extractor in offline mode.",
+)
+@click.option(
+    "--provider", type=click.Choice(["offline", "openai", "anthropic", "huggingface"], case_sensitive=False),
+    default=None, help="Configure the LLM provider explicitly (offline, openai, anthropic, huggingface).",
 )
 @click.option("--opa-url", default="http://localhost:8181", show_default=True, help="OPA server base URL.")
 @click.option("--opa-timeout", default=5.0, show_default=True, help="OPA HTTP request timeout, in seconds.")
@@ -532,6 +542,7 @@ async def run_pipeline(
 def main(
     pdf_source: str | None,
     offline_agents: bool,
+    provider: str | None,
     opa_url: str,
     opa_timeout: float,
     ledger_database_url: str,
@@ -542,6 +553,12 @@ def main(
 ) -> None:
     """Run RegEngine AI's entire pipeline -- ingest, extract, compile,
     deploy, simulate, and audit -- in a single command."""
+    if provider:
+        import os
+        os.environ["LLM_PROVIDER"] = provider.lower()
+    elif offline_agents:
+        import os
+        os.environ["LLM_PROVIDER"] = "offline"
     facts_override: dict[str, Any] | None = None
     if facts_json is not None:
         try:

@@ -59,10 +59,16 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: float = 30.0
 
     # --- Object storage (app.storage.object_store) ---
-    # S3-compatible (Backblaze B2 / Cloudflare R2 / AWS S3) staging area for
-    # manually-uploaded PDFs: the web process uploads here and hands the
-    # Celery worker (process_manual_upload_task) just the object key, since
-    # a multi-ten-MB file can't travel through a Redis/Celery task argument.
+    # "local" (default for POC & dev) saves to local filesystem in storage_local_dir;
+    # "s3" uses S3-compatible object storage (MinIO / AWS S3 / B2 / R2).
+    storage_backend: str = Field(
+        default="local",
+        validation_alias=AliasChoices("STORAGE_BACKEND", "storage_backend"),
+    )
+    storage_local_dir: str = Field(
+        default="data/uploads",
+        validation_alias=AliasChoices("STORAGE_LOCAL_DIR", "storage_local_dir"),
+    )
     object_storage_endpoint_url: str | None = None
     object_storage_bucket: str | None = None
     object_storage_access_key_id: str | None = None
@@ -104,7 +110,30 @@ class Settings(BaseSettings):
     # fires from inside the sync path).
     supersession_auto_detection_enabled: bool = False
 
-    # --- Compliance rule extraction (CrewAI dual-agent pipeline) ---
+    # --- Compliance rule extraction (LLM Provider & Extraction Pipeline) ---
+    # Provider selection: 'offline' (default/demo), 'openai', 'anthropic', 'huggingface'
+    llm_provider: str = Field(
+        default="offline",
+        validation_alias=AliasChoices("LLM_PROVIDER", "llm_provider"),
+    )
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "openai_api_key"),
+    )
+    openai_model_id: str = Field(
+        default="gpt-4o",
+        validation_alias=AliasChoices("OPENAI_MODEL_ID", "OPENAI_MODEL", "openai_model_id"),
+    )
+    anthropic_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "anthropic_api_key"),
+    )
+    anthropic_model_id: str = Field(
+        default="claude-3-5-sonnet-20241022",
+        validation_alias=AliasChoices("ANTHROPIC_MODEL_ID", "ANTHROPIC_MODEL", "anthropic_model_id"),
+    )
+    agent_timeout_seconds: int = 60
+
     # Hugging Face Inference token -- accepts either env var name (HF's own
     # tooling is inconsistent about which one it reads: huggingface_hub's
     # CLI/login flow writes HF_TOKEN, but a lot of existing docs/tutorials
@@ -114,14 +143,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("HUGGINGFACEHUB_API_TOKEN", "HF_TOKEN", "hf_api_token"),
     )
-    # Default model for every CrewAI agent / litellm call in this pipeline
-    # (app.agents.crew._build_llm, app.diffing.llm_classifier,
-    # app.explainability.llm_explainer, app.llm_ops.cached_extraction's
-    # frontier tier) unless a call site overrides it explicitly (e.g.
-    # agent_fallback_model below). Bare repo id, NOT litellm's
-    # "huggingface/<repo_id>" form -- call sites add that prefix
-    # themselves, matching litellm's own provider-routing convention.
-    hf_model_id: str = "Qwen/Qwen2.5-72B-Instruct"
+    # Default model for Hugging Face Inference
+    hf_model_id: str = Field(
+        default="Qwen/Qwen2.5-72B-Instruct",
+        validation_alias=AliasChoices("HF_MODEL_ID", "HF_MODEL", "HUGGINGFACE_MODEL_ID", "hf_model_id"),
+    )
     agent_verbose: bool = False
     agent_max_rpm: int = 20
 
@@ -501,6 +527,9 @@ class Settings(BaseSettings):
         default_factory=lambda: ["mfa", "otp", "hwk", "swk", "sms", "face", "fpt"]
     )
     step_up_redirect_base_url: str | None = None  # IdP re-auth URL template surfaced to the client on a 401 step-up challenge
+    # When False in development mode, local Compliance_Officer logins can approve policies
+    # without requiring an external IdP MFA challenge. Always strictly enforced in staging/production.
+    step_up_mfa_enforce_in_dev: bool = False
 
     # --- SAML 2.0 (app.api.saml_routes, via python3-saml) ---
     saml_enabled: bool = False
@@ -738,7 +767,7 @@ class Settings(BaseSettings):
     # on changes app.agents.crew.build_extraction_task's actual prompt
     # construction (sanitization + a per-call random boundary nonce), so
     # it is a deliberate, reviewed opt-in, not silently always-on.
-    redteam_defense_enabled: bool = False
+    redteam_defense_enabled: bool = True
     redteam_key_prefix: str = "regengine:redteam"  # security-vault telemetry (app.redteam.telemetry)
     # guardrails-ai (app.redteam.output_guard) has a default telemetry
     # channel that exports usage spans to an external endpoint via

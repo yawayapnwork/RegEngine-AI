@@ -7,28 +7,71 @@ import TransactionRow from "./TransactionRow";
 const LIVE_INTERVAL_MS = 3500;
 const MAX_FEED_LENGTH = 40;
 
-export default function AuditVault({ initialFeed }) {
+export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyChain }) {
   const [feed, setFeed] = useState(initialFeed);
   const [isLive, setIsLive] = useState(true);
   const [latestSeq, setLatestSeq] = useState(null);
   const [tamperedSeq, setTamperedSeq] = useState(null);
   const [verifyResult, setVerifyResult] = useState(null);
+  const [loading, setLoading] = useState(false);
   const newestRef = useRef(initialFeed[0]);
 
   useEffect(() => {
+    setFeed(initialFeed);
+    newestRef.current = initialFeed[0];
+  }, [initialFeed]);
+
+  useEffect(() => {
     if (!isLive) return undefined;
-    const interval = setInterval(() => {
-      const next = generateNextEntry(newestRef.current);
-      newestRef.current = next;
-      setFeed((prev) => [next, ...prev].slice(0, MAX_FEED_LENGTH));
-      setLatestSeq(next.sequenceNum);
-      setVerifyResult(null);
+    const interval = setInterval(async () => {
+      if (onRefreshFeed) {
+        try {
+          const fresh = await onRefreshFeed();
+          if (fresh && fresh.length > 0) {
+            setFeed(fresh);
+            if (fresh[0]?.sequenceNum !== newestRef.current?.sequenceNum) {
+              setLatestSeq(fresh[0]?.sequenceNum);
+              newestRef.current = fresh[0];
+            }
+          }
+        } catch (e) {
+          // ignore poll errors
+        }
+      } else {
+        const next = generateNextEntry(newestRef.current || { sequenceNum: 100, currentHash: "genesis" });
+        newestRef.current = next;
+        setFeed((prev) => [next, ...prev].slice(0, MAX_FEED_LENGTH));
+        setLatestSeq(next.sequenceNum);
+      }
     }, LIVE_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [isLive]);
+  }, [isLive, onRefreshFeed]);
 
-  const runVerification = () => {
-    setVerifyResult(verifyFeed(feed));
+  const runVerification = async () => {
+    if (onVerifyChain) {
+      setLoading(true);
+      try {
+        const res = await onVerifyChain();
+        setVerifyResult({
+          valid: res.valid,
+          entriesChecked: res.entries_checked ?? res.entriesChecked ?? feed.length,
+          breaks: (res.breaks || []).map((b) => ({
+            sequenceNum: b.sequence_num ?? b.sequenceNum,
+            reason: b.reason || "Hash mismatch",
+          })),
+        });
+      } catch (err) {
+        setVerifyResult({
+          valid: false,
+          entriesChecked: feed.length,
+          breaks: [{ sequenceNum: 0, reason: err instanceof Error ? err.message : "Verification request failed" }],
+        });
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setVerifyResult(verifyFeed(feed));
+    }
   };
 
   const simulateTamper = () => {

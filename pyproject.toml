@@ -6,4 +6,18 @@ dependencies = []
 
 [build-system]
 requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_smeta"
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "unit: fast isolated unit tests",
+    "integration: service and integration tests",
+    "e2e: end-to-end workflow tests",
+    "slow: tests requiring heavy model downloads or slow fixtures",
+]

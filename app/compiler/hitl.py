@@ -189,6 +189,69 @@ def flag_audit_not_approved(audited: AuditedComplianceRule) -> list[HITLFlag]:
     ]
 
 
+from app.regulatory.facts import FactValidationStatus, resolve_canonical_fact
+
+
+def flag_unmapped_or_invalid_facts(rule: ExtractedComplianceRule) -> list[HITLFlag]:
+    """Ensures every NumericalThreshold in deterministic_logic maps cleanly to a
+    canonical fact in the regulatory taxonomy, with permitted units and valid
+    numeric threshold ranges.
+
+    If no canonical mapping exists, the rule MUST be flagged as BLOCKING so it
+    is marked REVIEW_REQUIRED and cannot be compiled with silently invented field names.
+    Source clause evidence supporting the metric is retained on the flag.
+    """
+    flags: list[HITLFlag] = []
+    for i, t in enumerate(rule.deterministic_logic):
+        res = resolve_canonical_fact(
+            metric=t.metric,
+            unit=t.unit,
+            value=t.value,
+            value_upper=t.value_upper,
+        )
+        if res.status == FactValidationStatus.MISSING_MAPPING:
+            flags.append(
+                HITLFlag(
+                    flag_id=_new_flag_id(),
+                    rule_id=rule.rule_id,
+                    reason_code=HITLReasonCode.UNKNOWN_FACT_METRIC,
+                    severity=HITLSeverity.BLOCKING,
+                    description=(
+                        f"Metric '{t.metric}' cannot be mapped to any canonical regulatory fact "
+                        "in the taxonomy. Silent field name invention is prohibited. "
+                        "Human review is required to establish a canonical mapping."
+                    ),
+                    source_excerpt=t.verbatim_evidence,
+                    field_path=f"deterministic_logic[{i}].metric",
+                )
+            )
+        elif res.status == FactValidationStatus.WRONG_UNIT:
+            flags.append(
+                HITLFlag(
+                    flag_id=_new_flag_id(),
+                    rule_id=rule.rule_id,
+                    reason_code=HITLReasonCode.INVALID_METRIC_UNIT,
+                    severity=HITLSeverity.BLOCKING,
+                    description=res.error_message or f"Unit '{t.unit}' is invalid for fact.",
+                    source_excerpt=t.verbatim_evidence,
+                    field_path=f"deterministic_logic[{i}].unit",
+                )
+            )
+        elif res.status == FactValidationStatus.WRONG_THRESHOLD:
+            flags.append(
+                HITLFlag(
+                    flag_id=_new_flag_id(),
+                    rule_id=rule.rule_id,
+                    reason_code=HITLReasonCode.INVALID_THRESHOLD_VALUE,
+                    severity=HITLSeverity.BLOCKING,
+                    description=res.error_message or f"Threshold value {t.value} is out of bounds.",
+                    source_excerpt=t.verbatim_evidence,
+                    field_path=f"deterministic_logic[{i}].value",
+                )
+            )
+    return flags
+
+
 def collect_hitl_flags(audited: AuditedComplianceRule) -> list[HITLFlag]:
     """Run every flagging check and return the combined list. Order is
     significant only for readability in a review UI (blocking-cause checks
@@ -197,6 +260,7 @@ def collect_hitl_flags(audited: AuditedComplianceRule) -> list[HITLFlag]:
     flags: list[HITLFlag] = []
     flags += flag_audit_not_approved(audited)
     flags += flag_low_confidence(rule)
+    flags += flag_unmapped_or_invalid_facts(rule)
     flags += flag_conflicting_thresholds(rule)
     flags += flag_no_deterministic_logic(rule)
     flags += flag_qualitative_directives(rule)

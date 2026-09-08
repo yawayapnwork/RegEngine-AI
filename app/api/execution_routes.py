@@ -3,6 +3,7 @@ evaluation, legacy SFTP/CDC batch ingestion, and HITL case management."""
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -185,3 +186,34 @@ async def resolve_hitl_case(
         dispatch_webhook_task.delay(case.transaction.callback_url, event.model_dump(mode="json"))
 
     return case
+
+
+# --- Requirement 4: Live Hash-Chained Audit Ledger Inspection & Verification ---
+
+
+@router.get("/ledger/entries", response_model=list[dict[str, Any]], dependencies=[_require_hitl_read_role])
+async def list_ledger_entries(
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Retrieve the most recent hash-chained ledger rows for audit inspection."""
+    from sqlalchemy import select
+    from app.ledger.db import get_ledger_engine
+    from app.ledger.models import compliance_audit_ledger
+
+    engine = get_ledger_engine()
+    async with engine.connect() as conn:
+        query = select(compliance_audit_ledger).order_by(compliance_audit_ledger.c.sequence_num.desc()).limit(limit)
+        rows = (await conn.execute(query)).mappings().all()
+        return [dict(r) for r in rows]
+
+
+@router.get("/ledger/verify", dependencies=[_require_hitl_read_role])
+async def verify_ledger_chain() -> dict[str, Any]:
+    """Cryptographically verify the integrity of the audit ledger's SHA-256 hash chain."""
+    from app.ledger.db import get_ledger_engine
+    from app.ledger.verifier import verify_chain
+
+    engine = get_ledger_engine()
+    res = await verify_chain(engine)
+    return res.model_dump(mode="json")
+

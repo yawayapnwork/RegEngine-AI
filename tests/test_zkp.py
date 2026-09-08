@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+
+pytestmark = pytest.mark.slow
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import Settings

@@ -52,19 +52,19 @@ from app.execution.models import Decision
 logger = logging.getLogger("flink_stream_processor")
 
 try:
-    from pyflink.common import Duration, WatermarkStrategy
-    from pyflink.common.serialization import SimpleStringSchema
-    from pyflink.common.typeinfo import Types
-    from pyflink.datastream import CheckpointingMode, RuntimeContext, StreamExecutionEnvironment
-    from pyflink.datastream.connectors.kafka import (
+    from pyflink.common import Duration, WatermarkStrategy  # type: ignore[import-not-found]
+    from pyflink.common.serialization import SimpleStringSchema  # type: ignore[import-not-found]
+    from pyflink.common.typeinfo import Types  # type: ignore[import-not-found]
+    from pyflink.datastream import CheckpointingMode, RuntimeContext, StreamExecutionEnvironment  # type: ignore[import-not-found]
+    from pyflink.datastream.connectors.kafka import (  # type: ignore[import-not-found]
         DeliveryGuarantee,
         KafkaOffsetsInitializer,
         KafkaRecordSerializationSchema,
         KafkaSink,
         KafkaSource,
     )
-    from pyflink.datastream.functions import KeyedProcessFunction, RichMapFunction
-    from pyflink.datastream.state import EmbeddedRocksDBStateBackend, ListStateDescriptor, StateTtlConfig
+    from pyflink.datastream.functions import KeyedProcessFunction, RichMapFunction  # type: ignore[import-not-found]
+    from pyflink.datastream.state import EmbeddedRocksDBStateBackend, ListStateDescriptor, StateTtlConfig  # type: ignore[import-not-found]
 
     PYFLINK_AVAILABLE = True
 except ImportError:

@@ -108,15 +108,31 @@ async def create_upload_job(
             detail=f"File exceeds {settings.max_upload_mb}MB limit.",
         )
 
+    from pathlib import Path
+    from app.storage.object_store import (
+        FileTooLargeError,
+        InvalidFileTypeError,
+        ObjectStorageNotConfiguredError,
+        PathTraversalError,
+        upload_bytes,
+    )
+
+    clean_filename = Path(file.filename or "circular.pdf").name
+    if not clean_filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only PDF files (.pdf) are supported for regulatory circular ingestion.",
+        )
+
     job_id = str(uuid.uuid4())
-    object_key = f"uploads/{job_id}/{file.filename or 'circular.pdf'}"
+    object_key = f"uploads/{job_id}/{clean_filename}"
 
     try:
         await upload_bytes(object_key, body, content_type=file.content_type or "application/pdf")
 
         job = IngestionUploadJob(
             job_id=job_id,
-            filename=file.filename or "circular.pdf",
+            filename=clean_filename,
             object_key=object_key,
             status="queued",
             created_by=principal.subject,
@@ -125,22 +141,24 @@ async def create_upload_job(
         await session.commit()
 
         process_manual_upload_task.delay(job_id)
+    except (InvalidFileTypeError, PathTraversalError) as exc:
+        logger.warning("Upload validation failed for '%s': %s", file.filename, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Upload rejected: {exc}",
+        ) from exc
+    except FileTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
     except ObjectStorageNotConfiguredError as exc:
-        # An unhandled exception here would still reach the client as a
-        # 500 -- but crucially it would skip CORSMiddleware's normal
-        # response-header injection (that only wraps a clean response, not
-        # a raw ASGI-level crash), so the browser sees no
-        # Access-Control-Allow-Origin header and reports a generic "Failed
-        # to fetch" instead of this endpoint's actual problem. Catching and
-        # re-raising as HTTPException keeps this on the normal response
-        # path so CORS headers -- and a debuggable error message -- still
-        # reach the caller.
         logger.error("Manual upload rejected: object storage not configured: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Upload storage is not configured on this deployment.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001 - final safety net, never leak internals; see comment above
+    except Exception as exc:  # noqa: BLE001 - final safety net, never leak internals
         logger.exception("Unhandled error creating upload job for '%s'", file.filename)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

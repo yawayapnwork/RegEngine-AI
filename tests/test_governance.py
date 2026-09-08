@@ -16,6 +16,7 @@ import datetime as dt
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.analytics.models import Granularity, ReportPeriod
@@ -526,7 +527,9 @@ class TestGovernanceReporting:
         await seed_agent_inventory(db_session)
         store = KillSwitchStore(_FakeRedis(), "test:gov")
         await run_kill_switch_drill(store, db_session, scope=KillSwitchScope.GLOBAL, actor="admin@x")
-
+        events_res = await db_session.execute(select(KillSwitchEvent))
+        for ev in events_res.scalars().all():
+            ev.occurred_at = day
         await db_session.commit()
 
         period = ReportPeriod(start_date=dt.date(2026, 8, 1), end_date=dt.date(2026, 8, 31), granularity=Granularity.MONTHLY)

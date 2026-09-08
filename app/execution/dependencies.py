@@ -65,8 +65,16 @@ def get_policy_event_publisher() -> PolicyEventPublisher:
 
 def get_policy_publisher(
     event_publisher: PolicyEventPublisher = Depends(get_policy_event_publisher),
+    opa_engine: OPAEngine = Depends(get_opa_engine),
+    policy_registry: PolicyRegistry = Depends(get_policy_registry),
+    policy_cache: PolicyCache = Depends(get_policy_cache),
 ) -> PolicyPublisher:
-    return PolicyPublisher(event_publisher)
+    return PolicyPublisher(
+        event_publisher,
+        opa_engine=opa_engine,
+        policy_registry=policy_registry,
+        policy_cache=policy_cache,
+    )
 
 
 def get_evaluator(

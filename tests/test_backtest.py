@@ -52,11 +52,11 @@ class TestJsonLogicEvaluatorAgainstRealCompilerOutput:
     def test_range_threshold(self) -> None:
         rule = _margin_rule()
         rule = rule.model_copy(update={"deterministic_logic": [
-            NumericalThreshold(metric="Leverage", operator=ComparisonOperator.RANGE, value=1, value_upper=5, unit="x", verbatim_evidence="1x-5x")
+            NumericalThreshold(metric="Net Worth", operator=ComparisonOperator.RANGE, value=1, value_upper=5, unit="inr crore", verbatim_evidence="1-5 crore")
         ]})
         jl = compile_rule_to_jsonlogic(rule)
-        assert evaluate_jsonlogic(jl.logic, {"entity_type": "Stockbroker", "facts": {"leverage": 3}}) is True
-        assert evaluate_jsonlogic(jl.logic, {"entity_type": "Stockbroker", "facts": {"leverage": 8}}) is False
+        assert evaluate_jsonlogic(jl.logic, {"entity_type": "Stockbroker", "facts": {"net_worth_inr_crore": 3}}) is True
+        assert evaluate_jsonlogic(jl.logic, {"entity_type": "Stockbroker", "facts": {"net_worth_inr_crore": 8}}) is False
 
     def test_missing_fact_raises(self) -> None:
         jl = compile_rule_to_jsonlogic(_margin_rule(25))

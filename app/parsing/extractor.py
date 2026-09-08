@@ -163,6 +163,44 @@ def _partition_with_tika(path: str, server_url: str) -> list[dict]:
     return out
 
 
+def _partition_with_pypdf(path: str) -> list[dict]:
+    """Native pypdf extraction for text-layer PDFs. Requires no external
+    Java (Tika) or poppler/detectron2 (Unstructured) system dependencies.
+    Produces elements in the identical shape _partition_with_unstructured /
+    _partition_with_tika emit."""
+    import pypdf  # light dependency, native Python
+
+    reader = pypdf.PdfReader(path)
+    out: list[dict] = []
+    for page_num, page in enumerate(reader.pages, start=1):
+        try:
+            page_text = page.extract_text() or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pypdf extraction error on page %d of '%s': %r", page_num, path, exc)
+            continue
+
+        for line in page_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            out.append(
+                {
+                    "text": stripped,
+                    "category": "UncategorizedText",
+                    "page_number": page_num,
+                    "coordinates": None,
+                    "text_as_html": None,
+                }
+            )
+    return out
+
+
+def _has_text(elements: list[dict]) -> bool:
+    """Return True if at least one element contains non-whitespace text."""
+    return bool(elements) and any(bool(el.get("text", "").strip()) for el in elements)
+
+
+
 def _extract_metadata_from_elements(
     raw_elements: list[dict], filename: str | None, source_tag: str | None = None
 ) -> CircularMetadata:
@@ -394,24 +432,49 @@ async def extract_pdf(
     _validate_pdf_bytes(file_bytes)
 
     async def _run() -> list[dict]:
-        try:
-            if settings.extraction_backend == "unstructured":
-                return await asyncio.to_thread(
-                    _partition_with_unstructured, str(source_path), settings.unstructured_strategy
-                )
-            return await asyncio.to_thread(_partition_with_tika, str(source_path), settings.tika_server_url)
-        except Exception as primary_exc:  # noqa: BLE001 - deliberate fallback boundary
-            logger.warning("Primary extraction backend %s failed: %s", settings.extraction_backend, primary_exc)
+        # Extraction cascade order:
+        # 1. unstructured (if primary or default)
+        # 2. tika
+        # 3. pypdf
+        # If a primary backend is explicitly configured, that candidate is attempted first.
+        candidate_order = [settings.extraction_backend]
+        for b in ("unstructured", "tika", "pypdf"):
+            if b not in candidate_order:
+                candidate_order.append(b)
+
+        errors: list[tuple[str, Exception]] = []
+        last_empty_result: list[dict] | None = None
+
+        for backend in candidate_order:
             try:
-                if settings.extraction_backend == "unstructured":
-                    return await asyncio.to_thread(_partition_with_tika, str(source_path), settings.tika_server_url)
-                return await asyncio.to_thread(
-                    _partition_with_unstructured, str(source_path), settings.unstructured_strategy
-                )
-            except Exception as fallback_exc:  # noqa: BLE001
-                raise ExtractionBackendError(
-                    f"Both extraction backends failed. primary={primary_exc!r} fallback={fallback_exc!r}"
-                ) from fallback_exc
+                if backend == "unstructured":
+                    res = await asyncio.to_thread(
+                        _partition_with_unstructured, str(source_path), settings.unstructured_strategy
+                    )
+                elif backend == "tika":
+                    res = await asyncio.to_thread(
+                        _partition_with_tika, str(source_path), settings.tika_server_url
+                    )
+                elif backend == "pypdf":
+                    res = await asyncio.to_thread(_partition_with_pypdf, str(source_path))
+                else:
+                    logger.warning("Unknown extraction backend '%s' configured; skipping.", backend)
+                    continue
+
+                if _has_text(res):
+                    return res
+                last_empty_result = res
+            except Exception as exc:  # noqa: BLE001 - deliberate cascade boundary
+                logger.warning("Extraction backend '%s' failed for '%s': %r", backend, filename or source_path, exc)
+                errors.append((backend, exc))
+
+        if last_empty_result is not None:
+            return last_empty_result
+
+        error_details = " ".join(f"{b}={e!r}" for b, e in errors)
+        raise ExtractionBackendError(
+            f"All extraction backends failed ({', '.join(candidate_order)}). {error_details}"
+        )
 
     try:
         raw_elements = await asyncio.wait_for(_run(), timeout=settings.parse_timeout_seconds)
@@ -419,14 +482,6 @@ async def extract_pdf(
         raise ParseTimeoutError(
             f"PDF extraction exceeded {settings.parse_timeout_seconds}s timeout."
         ) from exc
-
-    # A scanned/image-only PDF still commonly produces *some* raw elements
-    # (Unstructured detects page/table regions from layout alone), just with
-    # no recoverable text in any of them -- so "zero elements" alone
-    # under-detects the scanned case. Checking for "no element has non-
-    # whitespace text" catches both shapes with one branch.
-    def _has_text(elements: list[dict]) -> bool:
-        return bool(elements) and any(el["text"].strip() for el in elements)
 
     # "fast" (the default -- see unstructured_strategy in app.config) skips
     # detectron2 layout detection, so it can occasionally miss text on a

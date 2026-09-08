@@ -47,6 +47,9 @@ class HITLReasonCode(str, Enum):
     CONFLICTING_THRESHOLDS = "conflicting_thresholds"       # two thresholds on the same field are contradictory
     UNRESOLVED_ENTITY = "unresolved_entity"                 # entity could not be normalized to the taxonomy
     SELF_HEALED_REQUIRES_REVIEW = "self_healed_requires_review"  # app.healing repaired this rule automatically -- a human must confirm the repair before it is trusted (see app/healing/orchestrator.py). NOTE: no HITLFlag -> HITLReview persistence path exists in this codebase yet (nothing currently constructs a HITLReview row), so this value is not yet in app.db.models._HITL_REASON_CODES' CheckConstraint -- add it there (+ a migration) when that persistence layer is built.
+    UNKNOWN_FACT_METRIC = "unknown_fact_metric"                 # metric cannot be mapped to canonical fact taxonomy
+    INVALID_METRIC_UNIT = "invalid_metric_unit"                 # unit is invalid for the mapped canonical fact
+    INVALID_THRESHOLD_VALUE = "invalid_threshold_value"         # value is outside the allowed bounds for the canonical fact
 
 
 class HITLSeverity(str, Enum):

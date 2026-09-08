@@ -171,3 +171,117 @@ def test_is_section_header_heuristic() -> None:
     assert is_section_header(
         "1. This is a much longer clause body that reads like actual obligation text.", long_match
     ) is False
+
+
+def _generate_real_sebi_pdf() -> bytes:
+    """Generate a minimal, real, well-formed text-layer PDF using reportlab."""
+    from io import BytesIO
+    from reportlab.pdfgen import canvas
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf)
+    c.drawString(100, 750, "Circular No. SEBI/HO/MIRSD/2024/001")
+    c.drawString(100, 730, "15 January 2024")
+    c.drawString(100, 700, "1. Collection of Upfront Margin")
+    c.drawString(100, 680, "1.1 Stock brokers shall collect upfront margin from clients.")
+    c.drawString(100, 660, "2. Daily Collateral Reporting")
+    c.drawString(100, 640, "2.1 Daily client collateral reporting must occur by EOD.")
+    c.save()
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_pypdf_fallback_extracts_real_text_layer_pdf(monkeypatch, tmp_path) -> None:
+    """When unstructured and tika backends fail/are unavailable, extract_pdf
+    must cleanly fall back to native pypdf without requiring OCR, Tika, or Poppler."""
+    import app.parsing.extractor as extractor
+    from app.parsing.exceptions import ScannedDocumentError
+
+    settings = Settings(_env_file=None, extraction_backend="unstructured")
+
+    # Simulate unstructured and tika failing
+    def fail_unstructured(path, strategy):
+        raise ModuleNotFoundError("No module named 'unstructured'")
+
+    def fail_tika(path, url):
+        raise ConnectionRefusedError("Tika server unreachable")
+
+    monkeypatch.setattr(extractor, "_partition_with_unstructured", fail_unstructured)
+    monkeypatch.setattr(extractor, "_partition_with_tika", fail_tika)
+
+    # OCR must NOT be called for a normal text-layer PDF
+    async def fail_ocr(source_path, filename, settings_):
+        raise AssertionError("OCR fallback should never be called when pypdf extracts text successfully")
+
+    monkeypatch.setattr(extractor, "_ocr_fallback", fail_ocr)
+
+    pdf_bytes = _generate_real_sebi_pdf()
+    pdf_file = tmp_path / "sebi_circular.pdf"
+    pdf_file.write_bytes(pdf_bytes)
+
+    metadata, elements = await extractor.extract_pdf(
+        file_bytes=pdf_bytes,
+        source_path=pdf_file,
+        filename="sebi_circular.pdf",
+        settings=settings,
+    )
+
+    assert metadata.circular_number == "SEBI/HO/MIRSD/2024/001"
+    assert metadata.issue_date == dt.date(2024, 1, 15)
+    assert len(elements) >= 4
+
+    clause_1_1 = next((el for el in elements if el.clause_number == "1.1"), None)
+    assert clause_1_1 is not None
+    assert "upfront margin" in clause_1_1.text.lower()
+    assert clause_1_1.page_number == 1
+
+
+@pytest.mark.asyncio
+async def test_pypdf_primary_backend(tmp_path) -> None:
+    """When settings.extraction_backend is set to 'pypdf', it extracts directly."""
+    import app.parsing.extractor as extractor
+
+    settings = Settings(_env_file=None, extraction_backend="pypdf")
+    pdf_bytes = _generate_real_sebi_pdf()
+    pdf_file = tmp_path / "sebi_pypdf.pdf"
+    pdf_file.write_bytes(pdf_bytes)
+
+    metadata, elements = await extractor.extract_pdf(
+        file_bytes=pdf_bytes,
+        source_path=pdf_file,
+        filename="sebi_pypdf.pdf",
+        settings=settings,
+    )
+
+    assert metadata.circular_number == "SEBI/HO/MIRSD/2024/001"
+    assert any(el.clause_number == "2.1" for el in elements)
+
+
+@pytest.mark.asyncio
+async def test_all_backends_failing_raises_extraction_backend_error(monkeypatch, tmp_path) -> None:
+    """If all three text-layer backends error out, ExtractionBackendError is raised."""
+    import app.parsing.extractor as extractor
+    from app.parsing.exceptions import ExtractionBackendError
+
+    settings = Settings(_env_file=None)
+
+    def fail_backend(*args, **kwargs):
+        raise RuntimeError("Backend failed")
+
+    monkeypatch.setattr(extractor, "_partition_with_unstructured", fail_backend)
+    monkeypatch.setattr(extractor, "_partition_with_tika", fail_backend)
+    monkeypatch.setattr(extractor, "_partition_with_pypdf", fail_backend)
+
+    pdf_bytes = _generate_real_sebi_pdf()
+    pdf_file = tmp_path / "fail.pdf"
+    pdf_file.write_bytes(pdf_bytes)
+
+    with pytest.raises(ExtractionBackendError) as exc_info:
+        await extractor.extract_pdf(
+            file_bytes=pdf_bytes,
+            source_path=pdf_file,
+            filename="fail.pdf",
+            settings=settings,
+        )
+    assert "All extraction backends failed" in str(exc_info.value)
+
