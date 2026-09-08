@@ -98,15 +98,22 @@ def _find_source_pdf(circular, settings: Settings) -> Path | None:
     """Mirrors app.ingestion.pipeline_trigger._archive_path's naming
     convention to locate a previously-archived raw PDF on disk. Returns
     None (not an error) when unavailable -- an ingestion-archive purge, a
-    manually-uploaded circular with no source_url, or a deployment that
+    manually-uploaded circular with no local copy, or a deployment that
     never enabled local archiving are all legitimate reasons a raw PDF
     might be missing; the binder still ships `clause_hashes.json` for
     that circular either way, so the cryptographic chain of custody is
     never broken even when the convenience artifact (the raw PDF itself)
     is unavailable."""
-    if not circular.source_url:
+    filename = None
+    if getattr(circular, "source_filename", None):
+        filename = circular.source_filename
+    elif getattr(circular, "source_url", None):
+        filename = circular.source_url.rsplit("/", 1)[-1] or f"{circular.circular_number}.pdf"
+    elif getattr(circular, "circular_number", None):
+        filename = f"{circular.circular_number}.pdf"
+
+    if not filename:
         return None
-    filename = circular.source_url.rsplit("/", 1)[-1] or f"{circular.circular_number}.pdf"
     candidate = Path(settings.ingestion_pdf_download_dir) / filename
     return candidate if candidate.exists() else None
 

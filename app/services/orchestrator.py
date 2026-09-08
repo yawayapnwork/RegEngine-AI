@@ -46,6 +46,9 @@ DEFAULT_TENANT_ID = "sebi_baseline"
 class ProcessE2EResult(BaseModel):
     circular_id: int
     circular_number: str
+    source_url: str | None = None
+    source_filename: str | None = None
+    source_retrieved_at: dt.datetime | None = None
     source_document_sha256: str
     extracted_text_sha256: str
     document_hash: str  # Kept for backward compatibility; maps to source_document_sha256
@@ -61,6 +64,9 @@ class CircularStatusResult(BaseModel):
     circular_id: int
     circular_number: str
     status: str
+    source_url: str | None = None
+    source_filename: str | None = None
+    source_retrieved_at: dt.datetime | None = None
     source_document_sha256: str | None = None
     extracted_text_sha256: str | None = None
     raw_text_digest: str  # Historical extracted text digest preserved
@@ -113,9 +119,11 @@ class E2EOrchestrator:
         file_bytes: bytes,
         filename: str | None,
         tenant_id: str = DEFAULT_TENANT_ID,
+        source_url: str | None = None,
+        source_retrieved_at: dt.datetime | None = None,
     ) -> Circular:
         """Persists the Circular entity with source document SHA-256 digest,
-        extracted text digest, and metadata."""
+        extracted text digest, and clean source metadata."""
         await self.ensure_baseline_tenant(session, tenant_id)
 
         # Requirement 1 & 8: Calculate SHA-256 over raw uploaded PDF bytes
@@ -137,6 +145,30 @@ class E2EOrchestrator:
         if not circular_number:
             circular_number = f"SEBI/CIR/{raw_text_digest[:10].upper()}"
 
+        # Clean source_url and source_filename:
+        # Never put a filename into source_url. source_url must be a valid external URL starting with http://, https://, or ftp://.
+        candidate_url = source_url or (parsed.metadata.source_url if parsed and parsed.metadata else None)
+        valid_source_url = None
+        if candidate_url and (candidate_url.startswith("http://") or candidate_url.startswith("https://") or candidate_url.startswith("ftp://")):
+            valid_source_url = candidate_url
+
+        # Clean source_filename:
+        # Preserve actual filename separately.
+        candidate_filename = (
+            filename
+            or (parsed.metadata.source_filename if parsed and parsed.metadata else None)
+            or None
+        )
+        clean_filename = None
+        if candidate_filename:
+            from pathlib import Path
+            clean_filename = Path(candidate_filename).name
+
+        retrieved_at = (
+            source_retrieved_at
+            or (parsed.metadata.source_retrieved_at if parsed and parsed.metadata else None)
+        )
+
         existing = (
             await session.execute(
                 select(Circular).where(
@@ -148,8 +180,20 @@ class E2EOrchestrator:
         ).scalar_one_or_none()
 
         if existing is not None:
+            updated = False
             if existing.source_document_sha256 is None and source_document_sha256:
                 existing.source_document_sha256 = source_document_sha256
+                updated = True
+            if existing.source_filename is None and clean_filename:
+                existing.source_filename = clean_filename
+                updated = True
+            if existing.source_url is None and valid_source_url:
+                existing.source_url = valid_source_url
+                updated = True
+            if existing.source_retrieved_at is None and retrieved_at:
+                existing.source_retrieved_at = retrieved_at
+                updated = True
+            if updated:
                 await session.flush()
             return existing
 
@@ -157,9 +201,11 @@ class E2EOrchestrator:
             tenant_id=tenant_id,
             is_shared=True,
             circular_number=circular_number,
-            title=parsed.metadata.title or filename or "SEBI Circular",
+            title=parsed.metadata.title or clean_filename or "SEBI Circular",
             issue_date=parsed.metadata.issue_date or dt.date.today(),
-            source_url=filename or None,
+            source_url=valid_source_url,
+            source_filename=clean_filename,
+            source_retrieved_at=retrieved_at,
             department=parsed.metadata.department or "MRD",
             source_document_sha256=source_document_sha256,
             raw_text_digest=raw_text_digest,
@@ -325,13 +371,27 @@ class E2EOrchestrator:
         file_bytes: bytes,
         filename: str | None = None,
         tenant_id: str = DEFAULT_TENANT_ID,
+        source_url: str | None = None,
+        source_retrieved_at: dt.datetime | None = None,
     ) -> ProcessE2EResult:
         """Executes the complete transactional pipeline."""
         # 1. Parse PDF
         parsed = await self.parse_pdf(file_bytes, filename=filename)
+        if source_url and (source_url.startswith("http://") or source_url.startswith("https://") or source_url.startswith("ftp://")):
+            parsed.metadata.source_url = source_url
+        if source_retrieved_at:
+            parsed.metadata.source_retrieved_at = source_retrieved_at
 
         # 2. Persist Circular
-        circular = await self.persist_circular(session, parsed, file_bytes, filename, tenant_id)
+        circular = await self.persist_circular(
+            session=session,
+            parsed=parsed,
+            file_bytes=file_bytes,
+            filename=filename,
+            tenant_id=tenant_id,
+            source_url=source_url,
+            source_retrieved_at=source_retrieved_at,
+        )
 
         # 3. Persist Clauses
         clauses = await self.persist_clauses(session, circular, parsed.chunks, tenant_id)
@@ -367,6 +427,9 @@ class E2EOrchestrator:
         return ProcessE2EResult(
             circular_id=circular.id,
             circular_number=circular.circular_number,
+            source_url=circular.source_url,
+            source_filename=circular.source_filename,
+            source_retrieved_at=circular.source_retrieved_at,
             source_document_sha256=circular.source_document_sha256 or "",
             extracted_text_sha256=circular.raw_text_digest,
             document_hash=circular.source_document_sha256 or circular.raw_text_digest,
@@ -433,6 +496,9 @@ class E2EOrchestrator:
             circular_id=circular.id,
             circular_number=circular.circular_number,
             status=status,
+            source_url=circular.source_url,
+            source_filename=circular.source_filename,
+            source_retrieved_at=circular.source_retrieved_at,
             source_document_sha256=circular.source_document_sha256,
             extracted_text_sha256=circular.raw_text_digest,
             raw_text_digest=circular.raw_text_digest,

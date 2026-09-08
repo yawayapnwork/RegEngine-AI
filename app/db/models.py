@@ -197,6 +197,10 @@ class Circular(Base):
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     issue_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_retrieved_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     department: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # SHA-256 of the original uploaded raw document bytes (e.g. PDF container)
@@ -228,6 +232,7 @@ class Circular(Base):
         UniqueConstraint("circular_number", name="uq_circulars_circular_number"),
         UniqueConstraint("raw_text_digest", name="uq_circulars_raw_text_digest"),
         Index("ix_circulars_issue_date", "issue_date"),
+        Index("ix_circulars_source_filename", "source_filename"),
         Index("ix_circulars_source_document_sha256", "source_document_sha256"),
         # Tenant-scoped range scan index (the dominant audit-report query shape).
         Index("ix_circulars_tenant_id", "tenant_id", "issue_date"),

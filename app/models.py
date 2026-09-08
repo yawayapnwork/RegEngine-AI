@@ -55,7 +55,9 @@ class CircularMetadata(BaseModel):
     circular_number: str | None = None
     issue_date: dt.date | None = None
     title: str | None = None
+    source_url: str | None = None
     source_filename: str | None = None
+    source_retrieved_at: dt.datetime | None = None
     department: str | None = None
     regulator: Regulator = Regulator.SEBI
     document_type: DocumentType = DocumentType.CIRCULAR
@@ -83,7 +85,9 @@ class ClauseChunk(BaseModel):
     contains_table: bool = False
     circular_number: str | None = None
     issue_date: dt.date | None = None
+    source_url: str | None = None
     source_filename: str | None = None
+    source_retrieved_at: dt.datetime | None = None
     source_document_sha256: str | None = Field(
         None, description="SHA-256 hex digest of the parent source document bytes."
     )
@@ -97,6 +101,9 @@ class ParseResult(BaseModel):
     chunks: list[ClauseChunk]
     element_count: int
     warnings: list[str] = Field(default_factory=list)
+    source_url: str | None = None
+    source_filename: str | None = None
+    source_retrieved_at: dt.datetime | None = None
     source_document_sha256: str | None = Field(
         None, description="SHA-256 hex digest of the original source PDF bytes."
     )

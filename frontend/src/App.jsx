@@ -99,7 +99,8 @@ function buildPipelineRuns(circularsList) {
   if (!circularsList) return [];
   return circularsList.map((c) => ({
     id: `run-${c.id}`,
-    filename: `${c.circular_number || "Circular"}.pdf`,
+    filename: c.source_filename || `${c.circular_number || "Circular"}.pdf`,
+    sourceUrl: c.source_url || null,
     circularNumber: c.circular_number,
     startedAt: c.created_at || new Date().toISOString(),
     currentStage: c.status === "deployed" ? "done" : c.status === "review_required" ? "verification" : "compilation",

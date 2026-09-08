@@ -5,6 +5,7 @@ ingestion pipeline (`app.services.pipeline.parse_pdf_bytes` +
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from pathlib import Path
 
@@ -66,6 +67,8 @@ async def process_discovered_document(
             filename=discovered.source_url.rsplit("/", 1)[-1],
             settings=settings,
             source_tag=discovered.regulator.value,
+            source_url=discovered.source_url,
+            source_retrieved_at=discovered.published_at or dt.datetime.now(dt.timezone.utc),
         )
         await index_chunks(parsed.chunks, settings, recreate_collection=False)
     except ParsingError:

@@ -7,6 +7,7 @@ memory on a single instance.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import tempfile
 from pathlib import Path
@@ -111,9 +112,11 @@ async def _localize_chunks(chunks: list[ClauseChunk], settings: Settings) -> tup
 
 async def parse_pdf_bytes(
     file_bytes: bytes,
-    filename: str | None,
+    filename: str | None = None,
     settings: Settings | None = None,
     source_tag: str | None = None,
+    source_url: str | None = None,
+    source_retrieved_at: dt.datetime | None = None,
 ) -> ParseResult:
     """`source_tag` identifies which regulator's feed this document came
     from (e.g. "rbi", "irdai") when known at call time -- the ingestion
@@ -123,6 +126,11 @@ async def parse_pdf_bytes(
     text (app.regulatory.taxonomy.detect_regulator_and_document)."""
     settings = settings or get_settings()
     warnings: list[str] = []
+
+    # Validate source_url: Never put a filename into source_url
+    valid_source_url = None
+    if source_url and (source_url.startswith("http://") or source_url.startswith("https://") or source_url.startswith("ftp://")):
+        valid_source_url = source_url
 
     # Requirement 1 & 8: Calculate SHA-256 over ORIGINAL uploaded PDF bytes
     # BEFORE any parsing, temporary file creation, decoding, or text extraction.
@@ -136,7 +144,8 @@ async def parse_pdf_bytes(
             backend=settings.extraction_backend,
             source_document_sha256=source_document_sha256,
         ), tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir) / (filename or "upload.pdf")
+            clean_filename = Path(filename).name if filename else "upload.pdf"
+            tmp_path = Path(tmpdir) / clean_filename
             try:
                 await asyncio.to_thread(tmp_path.write_bytes, file_bytes)
                 metadata, elements = await extract_pdf(
@@ -151,6 +160,9 @@ async def parse_pdf_bytes(
             except Exception as exc:  # noqa: BLE001 - convert unexpected errors to typed ones
                 raise ParsingError(f"Unexpected failure while extracting '{filename}': {exc!r}") from exc
 
+            metadata.source_url = valid_source_url
+            metadata.source_filename = filename
+            metadata.source_retrieved_at = source_retrieved_at
             metadata.source_document_sha256 = source_document_sha256
 
             if metadata.circular_number is None:
@@ -172,6 +184,9 @@ async def parse_pdf_bytes(
                 chunks=chunks,
                 element_count=len(elements),
                 warnings=warnings,
+                source_url=valid_source_url,
+                source_filename=filename,
+                source_retrieved_at=source_retrieved_at,
                 source_document_sha256=source_document_sha256,
                 extracted_text_sha256=extracted_text_sha256,
             )

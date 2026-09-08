@@ -158,6 +158,8 @@ class RuleProvenance(BaseModel):
     circular_title: str | None
     circular_issue_date: dt.date | None
     circular_source_url: str | None
+    circular_source_filename: str | None = None
+    circular_source_retrieved_at: dt.datetime | None = None
     clause_number: str | None
     clause_text: str | None
     clause_sha256: str | None
@@ -177,6 +179,8 @@ class CircularSummary(BaseModel):
     issue_date: str | None
     department: str | None
     source_url: str | None
+    source_filename: str | None = None
+    source_retrieved_at: dt.datetime | None = None
     is_shared: bool
     tenant_id: str
     clause_count: int = 0

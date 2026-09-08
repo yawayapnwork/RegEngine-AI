@@ -175,6 +175,10 @@ class CircularSummary(BaseModel):
     issue_date: str | None  # ISO-8601 date string
     department: str | None
     source_url: str | None
+    source_filename: str | None = None
+    source_retrieved_at: str | None = None
+    source_document_sha256: str | None = None
+    extracted_text_sha256: str | None = None
     is_shared: bool
     tenant_id: str
     clause_count: int = 0
@@ -598,6 +602,10 @@ async def sandbox_list_circulars(
             issue_date=c.issue_date.isoformat() if c.issue_date else None,
             department=c.department,
             source_url=c.source_url,
+            source_filename=getattr(c, "source_filename", None),
+            source_retrieved_at=c.source_retrieved_at.isoformat() if getattr(c, "source_retrieved_at", None) else None,
+            source_document_sha256=getattr(c, "source_document_sha256", None),
+            extracted_text_sha256=getattr(c, "raw_text_digest", None),
             is_shared=c.is_shared,
             tenant_id=c.tenant_id,
             clause_count=clause_counts.get(c.id, 0),

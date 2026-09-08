@@ -97,9 +97,27 @@ def build_excel_workbook(
     circulars_ws = wb.create_sheet("Source Circulars")
     _write_sheet(
         circulars_ws,
-        ["Circular Number", "Title", "Issue Date", "Source URL", "Raw Text Digest (SHA-256)", "Department"],
         [
-            (c.circular_number, c.title or "", c.issue_date.isoformat() if c.issue_date else "", c.source_url or "", c.raw_text_digest, c.department or "")
+            "Circular Number",
+            "Title",
+            "Issue Date",
+            "Source URL",
+            "Source Filename",
+            "Source Document SHA-256",
+            "Raw Text Digest (SHA-256)",
+            "Department",
+        ],
+        [
+            (
+                c.circular_number,
+                c.title or "",
+                c.issue_date.isoformat() if c.issue_date else "",
+                c.source_url or "",
+                getattr(c, "source_filename", "") or "",
+                getattr(c, "source_document_sha256", "") or "",
+                c.raw_text_digest,
+                c.department or "",
+            )
             for c in source_circulars
         ],
     )

@@ -116,10 +116,16 @@ async def get_rule_provenance_chain(
         StageProvenance(
             stage_index=1,
             stage_name="Original PDF",
-            identifier=circular.source_url or circular.circular_number,
+            identifier=circular.source_url or getattr(circular, "source_filename", None) or circular.circular_number,
             hash_value=src_doc_hash,
             verified=stage1_verified,
-            details={"title": circular.title, "circular_number": circular.circular_number},
+            details={
+                "title": circular.title,
+                "circular_number": circular.circular_number,
+                "source_url": circular.source_url,
+                "source_filename": getattr(circular, "source_filename", None),
+                "source_retrieved_at": circular.source_retrieved_at.isoformat() if getattr(circular, "source_retrieved_at", None) else None,
+            },
         )
     )
 
