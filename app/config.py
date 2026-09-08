@@ -150,6 +150,11 @@ class Settings(BaseSettings):
     )
     agent_verbose: bool = False
     agent_max_rpm: int = 20
+    clause_concurrency: int = Field(
+        default=3,
+        validation_alias=AliasChoices("CLAUSE_CONCURRENCY", "clause_concurrency", "agent_concurrency"),
+        description="Max clause extraction/audit tasks executed concurrently per circular.",
+    )
 
     # --- Dynamic agent graph orchestration (app.agents.graph) ---
     # Opt-in: False preserves the original fixed two-agent CrewAI

@@ -6,6 +6,7 @@ Executes the pipeline:
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import logging
@@ -84,8 +85,13 @@ class E2EOrchestrator:
     """Coordinates parsing, transactional persistence, clause extraction/auditing,
     rule compilation, and HITL review creation."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        clause_concurrency: int | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
+        self.clause_concurrency = clause_concurrency or getattr(self.settings, "clause_concurrency", 3)
 
     async def ensure_baseline_tenant(
         self, session: AsyncSession, tenant_id: str = DEFAULT_TENANT_ID
@@ -268,6 +274,108 @@ class E2EOrchestrator:
         configured LLM provider abstraction (offline, openai, anthropic, huggingface)."""
         return await extract_and_audit_clause(chunk, sibling_chunks, self.settings)
 
+    async def extract_and_audit_circular(
+        self,
+        chunks: list[ClauseChunk],
+        sibling_chunks: list[dict] | None = None,
+        max_concurrency: int | None = None,
+    ) -> list[tuple[ClauseChunk, AuditedComplianceRule | None, Exception | None]]:
+        """Extracts and audits compliance rules for all chunks of a circular using bounded
+        concurrency, preserving chunk ordering while capturing per-clause exceptions.
+
+        Uses an asyncio.Semaphore to guarantee that in-flight LLM calls never exceed
+        the configured concurrency limit (clause_concurrency).
+        """
+        if not chunks:
+            return []
+
+        concurrency = max_concurrency or self.clause_concurrency
+        gate = asyncio.Semaphore(max(1, concurrency))
+
+        siblings = sibling_chunks or [
+            {"chunk_id": c.chunk_id, "clause_number": c.clause_number, "section_path": c.section_path, "text": c.text}
+            for c in chunks
+        ]
+
+        async def _run_one(idx: int, chunk: ClauseChunk) -> tuple[int, ClauseChunk, AuditedComplianceRule | None, Exception | None]:
+            async with gate:
+                try:
+                    audited = await self.extract_and_audit(chunk, siblings)
+                    return idx, chunk, audited, None
+                except Exception as exc:
+                    logger.error(
+                        "Clause extraction/audit failed for chunk %s (clause %s): %s",
+                        chunk.chunk_id,
+                        chunk.clause_number,
+                        exc,
+                        exc_info=True,
+                    )
+                    return idx, chunk, None, exc
+
+        tasks = [_run_one(i, c) for i, c in enumerate(chunks)]
+        results = await asyncio.gather(*tasks)
+        # Guarantee strictly deterministic ordering matching the input chunk sequence
+        results_list = list(results)
+        results_list.sort(key=lambda r: r[0])
+        return [(r[1], r[2], r[3]) for r in results_list]
+
+    async def _persist_failed_clause_rule(
+        self,
+        session: AsyncSession,
+        clause: Clause,
+        chunk: ClauseChunk,
+        error: Exception | None,
+        tenant_id: str = DEFAULT_TENANT_ID,
+    ) -> tuple[CompiledRule, list[HITLReview]]:
+        """Explicitly handles and persists a failed clause extraction/audit as an uncompiled,
+        non-deployable rule with a blocking HITL review."""
+        rule_id = f"RULE-FAILED-{clause.clause_number or chunk.chunk_id or str(clause.id)}"
+        existing_rule = (
+            await session.execute(
+                select(CompiledRule).where(
+                    CompiledRule.rule_id == rule_id,
+                    CompiledRule.clause_id == clause.id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing_rule is not None:
+            compiled_rule = existing_rule
+        else:
+            compiled_rule = CompiledRule(
+                clause_id=clause.id,
+                tenant_id=tenant_id,
+                rule_id=rule_id,
+                rule_version=1,
+                rego_policy=None,
+                opa_package_name=None,
+                jsonlogic_ast=None,
+                is_compiled=False,
+                is_active=False,  # Failed extraction can NEVER be active!
+                hitl_status="BLOCKING",
+                compiler_version="1.0.0",
+            )
+            session.add(compiled_rule)
+            await session.flush()
+
+        error_msg = f"{type(error).__name__}: {str(error)}" if error else "Extraction failed"
+        rev = HITLReview(
+            review_id=str(uuid.uuid4()),
+            clause_id=clause.id,
+            compiled_rule_id=compiled_rule.id,
+            tenant_id=tenant_id,
+            reason_code="audit_not_approved",
+            severity="blocking",
+            description=f"Automated clause extraction failed: {error_msg}. Manual compliance review required.",
+            source_excerpt=clause.text[:200] if clause.text else None,
+            field_path="deterministic_logic",
+            status="PENDING",
+            resolved_at=None,
+        )
+        session.add(rev)
+        await session.flush()
+        return compiled_rule, [rev]
+
     async def compile_and_persist_rules(
         self,
         session: AsyncSession,
@@ -396,25 +504,45 @@ class E2EOrchestrator:
         # 3. Persist Clauses
         clauses = await self.persist_clauses(session, circular, parsed.chunks, tenant_id)
 
-        # 4. Extract, Audit, Compile, and Create HITL Reviews
+        # 4. Extract, Audit, Compile, and Create HITL Reviews with bounded concurrency
         sibling_payload = [
             {"chunk_id": c.chunk_id, "clause_number": c.clause_number, "section_path": c.section_path, "text": c.text}
             for c in parsed.chunks
         ]
 
+        # Concurrently extract and audit chunks with bounded concurrency
+        extraction_results = await self.extract_and_audit_circular(
+            parsed.chunks, sibling_chunks=sibling_payload
+        )
+
         compiled_rule_ids: list[str] = []
         review_ids: list[str] = []
         rules_compiled_count = 0
 
-        # Prioritize clauses with obligations/percentages, and ensure all clauses are processed
+        # Persist rules and reviews sequentially in strictly deterministic chunk order
         clause_map = {c.sha256: c for c in clauses}
-        for chunk in parsed.chunks:
-            clause = clause_map.get(chunk.sha256)
+        for i, (chunk, audited, error) in enumerate(extraction_results):
+            clause = clauses[i] if i < len(clauses) else clause_map.get(chunk.sha256)
             if not clause:
+                logger.error("No persisted clause found for chunk %s (%s); skipping", chunk.chunk_id, chunk.clause_number)
                 continue
 
-            audited = await self.extract_and_audit(chunk, sibling_payload)
-            rule, reviews = await self.compile_and_persist_rules(session, clause, audited, tenant_id)
+            if error is not None or audited is None:
+                # Individual clause failure handled explicitly
+                rule, reviews = await self._persist_failed_clause_rule(
+                    session=session,
+                    clause=clause,
+                    chunk=chunk,
+                    error=error,
+                    tenant_id=tenant_id,
+                )
+            else:
+                rule, reviews = await self.compile_and_persist_rules(
+                    session=session,
+                    clause=clause,
+                    audited=audited,
+                    tenant_id=tenant_id,
+                )
 
             if rule.is_compiled:
                 rules_compiled_count += 1

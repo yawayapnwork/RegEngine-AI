@@ -58,16 +58,17 @@ async def extract_and_audit_clause(
 async def extract_and_audit_circular(
     chunks: list[ClauseChunk],
     settings: Settings | None = None,
-    max_concurrency: int = 3,
+    max_concurrency: int | None = None,
 ) -> list[AuditedComplianceRule]:
     """Run the dual-agent pipeline across every clause chunk of a circular,
     bounding concurrency to respect the Hugging Face Inference rate limit / agent_max_rpm."""
     settings = settings or get_settings()
+    concurrency = max_concurrency or getattr(settings, "clause_concurrency", 3)
     sibling_payload = [
         {"chunk_id": c.chunk_id, "clause_number": c.clause_number, "section_path": c.section_path, "text": c.text}
         for c in chunks
     ]
-    gate = asyncio.Semaphore(max_concurrency)
+    gate = asyncio.Semaphore(max(1, concurrency))
 
     async def _run(chunk: ClauseChunk) -> AuditedComplianceRule:
         async with gate:
