@@ -54,6 +54,8 @@ class HITLReviewOut(BaseModel):
     resolution_notes: str | None
     flagged_at: dt.datetime
     resolved_at: dt.datetime | None
+    approved_rule_version: int | None = None
+    approved_policy_sha256: str | None = None
 
     model_config = {"from_attributes": True}
 

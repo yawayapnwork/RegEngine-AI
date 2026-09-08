@@ -456,6 +456,8 @@ class CompiledRule(Base):
     )
 
     compiler_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    policy_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provenance_metadata: Mapped[dict | None] = mapped_column(_JSON_TYPE, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -477,6 +479,7 @@ class CompiledRule(Base):
             "rule_id",
             unique=True,
             postgresql_where=sa_text("is_active = true"),
+            sqlite_where=sa_text("is_active = 1"),
         ),
         CheckConstraint(f"hitl_status IN {_COMPILED_RULE_HITL_STATUSES!r}", name="hitl_status"),
     )
@@ -530,6 +533,8 @@ class HITLReview(Base):
     resolved_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    approved_rule_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approved_policy_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="hitl_reviews")
     clause: Mapped["Clause"] = relationship(back_populates="hitl_reviews")

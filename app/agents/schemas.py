@@ -152,6 +152,16 @@ class ExtractedComplianceRule(BaseModel):
     extraction_notes: str | None = Field(
         None, description="Free-text caveats, e.g. cross-references to other clauses needed for full context."
     )
+    canonical_facts_digest: str | None = Field(
+        None, description="Deterministic SHA-256 digest over normalized canonical facts and thresholds."
+    )
+
+    @model_validator(mode="after")
+    def _ensure_canonical_facts_digest(self) -> "ExtractedComplianceRule":
+        if self.canonical_facts_digest is None:
+            from app.regulatory.facts import compute_canonical_facts_digest
+            self.canonical_facts_digest = compute_canonical_facts_digest(self.deterministic_logic)
+        return self
 
 
 # --------------------------------------------------------------------------

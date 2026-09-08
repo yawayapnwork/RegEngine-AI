@@ -51,37 +51,89 @@ def _explanation_texts(outcome: PolicyOutcome) -> list[str]:
     return [exp.headline for exp in explain_policy_outcome_deterministic(outcome, regulator="sebi")]
 
 
+def compute_transaction_digest(transaction: TransactionPayload) -> str:
+    """Computes a deterministic SHA-256 digest over normalized transaction business input."""
+    import hashlib
+    import json
+
+    canonical = {
+        "broker_id": transaction.broker_id or "",
+        "entity_type": transaction.entity_type,
+        "facts": transaction.facts,
+        "transaction_id": transaction.transaction_id,
+    }
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def compute_evidence_digest(evidence_payload: dict[str, Any]) -> str:
+    """Computes a deterministic SHA-256 digest over the comprehensive compliance evidence payload."""
+    import hashlib
+    import json
+
+    payload = json.dumps(evidence_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def build_ledger_events(transaction: TransactionPayload, result: EvaluationResult) -> list[ComplianceEvaluationEvent]:
     events = []
+    tx_digest = compute_transaction_digest(transaction)
+
     for outcome in result.matched_policies:
         evaluation_result = _outcome_result(outcome)
+        clause_hash = outcome.clause_sha256 or _clause_hash(outcome.rule_id)
+        rule_version = outcome.rule_version or 1
+
+        evidence_payload = {
+            "transaction_id": transaction.transaction_id,
+            "transaction_input_digest": tx_digest,
+            "rule_id": outcome.rule_id,
+            "rule_version": rule_version,
+            "policy_sha256": outcome.policy_sha256,
+            "package": outcome.package,
+            "circular_id": outcome.circular_number or "unknown",
+            "section_reference": outcome.clause_number or "unscoped",
+            "clause_sha256": clause_hash,
+            "source_document_sha256": outcome.source_document_sha256,
+            "extracted_text_sha256": outcome.extracted_text_sha256,
+            "canonical_facts_digest": outcome.canonical_facts_digest,
+            "evaluation_result": evaluation_result.value,
+            "violations": outcome.violations,
+            "decision": result.decision.value,
+            "hitl_case_id": result.hitl_case_id if evaluation_result == EvaluationOutcome.HITL_REVIEW else None,
+        }
+        ev_digest = compute_evidence_digest(evidence_payload)
+
+        details = {
+            "violations": outcome.violations,
+            "package": outcome.package,
+            "transaction_decision": result.decision.value,
+            "explanation": _explanation_texts(outcome),
+            "entity_type": transaction.entity_type,
+            "facts": transaction.facts,
+            # Provenance & evidence links
+            "transaction_input_digest": tx_digest,
+            "rule_version": rule_version,
+            "policy_sha256": outcome.policy_sha256,
+            "canonical_facts_digest": outcome.canonical_facts_digest,
+            "source_document_sha256": outcome.source_document_sha256,
+            "extracted_text_sha256": outcome.extracted_text_sha256,
+            "clause_sha256": clause_hash,
+            "evidence_digest": ev_digest,
+        }
+
         events.append(
             ComplianceEvaluationEvent(
                 broker_id=transaction.broker_id or "unknown",
                 transaction_id=transaction.transaction_id,
                 evaluated_at=result.evaluated_at,
                 circular_id=outcome.circular_number or "unknown",
-                clause_hash=_clause_hash(outcome.rule_id),
+                clause_hash=clause_hash,
                 section_reference=outcome.clause_number or "unscoped",
                 rule_id=outcome.rule_id,
                 evaluation_result=evaluation_result,
                 hitl_review_id=result.hitl_case_id if evaluation_result == EvaluationOutcome.HITL_REVIEW else None,
-                details={
-                    "violations": outcome.violations,
-                    "package": outcome.package,
-                    "transaction_decision": result.decision.value,
-                    "explanation": _explanation_texts(outcome),
-                    # Input snapshot -- required for app.backtest to replay
-                    # this exact historical transaction against a NEW
-                    # candidate policy later. Without it, backtesting a
-                    # rule change would have no way to reconstruct what was
-                    # actually evaluated; re-deriving facts from anywhere
-                    # else (the broker's own OMS, a legacy `transactions`
-                    # table) would not be guaranteed to match what OPA
-                    # actually saw at decision time.
-                    "entity_type": transaction.entity_type,
-                    "facts": transaction.facts,
-                },
+                details=details,
             )
         )
     return events

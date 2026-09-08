@@ -106,7 +106,15 @@ class Evaluator:
                 continue
 
             if result is None:
-                outcomes.append(PolicyOutcome(rule_id=rule_id, package=package, allow=None))
+                outcomes.append(
+                    PolicyOutcome(
+                        rule_id=rule_id,
+                        package=package,
+                        allow=None,
+                        rule_version=entry.get("rule_version", 1),
+                        policy_sha256=entry.get("policy_sha256"),
+                    )
+                )
             else:
                 outcomes.append(
                     PolicyOutcome(
@@ -116,6 +124,12 @@ class Evaluator:
                         violations=list(result.get("violations", []) or []),
                         circular_number=result.get("circular_number"),
                         clause_number=result.get("clause_number"),
+                        rule_version=result.get("rule_version") or entry.get("rule_version", 1),
+                        policy_sha256=result.get("policy_sha256") or entry.get("policy_sha256"),
+                        canonical_facts_digest=result.get("canonical_facts_digest") or entry.get("canonical_facts_digest"),
+                        source_document_sha256=result.get("source_document_sha256"),
+                        extracted_text_sha256=result.get("extracted_text_sha256"),
+                        clause_sha256=result.get("source_sha256"),
                     )
                 )
 

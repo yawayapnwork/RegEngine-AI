@@ -55,6 +55,12 @@ class PolicyOutcome(BaseModel):
     violations: list[str] = Field(default_factory=list)
     circular_number: str | None = Field(None, description="Echoed from the compiled Rego decision object; feeds the audit ledger's SEBI circular mapping.")
     clause_number: str | None = Field(None, description="Echoed from the compiled Rego decision object; feeds the audit ledger's section_reference.")
+    rule_version: int | None = Field(1, description="Exact compiled rule/policy version evaluated.")
+    policy_sha256: str | None = Field(None, description="SHA-256 of the evaluated policy module.")
+    canonical_facts_digest: str | None = Field(None, description="SHA-256 of canonical facts/thresholds governed.")
+    source_document_sha256: str | None = Field(None, description="Originating PDF document SHA-256.")
+    extracted_text_sha256: str | None = Field(None, description="Extracted text SHA-256.")
+    clause_sha256: str | None = Field(None, description="Clause text SHA-256.")
 
 
 class EvaluationResult(BaseModel):

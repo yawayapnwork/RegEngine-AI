@@ -19,7 +19,10 @@ class CompiledRego(BaseModel):
         description="Rego rule names intended for external evaluation (opa eval -d policy.rego 'data.<package>.<entrypoint>').",
     )
     thresholds_compiled: int
-    generated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    rule_version: int = 1
+    policy_sha256: str | None = None
+    canonical_facts_digest: str | None = None
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
     compiler_version: str = "1.0.0"
 
 

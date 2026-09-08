@@ -22,7 +22,7 @@ from app.compiler.rego_compiler import compile_rule_to_rego
 logger = logging.getLogger(__name__)
 
 
-def compile_audited_rule(audited: AuditedComplianceRule) -> CompilationResult:
+def compile_audited_rule(audited: AuditedComplianceRule, rule_version: int = 1) -> CompilationResult:
     rule = audited.rule
     hitl_flags = collect_hitl_flags(audited)
 
@@ -35,7 +35,7 @@ def compile_audited_rule(audited: AuditedComplianceRule) -> CompilationResult:
         )
         return CompilationResult(rule_id=rule.rule_id, compiled=False, hitl_flags=hitl_flags)
 
-    rego = compile_rule_to_rego(rule)
+    rego = compile_rule_to_rego(rule, rule_version=rule_version)
     json_logic = compile_rule_to_jsonlogic(rule)
 
     # Defense in depth: a compiler bug that emits a structurally invalid

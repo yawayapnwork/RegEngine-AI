@@ -26,12 +26,19 @@ class PolicyRegistry:
         ExtractedComplianceRule.target_entities); an empty list means the
         policy has no entity guard and applies to every transaction, so it
         is stored under the sentinel key "*"."""
-        entry = json.dumps({"rule_id": compiled.rule_id, "package": compiled.package})
+        entry_dict = {
+            "rule_id": compiled.rule_id,
+            "package": compiled.package,
+            "rule_version": getattr(compiled, "rule_version", 1),
+            "policy_sha256": getattr(compiled, "policy_sha256", None),
+            "canonical_facts_digest": getattr(compiled, "canonical_facts_digest", None),
+        }
+        entry = json.dumps(entry_dict)
         for entity_type in entity_types or ["*"]:
             existing = await self._redis.hget(self._key, entity_type)
             entries: list[str] = json.loads(existing) if existing else []
-            if entry not in entries:
-                entries.append(entry)
+            entries = [e for e in entries if json.loads(e).get("rule_id") != compiled.rule_id]
+            entries.append(entry)
             await self._redis.hset(self._key, entity_type, json.dumps(entries))
 
     async def unregister(self, rule_id: str) -> None:

@@ -458,3 +458,46 @@ def resolve_canonical_fact(
         canonical_identifier=matched_fact.identifier,
         canonical_fact=matched_fact,
     )
+
+
+def compute_canonical_facts_digest(thresholds_or_facts: list[Any] | None) -> str:
+    """Computes a deterministic SHA-256 digest over normalized canonical facts
+    and numeric thresholds associated with a regulatory clause or rule.
+    """
+    import hashlib
+    import json
+
+    if not thresholds_or_facts:
+        return hashlib.sha256(b"[]").hexdigest()
+
+    records = []
+    for item in thresholds_or_facts:
+        if isinstance(item, dict):
+            metric = item.get("metric", "")
+            cf = item.get("canonical_fact") or item.get("canonical_identifier") or ""
+            op = str(item.get("operator", ""))
+            val = item.get("value")
+            val_upper = item.get("value_upper")
+            unit = item.get("unit", "")
+        else:
+            metric = getattr(item, "metric", "")
+            cf = getattr(item, "canonical_fact", None) or getattr(item, "canonical_identifier", "") or ""
+            op = str(getattr(item, "operator", ""))
+            val = getattr(item, "value", None)
+            val_upper = getattr(item, "value_upper", None)
+            unit = getattr(item, "unit", "")
+
+        records.append({
+            "metric": str(metric),
+            "canonical_fact": str(cf) if cf else "",
+            "operator": op,
+            "value": float(val) if val is not None else None,
+            "value_upper": float(val_upper) if val_upper is not None else None,
+            "unit": normalize_unit(str(unit)) if unit else "",
+        })
+
+    # Sort records by canonical_fact, metric, operator, value for strict canonical ordering
+    records.sort(key=lambda r: (r["canonical_fact"], r["metric"], r["operator"], str(r["value"])))
+    payload = json.dumps(records, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+

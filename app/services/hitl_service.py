@@ -14,6 +14,7 @@ import asyncio
 from collections import defaultdict
 from contextlib import asynccontextmanager
 import datetime as dt
+import hashlib
 import logging
 from typing import Sequence
 
@@ -179,6 +180,12 @@ class HITLReviewService:
                 review.compliance_officer_id = principal_subject
                 review.resolution_notes = notes
                 review.resolved_at = now_utc
+                review.approved_rule_version = compiled_rule.rule_version
+                policy_hash = compiled_rule.policy_sha256
+                if not policy_hash and compiled_rule.rego_policy:
+                    policy_hash = hashlib.sha256(compiled_rule.rego_policy.encode("utf-8")).hexdigest()
+                    compiled_rule.policy_sha256 = policy_hash
+                review.approved_policy_sha256 = policy_hash
 
                 # Evaluate gate across all sibling reviews (including the now-resolved review)
                 can_activate, target_status, gate_reason = evaluate_rule_hitl_gate(all_reviews)

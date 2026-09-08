@@ -54,12 +54,13 @@ means missing data denies, never silently permits).
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 
 from app.agents.schemas import ComparisonOperator, ExtractedComplianceRule, NumericalThreshold
 from app.compiler.models import CompiledRego
 from app.compiler.naming import UndefinedFactError, clause_slug, circular_slug, metric_field_name, rego_package_name
-from app.regulatory.facts import get_canonical_fact
+from app.regulatory.facts import compute_canonical_facts_digest, get_canonical_fact
 from app.regulatory.taxonomy import resolve_domain
 
 _INDENT = "    "
@@ -140,11 +141,11 @@ def _violation_clauses(threshold: NumericalThreshold, index: int) -> list[tuple[
     return [(f"{field} {fail_op} {_rego_scalar(threshold.value)}", msg)]
 
 
-def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
+def compile_rule_to_rego(rule: ExtractedComplianceRule, rule_version: int = 1) -> CompiledRego:
     """Compile all NumericalThreshold entries of a single ExtractedComplianceRule
-    into one Rego module. Caller is responsible for having already confirmed
-    (via the HITL module) that this rule is safe to compile — this function
-    does not itself judge qualitative content."""
+    into one Rego module with immutable provenance metadata. Caller is responsible
+    for having already confirmed (via the HITL module) that this rule is safe to
+    compile — this function does not itself judge qualitative content."""
     if not rule.deterministic_logic:
         raise ValueError(f"Rule {rule.rule_id} has no deterministic_logic to compile.")
 
@@ -153,6 +154,8 @@ def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
     package = rego_package_name(rule.regulator, domain, rule.circular_number, rule.clause_number)
     clause = rule.clause_number or "unscoped"
     entity_guard = _entity_guard(rule)
+
+    cf_digest = rule.canonical_facts_digest or compute_canonical_facts_digest(rule.deterministic_logic)
 
     lines: list[str] = []
 
@@ -167,6 +170,7 @@ def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
     lines.append(f"# description: Auto-compiled from SEBI clause {clause}")
     lines.append("# custom:")
     lines.append(f"#   rule_id: {rule.rule_id}")
+    lines.append(f"#   rule_version: {rule_version}")
     lines.append(f"#   clause_number: {clause}")
     lines.append(f"#   circular_number: {rule.circular_number or 'unknown'}")
     lines.append(f"#   source_sha256: {rule.source_sha256}")
@@ -174,8 +178,9 @@ def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
         lines.append(f"#   source_document_sha256: {rule.source_document_sha256}")
     if rule.extracted_text_sha256:
         lines.append(f"#   extracted_text_sha256: {rule.extracted_text_sha256}")
+    lines.append(f"#   canonical_facts_digest: {cf_digest}")
     lines.append(f"#   obligation_type: {rule.obligation_type.value}")
-    lines.append(f"#   generated_at: {dt.datetime.utcnow().isoformat()}Z")
+    lines.append(f"#   generated_at: {dt.datetime.now(dt.timezone.utc).isoformat()}Z")
     lines.append(f"#   compiler: sebi-rego-compiler/1.0.0")
     lines.append(f"package {package}")
     lines.append("")
@@ -224,17 +229,26 @@ def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
     lines.append(f'{_INDENT}"allow": allow,')
     lines.append(f'{_INDENT}"violations": violation,')
     lines.append(f'{_INDENT}"rule_id": "{rule.rule_id}",')
+    lines.append(f'{_INDENT}"rule_version": {rule_version},')
     lines.append(f'{_INDENT}"clause_number": "{clause}",')
     lines.append(f'{_INDENT}"circular_number": {json.dumps(rule.circular_number)},')
     lines.append(f'{_INDENT}"obligation_type": "{rule.obligation_type.value}",')
+    lines.append(f'{_INDENT}"source_sha256": "{rule.source_sha256}",')
+    lines.append(f'{_INDENT}"source_document_sha256": {json.dumps(rule.source_document_sha256)},')
+    lines.append(f'{_INDENT}"extracted_text_sha256": {json.dumps(rule.extracted_text_sha256)},')
+    lines.append(f'{_INDENT}"canonical_facts_digest": "{cf_digest}",')
     lines.append("}")
     lines.append("")
 
     rego_code = "\n".join(lines)
+    policy_sha256 = hashlib.sha256(rego_code.encode("utf-8")).hexdigest()
 
     return CompiledRego(
         rule_id=rule.rule_id,
         package=package,
         rego_code=rego_code,
         thresholds_compiled=len(rule.deterministic_logic),
+        rule_version=rule_version,
+        policy_sha256=policy_sha256,
+        canonical_facts_digest=cf_digest,
     )
