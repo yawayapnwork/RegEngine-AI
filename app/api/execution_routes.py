@@ -172,9 +172,9 @@ async def resolve_hitl_case(
     try:
         case = await hitl_queue.resolve(case_id, status_map[resolution.decision], resolved_by, resolution.notes)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No HITL case '{case_id}'.") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"HITL case '{case_id}' is already resolved.") from exc
 
     if case.transaction.callback_url:
         event = WebhookEvent(

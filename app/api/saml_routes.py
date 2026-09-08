@@ -169,5 +169,9 @@ async def saml_sp_metadata(settings: Settings = Depends(get_settings)) -> Respon
     saml_settings = OneLogin_Saml2_Settings(_saml_settings_dict(settings), sp_validation_only=True)
     errors = saml_settings.check_sp_settings(_saml_settings_dict(settings))
     if errors:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Invalid SP configuration: {errors}")
+        logger.error("Invalid SAML SP configuration: %s", errors)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid SAML service provider configuration.",
+        )
     return Response(content=saml_settings.get_sp_metadata(), media_type="application/xml")

@@ -79,10 +79,10 @@ def _validate_period(date_from: str, date_to: str) -> ReportPeriod:
     try:
         start = dt.date.fromisoformat(date_from)
         end = dt.date.fromisoformat(date_to)
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid date format (expected YYYY-MM-DD): {e}",
+            detail="Invalid date format. Expected YYYY-MM-DD.",
         )
     if start > end:
         raise HTTPException(
@@ -189,8 +189,8 @@ async def get_summary(
         logger.exception("Failed to build aggregated report: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analytics pipeline failed: {exc}",
-        )
+            detail="Analytics pipeline failed to generate report.",
+        ) from exc
 
     # Run anomaly detection in-process (fast; all data already in memory)
     report = detect_anomalies(report)

@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
+import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.requests import Request
@@ -255,10 +257,62 @@ app.include_router(grievance_router)
 app.include_router(internal_router)
 
 
+def _get_request_id(request: Request) -> str:
+    return (
+        getattr(request.state, "request_id", None)
+        or request.headers.get("x-request-id")
+        or request.headers.get("x-correlation-id")
+        or str(uuid.uuid4())
+    )
+
+
 @app.exception_handler(ParsingError)
-async def parsing_error_handler(_: Request, exc: ParsingError) -> JSONResponse:
-    logger.warning("Unhandled ParsingError reached top-level handler: %s", exc)
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+async def parsing_error_handler(request: Request, exc: ParsingError) -> JSONResponse:
+    request_id = _get_request_id(request)
+    logger.exception("Unhandled ParsingError [request_id=%s] on %s %s: %s", request_id, request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal error while parsing the document."},
+        headers={"X-Request-ID": request_id, "X-Correlation-ID": request_id},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = _get_request_id(request)
+    headers = dict(exc.headers or {})
+    headers["X-Request-ID"] = request_id
+    headers["X-Correlation-ID"] = request_id
+
+    if exc.status_code >= 500:
+        logger.error("HTTP %d error [request_id=%s] on %s %s: %s", exc.status_code, request_id, request.method, request.url.path, exc.detail)
+        # Ensure 5xx responses never leak raw database errors, file paths, or stack traces
+        detail = exc.detail
+        if isinstance(detail, str) and (
+            "Traceback" in detail
+            or "File \"" in detail
+            or bool(re.search(r"\bline \d+\b", detail))
+            or bool(re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)\b", detail, re.IGNORECASE))
+            or bool(re.search(r"\b(relation|column|database)\b", detail, re.IGNORECASE))
+            or "\\" in detail
+            or "Exception:" in detail
+            or "Error:" in detail
+        ):
+            detail = "Internal server error."
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=headers)
+
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=headers)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = _get_request_id(request)
+    logger.exception("Unhandled internal exception [request_id=%s] on %s %s: %s", request_id, request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error."},
+        headers={"X-Request-ID": request_id, "X-Correlation-ID": request_id},
+    )
 
 
 @app.get("/")

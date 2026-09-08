@@ -40,8 +40,11 @@ def _parse_window(date_from: str, date_to: str) -> tuple[dt.datetime, dt.datetim
     try:
         start = dt.date.fromisoformat(date_from)
         end = dt.date.fromisoformat(date_to)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid date format: {e}")
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid date format. Expected YYYY-MM-DD.",
+        )
     if start > end:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="date_from must be on or before date_to.")
     return (

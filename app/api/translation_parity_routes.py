@@ -144,6 +144,6 @@ async def resolve_discrepancy_case(
     try:
         return await discrepancy_queue.resolve(case_id, resolution.status, principal.subject, resolution.notes)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No translation discrepancy case '{case_id}'.") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Discrepancy case '{case_id}' is already resolved.") from exc

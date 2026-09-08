@@ -75,9 +75,9 @@ async def confirm_grievance(
     try:
         return await queue.confirm_for_submission(grievance_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No grievance '{grievance_id}'.") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Grievance '{grievance_id}' cannot be confirmed in its current state.") from exc
 
 
 @router.post("/{grievance_id}/refresh-status", response_model=GrievanceRecord, dependencies=[_require_officer_role])

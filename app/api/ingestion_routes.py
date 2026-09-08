@@ -148,16 +148,23 @@ async def upload_circular_pdf(
         await session.commit()
 
         process_manual_upload_task.delay(job_id)
-    except (InvalidFileTypeError, PathTraversalError) as exc:
+    except InvalidFileTypeError as exc:
         logger.warning("Upload validation failed for '%s': %s", file.filename, exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Upload rejected: {exc}",
+            detail="Upload rejected: Invalid file content or format.",
+        ) from exc
+    except PathTraversalError as exc:
+        logger.warning("Path traversal detected during upload of '%s': %s", file.filename, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Upload rejected: Invalid filename or storage key.",
         ) from exc
     except FileTooLargeError as exc:
+        logger.warning("File too large during upload of '%s': %s", file.filename, exc)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=str(exc),
+            detail=f"File exceeds {settings.max_upload_mb}MB limit.",
         ) from exc
     except ObjectStorageNotConfiguredError as exc:
         logger.error("Manual upload rejected: object storage not configured: %s", exc)

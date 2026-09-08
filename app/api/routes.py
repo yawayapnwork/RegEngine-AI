@@ -54,6 +54,21 @@ def _map_status(exc: Exception) -> int:
     return _ERROR_STATUS_MAP.get(type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+_SAFE_ERROR_MESSAGES: dict[type[Exception], str] = {
+    UnsupportedFileError: "Uploaded file is not a valid or supported PDF.",
+    ScannedDocumentError: "Document appears to be a scanned image with no readable text layer.",
+    ExtractionBackendError: "Document text extraction failed across all configured backends.",
+    ParseTimeoutError: "PDF extraction exceeded configured timeout.",
+    ChunkingError: "Failed to segment document into valid semantic chunks.",
+    EmbeddingError: "Failed to generate vector embeddings for document chunks.",
+    IndexingError: "Failed to index document chunks into vector search.",
+}
+
+
+def _safe_error_detail(exc: Exception, default: str = "Internal error while processing request.") -> str:
+    return _SAFE_ERROR_MESSAGES.get(type(exc), default)
+
+
 @router.post(
     "/v1/circulars/parse",
     response_model=ParseResult,
@@ -83,7 +98,7 @@ async def parse_circular(
         return await parse_pdf_bytes(body, file.filename, settings)
     except tuple(_ERROR_STATUS_MAP.keys()) as exc:
         logger.warning("Parse failed for '%s': %s", file.filename, exc)
-        raise HTTPException(status_code=_map_status(exc), detail=str(exc)) from exc
+        raise HTTPException(status_code=_map_status(exc), detail=_safe_error_detail(exc, "Internal error while parsing the document.")) from exc
     except Exception as exc:  # noqa: BLE001 - final safety net, never leak internals
         logger.exception("Unhandled error parsing '%s'", file.filename)
         raise HTTPException(
@@ -107,7 +122,7 @@ async def index_circular(
         return await index_chunks(request.chunks, settings, recreate_collection=request.recreate_collection)
     except (EmbeddingError, IndexingError) as exc:
         logger.warning("Indexing failed: %s", exc)
-        raise HTTPException(status_code=_map_status(exc), detail=str(exc)) from exc
+        raise HTTPException(status_code=_map_status(exc), detail=_safe_error_detail(exc, "Internal error while indexing chunks.")) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled error during indexing")
         raise HTTPException(
@@ -133,7 +148,13 @@ async def parse_and_index_circular(
         return await index_chunks(parsed.chunks, settings, recreate_collection=recreate_collection)
     except (EmbeddingError, IndexingError) as exc:
         logger.warning("Indexing failed for '%s': %s", file.filename, exc)
-        raise HTTPException(status_code=_map_status(exc), detail=str(exc)) from exc
+        raise HTTPException(status_code=_map_status(exc), detail=_safe_error_detail(exc, "Internal error while indexing chunks.")) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error indexing after parse for '%s'", file.filename)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal error while indexing chunks.",
+        ) from exc
 
 
 @router.post(
@@ -171,12 +192,12 @@ async def process_e2e_circular(
         )
     except tuple(_ERROR_STATUS_MAP.keys()) as exc:
         logger.warning("E2E processing failed for '%s': %s", file.filename, exc)
-        raise HTTPException(status_code=_map_status(exc), detail=str(exc)) from exc
+        raise HTTPException(status_code=_map_status(exc), detail=_safe_error_detail(exc, "Internal error processing circular.")) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled error processing circular '%s'", file.filename)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error processing circular: {exc}",
+            detail="Internal error processing circular.",
         ) from exc
 
 

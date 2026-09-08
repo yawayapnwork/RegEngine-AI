@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 
 import redis.asyncio as redis
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -57,6 +58,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self._settings = settings
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        request_id = (
+            request.headers.get("x-request-id")
+            or request.headers.get("x-correlation-id")
+            or str(uuid.uuid4())
+        )
+        request.state.request_id = request_id
+        request.state.correlation_id = request_id
+
         # Same exemption list as rate limiting: infra/public paths
         # (/healthz especially -- kubelet/Docker probes hit it over plain
         # HTTP even when real traffic requires TLS) never need HTTPS enforced.
@@ -66,6 +75,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=400,
                     content={"detail": "HTTPS required. This endpoint does not accept plaintext HTTP."},
+                    headers={"X-Request-ID": request_id, "X-Correlation-ID": request_id},
                 )
 
         response = await call_next(request)
@@ -74,6 +84,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = response.headers.get("Cache-Control", "no-store")
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Correlation-ID"] = request_id
         return response
 
 
