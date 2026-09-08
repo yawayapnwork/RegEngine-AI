@@ -1,4 +1,16 @@
-"""Legal knowledge graph pipeline (Neo4j): models the full web of
+"""[FROZEN / NON-MVP EXPERIMENTAL SUBSYSTEM]
+===============================================================================
+Status: Frozen / Non-MVP Experimental
+Core MVP Pipeline: Regulatory Document -> Extraction -> Clause Interpretation
+                  -> Canonical Facts -> Policy Compilation -> HITL Review
+                  -> Policy Activation -> OPA Evaluation -> Evidence Ledger
+
+This subsystem is preserved for future architectural extensions but is outside
+the active regulatory-compliance MVP. It is not imported or required by the
+core execution, compilation, ingestion, or ledger pipeline.
+===============================================================================
+
+Legal knowledge graph pipeline (Neo4j): models the full web of
 regulatory circulars/clauses/entities/obligations/penalties and their
 relationships (SUPERSEDES, AMENDS, REFERENCES, APPLIES_TO, CONFLICTS_WITH),
 and automates discovery of contradictory thresholds and unenforced

@@ -272,8 +272,8 @@ class HITLReviewService:
             rule_activated,
         )
 
-        # Publish OPA event only if the rule was actually activated
-        if rule_activated and compiled_rule is not None and policy_publisher is not None:
+        # Publish OPA event only if the rule was actually activated and has compiled Rego
+        if rule_activated and compiled_rule is not None and compiled_rule.rego_policy and policy_publisher is not None:
             try:
                 await policy_publisher.publish_approved(compiled_rule, approved_by=principal_subject)
             except Exception:

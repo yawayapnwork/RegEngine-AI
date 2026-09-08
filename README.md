@@ -21,6 +21,7 @@ flowchart LR
 ## Contents
 
 - [Architecture & Processing Flow](#architecture--processing-flow)
+- [Core MVP Architecture vs. Frozen Subsystems](#core-mvp-architecture-vs-frozen-subsystems)
 - [Repository Layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Installation & Dependency Structure](#installation--dependency-structure)
@@ -49,22 +50,87 @@ flowchart LR
 
 ---
 
+## Core MVP Architecture vs. Frozen Subsystems
+
+RegEngine's active operational scope is strictly focused on the core regulatory-compliance MVP pipeline:
+
+$$\text{PDF regulatory document} \longrightarrow \text{extraction} \longrightarrow \text{clause interpretation} \longrightarrow \text{canonical facts} \longrightarrow \text{deterministic policy compilation} \longrightarrow \text{HITL review} \longrightarrow \text{policy activation} \longrightarrow \text{OPA evaluation} \longrightarrow \text{cryptographic evidence/audit}$$
+
+### Subsystem Classification Matrix
+
+To keep the production and CI footprint lean without losing valuable prospective code, RegEngine explicitly segregates core components from frozen/experimental extensions. Frozen directories are retained in the codebase but removed from the default startup, runtime, and background execution paths.
+
+For full architectural details, rules, and runtime guarantees, see [`docs/architecture/mvp-boundary.md`](docs/architecture/mvp-boundary.md).
+
+| Directory / Feature | Status | In Core Path? | Description & Isolation Mode |
+|---|---|:---:|---|
+| `app/parsing` | **Core MVP** | Yes | PDF extraction, layout-aware chunking, dual SHA-256 digests. |
+| `app/agents` | **Core MVP** | Yes | CrewAI dual-agent extraction and audit under bounded concurrency. |
+| `app/compiler` | **Core MVP** | Yes | Deterministic Rego & JSON-Logic compilation, HITL ambiguity flagging. |
+| `app/execution` | **Core MVP** | Yes | Policy evaluator, OPA client/publisher, hot-reload, Celery batch worker. |
+| `app/services` | **Core MVP** | Yes | Orchestrator, HITL lifecycle service, circular processing pipeline. |
+| `app/ledger` | **Core MVP** | Yes | Append-only SHA-256 hash-chained tamper-evident audit ledger. |
+| `app/db` | **Core MVP** | Yes | Relational models (`Circular`, `Clause`, `CompiledRule`, `HITLReview`, `Ledger`). |
+| `app/api` | **Core MVP** | Yes | REST routes (`/v1/circulars`, `/v1/execution`, `/v1/hitl-reviews`, `/v1/auth`). |
+| `app/storage` | **Core MVP** | Yes | Local filesystem and S3 storage abstraction. |
+| `app/security` | **Core MVP** | Yes | JWT auth, RBAC, step-up MFA for compliance approval actions. |
+| `frontend/` | **Core MVP** | Yes | React dashboard wired to backend REST APIs (no mock dependencies). |
+| `app/zkp` | **Frozen / Experimental** | No | Zero-knowledge proof compliance proofs (preserved, not invoked). |
+| `app/fix_gateway` | **Frozen / Experimental** | No | Financial Information eXchange (FIX) protocol bridge. |
+| `app/negotiation` | **Frozen / Experimental** | No | Agent-to-agent regulatory clarification negotiation. |
+| `app/healing` | **Frozen / Experimental** | No | Autonomous policy self-healing from execution anomalies. |
+| `app/grievance_escalation` | **Frozen / Experimental** | No | SEBI SCORES / investor grievance automation (beat tasks gated off). |
+| `app/canary` | **Frozen / Experimental** | No | Canary policy deployments and rollback windows (beat tasks gated off). |
+| `app/regulatory_filing` | **Frozen / Experimental** | No | Automated regulatory filing generation (beat tasks gated off). |
+| `app/localization` | **Frozen / Experimental** | No | Multilingual OCR and vernacular circular processing. |
+| `app/translation_parity` | **Frozen / Experimental** | No | Cross-lingual legal translation verification and parity scoring. |
+| `app/backtest` | **Frozen / Experimental** | No | Historical market backtesting engine for draft policies. |
+| `app/graph` | **Frozen / Experimental** | No | Circular-to-clause dependency knowledge graph engine. |
+| `app/diffing` | **Frozen / Experimental** | No | Regulatory supersession diffing and amendatory clause tracking. |
+| `app/incident` | **Frozen / Experimental** | No | Real-time breach notification WebSockets (gated behind `incident_broadcast_enabled=False`). |
+| Multi-Regulator (RBI/IRDAI/PFRDA) | **Frozen / Experimental** | No | `Regulator.SEBI` is the sole active core MVP regulator; others marked frozen. |
+
+### Architectural Boundary Guarantees
+
+1. **Zero-Dependency Core Startup**: The core application (`uvicorn app.main:app`) does not initialize or require services, brokers, or periodic background tasks associated with non-MVP features.
+2. **Feature Flags**: Experimental Celery beat tasks and WebSocket subscribers default to `False` (`settings.canary_enabled`, `settings.regulatory_filing_enabled`, `settings.grievance_escalation_enabled`, `settings.incident_broadcast_enabled`).
+3. **No Blind Deletion**: All frozen subsystems remain present in the tree with standard `[FROZEN / NON-MVP EXPERIMENTAL SUBSYSTEM]` banners for future development.
+
+---
+
 ## Repository Layout
 
 ```
 app/
-  parsing/          PDF extraction, chunking, cryptographic hashing (raw vs text)
-  vectorstore/      Embeddings + Qdrant indexing
-  agents/           CrewAI dual-agent extraction / logic audit pipelines, schemas
-  compiler/         Rego + JSON-Logic compilers, naming conventions, HITL flagging
-  execution/        Evaluator, OPA client, policy publisher, Celery tasks, HITL queue
-  ledger/           SHA-256 hash-chain primitives, LedgerService, verifier CLI
-  db/               SQLAlchemy ORM models (circulars, clauses, rules, reviews, ledger)
-  storage/          Storage abstraction: LocalFilesystemStorage and S3Storage
-  security/         OAuth2/JWT auth, RBAC, step-up MFA, tenant crypto, secrets backends
-  api/              FastAPI routers (circulars, execution, hitl-reviews, auth, dlq)
-  main.py           FastAPI application assembly and lifecycle handlers
-  config.py         Centralized environment-driven settings (Pydantic Settings)
+  # Core Regulatory-Compliance MVP Subsystems
+  parsing/          [Core MVP] PDF extraction, chunking, cryptographic hashing (raw vs text)
+  vectorstore/      [Core MVP] Embeddings + Qdrant indexing
+  agents/           [Core MVP] CrewAI dual-agent extraction / logic audit pipelines, schemas
+  compiler/         [Core MVP] Rego + JSON-Logic compilers, naming conventions, HITL flagging
+  execution/        [Core MVP] Evaluator, OPA client, policy publisher, Celery tasks, HITL queue
+  services/         [Core MVP] Orchestrator, HITL review lifecycle service, pipeline coordination
+  ledger/           [Core MVP] SHA-256 hash-chain primitives, LedgerService, verifier CLI
+  db/               [Core MVP] SQLAlchemy ORM models (circulars, clauses, rules, reviews, ledger)
+  storage/          [Core MVP] Storage abstraction: LocalFilesystemStorage and S3Storage
+  security/         [Core MVP] OAuth2/JWT auth, RBAC, step-up MFA, tenant crypto, secrets backends
+  api/              [Core MVP] Core FastAPI routers (circulars, execution, hitl-reviews, auth)
+  main.py           [Core MVP] FastAPI application assembly and lifecycle handlers
+  config.py         [Core MVP] Centralized environment-driven settings (Pydantic Settings)
+
+  # Frozen / Non-MVP Experimental Subsystems (Preserved, decoupled from core runtime)
+  zkp/                  [Frozen] Zero-knowledge proof compliance proofs
+  fix_gateway/          [Frozen] FIX protocol order processing gateway
+  negotiation/          [Frozen] Autonomous agent-to-agent regulatory negotiation
+  healing/              [Frozen] Autonomous policy self-healing from incident telemetry
+  grievance_escalation/ [Frozen] SEBI SCORES / investor grievance escalation workflows
+  canary/               [Frozen] Canary policy routing and rollback automation
+  regulatory_filing/    [Frozen] Automated regulatory compliance filing generation
+  localization/         [Frozen] Multilingual OCR and vernacular document extraction
+  translation_parity/   [Frozen] Cross-lingual legal translation parity validation
+  backtest/             [Frozen] Historical trade compliance backtesting
+  graph/                [Frozen] Cross-circular dependency knowledge graph
+  diffing/              [Frozen] Regulatory supersession and amendatory diffing
+  incident/             [Frozen] WebSocket breach event streaming
 frontend/
   src/constants/    Canonical constants (pipeline stage definitions, labels)
   src/components/   UI views: pipeline, splitview, playground, hitl, vault, layout

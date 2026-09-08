@@ -60,29 +60,34 @@ All non-2xx responses return a standardized JSON error structure:
 """
 
 
-# Redoc x-tagGroups Domain Structure
+# Redoc x-tagGroups Domain Structure (Core MVP vs Frozen Experimental)
 REDOC_TAG_GROUPS = [
     {
-        "name": "1. Regulatory Ingestion",
+        "name": "1. Regulatory Ingestion (Core MVP)",
         "tags": ["ingestion-service", "ingestion-admin"],
     },
     {
-        "name": "2. Agent Rules Engine",
-        "tags": ["sandbox", "compiler"],
+        "name": "2. Agent Rules Engine (Core MVP)",
+        "tags": ["compiler"],
     },
     {
-        "name": "3. OPA Evaluation",
+        "name": "3. OPA Evaluation (Core MVP)",
         "tags": ["transaction-evaluator", "cdc-ingestion", "batch-execution"],
     },
     {
-        "name": "4. Cryptographic Audit Vault",
+        "name": "4. Cryptographic Audit Vault (Core MVP)",
         "tags": ["compliance-analytics", "dlq-admin"],
     },
     {
-        "name": "5. HITL Management",
+        "name": "5. HITL Management (Core MVP)",
         "tags": ["hitl-review-portal", "webhooks-callbacks"],
     },
+    {
+        "name": "6. Frozen / Experimental Extensions (Non-MVP)",
+        "tags": ["sandbox", "Zero-Knowledge Proof Verification", "Legal Knowledge Graph"],
+    },
 ]
+
 
 
 def get_custom_openapi(app: FastAPI) -> dict[str, Any]:

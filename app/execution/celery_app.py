@@ -73,40 +73,52 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     result_expires=86400,
-    beat_schedule={
-        "poll-sebi-sources": {
-            "task": "app.ingestion.tasks.poll_sebi_sources_task",
-            "schedule": settings.ingestion_poll_interval_seconds,
-        },
-        "purge-expired-llm-cache-entries": {
-            "task": "app.llm_ops.tasks.purge_expired_cache_entries_task",
-            "schedule": settings.llm_cache_purge_interval_seconds,
-        },
-        "sweep-overdue-escalations": {
-            "task": "app.incident.tasks.sweep_overdue_escalations_task",
-            "schedule": settings.incident_escalation_sweep_interval_seconds,
-        },
-        "directory-sync-poll": {
-            "task": "app.security.tasks.directory_sync_poll_task",
-            "schedule": settings.directory_sync_poll_interval_seconds,
-        },
-        "submit-pending-regulatory-filings": {
-            "task": "app.regulatory_filing.tasks.submit_pending_filings_task",
-            "schedule": settings.regulatory_filing_submit_interval_seconds,
-        },
-        "evaluate-canary-windows": {
-            "task": "app.canary.tasks.evaluate_canary_windows_task",
-            "schedule": settings.canary_evaluation_sweep_interval_seconds,
-        },
-        "submit-pending-grievances": {
-            "task": "app.grievance_escalation.tasks.submit_pending_grievances_task",
-            "schedule": settings.grievance_escalation_poll_interval_seconds,
-        },
-        "poll-pending-grievances": {
-            "task": "app.grievance_escalation.tasks.poll_pending_grievances_task",
-            "schedule": settings.grievance_escalation_poll_interval_seconds,
-        },
-    },
 )
+
+# Core MVP periodic tasks
+beat_schedule: dict[str, dict[str, Any]] = {
+    "poll-sebi-sources": {
+        "task": "app.ingestion.tasks.poll_sebi_sources_task",
+        "schedule": settings.ingestion_poll_interval_seconds,
+    },
+    "purge-expired-llm-cache-entries": {
+        "task": "app.llm_ops.tasks.purge_expired_cache_entries_task",
+        "schedule": settings.llm_cache_purge_interval_seconds,
+    },
+    "sweep-overdue-escalations": {
+        "task": "app.incident.tasks.sweep_overdue_escalations_task",
+        "schedule": settings.incident_escalation_sweep_interval_seconds,
+    },
+    "directory-sync-poll": {
+        "task": "app.security.tasks.directory_sync_poll_task",
+        "schedule": settings.directory_sync_poll_interval_seconds,
+    },
+}
+
+# Frozen / Non-MVP periodic tasks: only active when explicitly enabled
+if settings.regulatory_filing_enabled:
+    beat_schedule["submit-pending-regulatory-filings"] = {
+        "task": "app.regulatory_filing.tasks.submit_pending_filings_task",
+        "schedule": settings.regulatory_filing_submit_interval_seconds,
+    }
+
+if settings.canary_enabled:
+    beat_schedule["evaluate-canary-windows"] = {
+        "task": "app.canary.tasks.evaluate_canary_windows_task",
+        "schedule": settings.canary_evaluation_sweep_interval_seconds,
+    }
+
+if settings.grievance_escalation_enabled:
+    beat_schedule["submit-pending-grievances"] = {
+        "task": "app.grievance_escalation.tasks.submit_pending_grievances_task",
+        "schedule": settings.grievance_escalation_poll_interval_seconds,
+    }
+    beat_schedule["poll-pending-grievances"] = {
+        "task": "app.grievance_escalation.tasks.poll_pending_grievances_task",
+        "schedule": settings.grievance_escalation_poll_interval_seconds,
+    }
+
+celery_app.conf.beat_schedule = beat_schedule
+
 
 celery_app.autodiscover_tasks(["app.execution", "app.ingestion", "app.agents", "app.compiler", "app.vectorstore", "app.llm_ops", "app.incident", "app.security", "app.backtest", "app.regulatory_filing", "app.canary", "app.grievance_escalation"])

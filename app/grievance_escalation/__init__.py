@@ -1,4 +1,16 @@
-"""Automated grievance escalation agent: when a broker's non-compliance
+"""[FROZEN / NON-MVP EXPERIMENTAL SUBSYSTEM]
+===============================================================================
+Status: Frozen / Non-MVP Experimental
+Core MVP Pipeline: Regulatory Document -> Extraction -> Clause Interpretation
+                  -> Canonical Facts -> Policy Compilation -> HITL Review
+                  -> Policy Activation -> OPA Evaluation -> Evidence Ledger
+
+This subsystem is preserved for future architectural extensions but is outside
+the active regulatory-compliance MVP. It is not imported or required by the
+core execution, compilation, ingestion, or ledger pipeline.
+===============================================================================
+
+Automated grievance escalation agent: when a broker's non-compliance
 is SYSTEMIC (the same broker breaching the same rule repeatedly within
 a rolling window, not one isolated failure), assembles an evidence
 package (the SEBI clause hash, the transaction payload, and a SHA-256

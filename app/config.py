@@ -397,6 +397,7 @@ class Settings(BaseSettings):
     slack_signing_secret: str | None = None
 
     # --- Breach Notification Engine (app.incident) ---
+    incident_broadcast_enabled: bool = False  # WebSocket dashboard fanout subscriber
     incident_key_prefix: str = "regengine:incidents"
     incident_events_channel: str = "regengine:incident_events"  # Redis pub/sub -> WebSocket dashboard fanout
     celery_incidents_queue: str = "regengine_incidents"

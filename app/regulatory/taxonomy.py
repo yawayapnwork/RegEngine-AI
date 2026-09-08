@@ -3,19 +3,16 @@ this platform supports, what document types and entity types each one
 uses, and how to recognize one from raw document text or an ingestion
 source tag.
 
-This module is the abstraction boundary requirement 1 asks for. Every
-other module that used to hardcode "SEBI" (app.parsing.extractor's
-circular-number regex, app.compiler.naming's Rego package name,
-app.agents.crew's agent backstory, app.ingestion's feed configuration)
-now derives that behavior from a `Regulator` + `RegulatorProfile` looked
-up here instead, so adding a fifth regulator later is "add one profile
-and its patterns," not "grep the codebase for every SEBI-specific string."
+MVP Status & Scope Boundary:
+- CORE MVP: Regulator.SEBI (Securities and Exchange Board of India) -- capital markets,
+  stockbroking, AMCs, depositories, upfront margin circulars, and standard circular types.
+- FROZEN EXTENSIONS: Regulator.RBI, Regulator.IRDAI, and Regulator.PFRDA are non-MVP
+  experimental extensions preserved for future multi-jurisdiction expansion.
 
-Backward compatibility: every existing SEBI-only document continues to
-parse identically -- `detect_regulator_and_document` falls back to
-`Regulator.SEBI` / `DocumentType.CIRCULAR` when no regulator-specific
-pattern matches at all, which is the same behavior the old SEBI-only
-regex effectively had (it just never considered the question).
+Backward compatibility: every existing SEBI document continues to parse
+identically -- `detect_regulator_and_document` falls back to
+`Regulator.SEBI` / `DocumentType.CIRCULAR` when no regulator-specific pattern
+matches.
 """
 from __future__ import annotations
 

@@ -1,6 +1,8 @@
 """Tests for circular listing optimization: eliminating N+1 queries,
 verifying O(1) query scaling, pagination before aggregation, and semantic parity.
 """
+from __future__ import annotations
+
 import datetime as dt
 from pathlib import Path
 import pytest

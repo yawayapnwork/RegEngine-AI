@@ -151,12 +151,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         name="hitl-queue-depth-poller",
     )
 
-    breach_subscriber = BreachEventBroadcastSubscriber(
-        redis_client=get_redis_pool(),
-        channel=settings.incident_events_channel,
-        manager=get_dashboard_connection_manager(),
-    )
-    breach_broadcast_task = asyncio.create_task(breach_subscriber.run(), name="breach-event-broadcast-subscriber")
+    breach_broadcast_task = None
+    breach_subscriber = None
+    if settings.incident_broadcast_enabled:
+        breach_subscriber = BreachEventBroadcastSubscriber(
+            redis_client=get_redis_pool(),
+            channel=settings.incident_events_channel,
+            manager=get_dashboard_connection_manager(),
+        )
+        breach_broadcast_task = asyncio.create_task(breach_subscriber.run(), name="breach-event-broadcast-subscriber")
 
     # FIX gateway's native-policy-set hot-reload -- same per-process
     # rationale as PolicyHotReloadSubscriber above (each process owns its
@@ -183,10 +186,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         hot_reload_task.cancel()
         queue_depth_stop.set()
         queue_depth_task.cancel()
-        breach_subscriber.stop()
-        breach_broadcast_task.cancel()
-        background_tasks = [hot_reload_task, queue_depth_task, breach_broadcast_task]
-        if fix_gateway_subscriber is not None:
+        background_tasks = [hot_reload_task, queue_depth_task]
+        if breach_subscriber is not None and breach_broadcast_task is not None:
+            breach_subscriber.stop()
+            breach_broadcast_task.cancel()
+            background_tasks.append(breach_broadcast_task)
+        if fix_gateway_subscriber is not None and fix_gateway_task is not None:
             fix_gateway_subscriber.stop()
             fix_gateway_task.cancel()
             background_tasks.append(fix_gateway_task)
@@ -258,27 +263,37 @@ else:
 
 from app.api.webhook_routes import router as webhook_router
 
-app.include_router(router)
-app.include_router(execution_router)
-app.include_router(ingestion_router)
-app.include_router(auth_router)
-app.include_router(graph_router)
-app.include_router(backtest_router)
-app.include_router(saml_router)
-app.include_router(hitl_review_router)
-app.include_router(dlq_router)
-app.include_router(sandbox_router)
-app.include_router(analytics_router)
-app.include_router(llm_cost_router)
-app.include_router(diffing_router)
-app.include_router(explainability_router)
-app.include_router(incident_router)
-app.include_router(webhook_router)
-app.include_router(zkp_router)
-app.include_router(governance_router)
-app.include_router(translation_parity_router)
-app.include_router(grievance_router)
-app.include_router(internal_router)
+# =============================================================================
+# Core Regulatory-Compliance MVP Routers
+# Canonical Path: Regulatory PDF -> Parsing -> Extraction & Audit -> Facts
+#                -> Policy Compilation -> HITL Review -> OPA Evaluation -> Ledger
+# =============================================================================
+app.include_router(router)               # /v1/circulars
+app.include_router(execution_router)     # /v1/execution
+app.include_router(hitl_review_router)   # /v1/hitl-reviews
+app.include_router(auth_router)          # /v1/auth
+app.include_router(ingestion_router)     # /v1/ingestion
+app.include_router(dlq_router)           # /v1/admin/dlq
+app.include_router(internal_router)      # /v1/internal
+app.include_router(webhook_router)       # /v1/webhooks
+
+# =============================================================================
+# Frozen / Non-MVP Experimental Routers (Preserved for Future Extensions)
+# =============================================================================
+app.include_router(zkp_router)                # /v1/zkp (Zero-Knowledge Proofs)
+app.include_router(grievance_router)          # /v1/grievances (SCORES escalation)
+app.include_router(translation_parity_router) # /v1/translation-parity (Cross-lingual)
+app.include_router(backtest_router)           # /v1/backtest (Historical replay)
+app.include_router(sandbox_router)            # /v1/sandbox (Intermediary simulator)
+app.include_router(graph_router)              # /v1/graph (Neo4j Knowledge Graph)
+app.include_router(diffing_router)            # /v1/diffing (Regulatory diffing)
+app.include_router(analytics_router)          # /v1/analytics (Operational analytics)
+app.include_router(llm_cost_router)           # /v1/llm-cost (Token telemetry)
+app.include_router(explainability_router)     # /v1/explainability (Tree reasoning)
+app.include_router(incident_router)           # /v1/incidents (Incident management)
+app.include_router(governance_router)         # /v1/governance (Board kill-switch)
+app.include_router(saml_router)               # /v1/auth/saml (Enterprise SSO)
+
 
 
 def _get_request_id(request: Request) -> str:
