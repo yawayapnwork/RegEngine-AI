@@ -30,6 +30,7 @@ from app.db.models import CompiledRule, HITLReview
 from app.db.session import get_db_session
 from app.execution.dependencies import get_policy_publisher
 from app.execution.policy_publisher import PolicyPublisher
+from app.services.hitl_service import HITLReviewService
 from app.webhooks.notifier import AuditNotifier
 
 logger = logging.getLogger(__name__)
@@ -142,46 +143,25 @@ async def slack_interactive_action_callback(
                 media_type="application/json",
             )
 
-        compiled_rule: CompiledRule | None = None
-        if review.compiled_rule_id is not None:
-            compiled_rule = await session.get(CompiledRule, review.compiled_rule_id)
-            if compiled_rule:
-                # Deactivate older versions of same rule_id
-                await session.execute(
-                    CompiledRule.__table__.update()
-                    .where(CompiledRule.rule_id == compiled_rule.rule_id, CompiledRule.id != compiled_rule.id)
-                    .values(is_active=False)
-                )
-                compiled_rule.is_active = True
-                compiled_rule.hitl_status = "RESOLVED"
-
-        review.status = "RESOLVED"
-        review.compliance_officer_id = f"slack:{slack_user}"
-        review.resolution_notes = f"Approved via Slack interactive button at {formatted_time}"
-        review.resolved_at = now_utc
-
-        await session.commit()
-        await session.refresh(review)
-        logger.info("HITL review '%s' APPROVED via Slack by '%s'", review_id, slack_user)
-
-        # Trigger OPA hot-reload via PolicyPublisher
-        if compiled_rule:
-            try:
-                await policy_publisher.publish_approved(compiled_rule, approved_by=f"slack:{slack_user}")
-            except Exception as pub_exc:
-                logger.warning("DB approval committed, but OPA hot-reload publish lagged: %s", pub_exc)
-
-        response_text = f"✅ *Policy APPROVED* by @{slack_user} via Slack on {formatted_time}. OPA Policy hot-swapped!"
+        review, rule_activated, compiled_rule = await HITLReviewService.approve_review(
+            session=session,
+            review_id=review_id,
+            principal_subject=f"slack:{slack_user}",
+            notes=f"Approved via Slack interactive button at {formatted_time}",
+            policy_publisher=policy_publisher,
+        )
+        if rule_activated:
+            response_text = f"✅ *Policy APPROVED & ACTIVATED* by @{slack_user} via Slack on {formatted_time}. OPA Policy hot-swapped!"
+        else:
+            response_text = f"✅ *Review APPROVED* by @{slack_user} via Slack on {formatted_time}. (Policy remains inactive pending remaining reviews)."
 
     elif action_id == "reject_policy":
-        review.status = "REJECTED"
-        review.compliance_officer_id = f"slack:{slack_user}"
-        review.resolution_notes = f"Rejected via Slack interactive button at {formatted_time}"
-        review.resolved_at = now_utc
-
-        await session.commit()
-        await session.refresh(review)
-        logger.info("HITL review '%s' REJECTED via Slack by '%s'", review_id, slack_user)
+        review = await HITLReviewService.reject_review(
+            session=session,
+            review_id=review_id,
+            principal_subject=f"slack:{slack_user}",
+            notes=f"Rejected via Slack interactive button at {formatted_time}",
+        )
         response_text = f"❌ *Policy REJECTED* by @{slack_user} via Slack on {formatted_time}."
 
     elif action_id == "modify_ast":
@@ -232,37 +212,28 @@ async def teams_adaptive_card_action_callback(
     formatted_time = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
 
     if action == "approve_policy":
-        compiled_rule: CompiledRule | None = None
-        if review.compiled_rule_id is not None:
-            compiled_rule = await session.get(CompiledRule, review.compiled_rule_id)
-            if compiled_rule:
-                await session.execute(
-                    CompiledRule.__table__.update()
-                    .where(CompiledRule.rule_id == compiled_rule.rule_id, CompiledRule.id != compiled_rule.id)
-                    .values(is_active=False)
-                )
-                compiled_rule.is_active = True
-                compiled_rule.hitl_status = "RESOLVED"
+        if review.status == "RESOLVED":
+            return {"type": "message", "text": f"ℹ️ Review '{review_id}' was already approved."}
 
-        review.status = "RESOLVED"
-        review.compliance_officer_id = f"teams:{teams_user}"
-        review.resolution_notes = f"Approved via MS Teams Adaptive Card at {formatted_time}"
-        review.resolved_at = now_utc
-
-        await session.commit()
-        if compiled_rule:
-            try:
-                await policy_publisher.publish_approved(compiled_rule, approved_by=f"teams:{teams_user}")
-            except Exception:
-                pass
-        msg = f"✅ Policy APPROVED by {teams_user} via MS Teams."
+        review, rule_activated, compiled_rule = await HITLReviewService.approve_review(
+            session=session,
+            review_id=review_id,
+            principal_subject=f"teams:{teams_user}",
+            notes=f"Approved via MS Teams Adaptive Card at {formatted_time}",
+            policy_publisher=policy_publisher,
+        )
+        if rule_activated:
+            msg = f"✅ Policy APPROVED & ACTIVATED by {teams_user} via MS Teams."
+        else:
+            msg = f"✅ Review APPROVED by {teams_user} via MS Teams (policy remains inactive pending remaining reviews)."
 
     elif action == "reject_policy":
-        review.status = "REJECTED"
-        review.compliance_officer_id = f"teams:{teams_user}"
-        review.resolution_notes = f"Rejected via MS Teams at {formatted_time}"
-        review.resolved_at = now_utc
-        await session.commit()
+        review = await HITLReviewService.reject_review(
+            session=session,
+            review_id=review_id,
+            principal_subject=f"teams:{teams_user}",
+            notes=f"Rejected via MS Teams at {formatted_time}",
+        )
         msg = f"❌ Policy REJECTED by {teams_user} via MS Teams."
 
     else:

@@ -78,7 +78,7 @@ _HITL_REASON_CODES = (
     "invalid_threshold_value",
 )
 _HITL_SEVERITIES = ("blocking", "advisory")
-_HITL_REVIEW_STATUSES = ("PENDING", "IN_REVIEW", "RESOLVED", "REJECTED")
+_HITL_REVIEW_STATUSES = ("PENDING", "IN_REVIEW", "RESOLVED", "REJECTED", "REVISION_REQUIRED")
 _COMPILED_RULE_HITL_STATUSES = ("NONE", "ADVISORY", "BLOCKING", "RESOLVED")
 _TENANT_TYPES = ("stockbroker", "amc", "depository", "other")
 
@@ -442,7 +442,7 @@ class HITLReview(Base):
         CheckConstraint(f"severity IN {_HITL_SEVERITIES!r}", name="severity"),
         CheckConstraint(f"status IN {_HITL_REVIEW_STATUSES!r}", name="status"),
         CheckConstraint(
-            "(status IN ('RESOLVED', 'REJECTED')) = (resolved_at IS NOT NULL)",
+            "(status IN ('RESOLVED', 'REJECTED', 'REVISION_REQUIRED')) = (resolved_at IS NOT NULL)",
             name="resolved_at_consistency",
         ),
     )

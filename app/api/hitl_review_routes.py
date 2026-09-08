@@ -34,6 +34,7 @@ from app.execution.policy_publisher import PolicyPublisher
 from app.security.dependencies import require_roles
 from app.security.models import Principal, Role
 from app.security.step_up import require_step_up_mfa
+from app.services.hitl_service import HITLReviewService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/hitl-reviews", tags=["hitl-review-portal"])
@@ -102,67 +103,24 @@ async def approve_review(
     _stepped_up: Principal = Depends(require_step_up_mfa),
     policy_publisher: PolicyPublisher = Depends(get_policy_publisher),
 ) -> HITLReview:
-    """Approves the compiled policy this review concerns: activates its
-    CompiledRule version (deactivating any prior active version of the
-    same rule_id, so exactly one version is ever live -- see
-    app.db.models.CompiledRule's partial-unique-index comment), marks the
-    review RESOLVED under this officer's identity, and publishes a
-    PolicyEvent so every FastAPI worker's PolicyHotReloadSubscriber
-    hot-reloads OPA within its next pub/sub poll -- typically low
-    milliseconds, never a restart. Publishing happens AFTER the DB commit
-    (not inside the same transaction): a Redis PUBLISH cannot be rolled
-    back, so it must only ever fire once the approval it describes is
-    durably true, not before.
+    """Approves a HITL review.
 
-    Requires step-up MFA (app.security.step_up.require_step_up_mfa): a
-    valid Compliance_Officer token alone is not sufficient here -- the
-    token's underlying authentication event must also be recent and
-    MFA-satisfying (fresh `auth_time` + a qualifying `amr` value), since
-    this action activates a policy that governs live production trade
-    evaluation. `reject_review` below does not require step-up: declining
-    to activate something carries materially lower risk than approving it."""
-    review = await _get_review_or_404(session, review_id)
-    if review.status != "PENDING":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Review '{review_id}' is already '{review.status}'; cannot re-approve.",
-        )
+    Gating Logic:
+    A CompiledRule is ONLY activated (is_active=True, hitl_status='RESOLVED')
+    if EVERY required blocking review for that rule has been resolved and approved,
+    and no review is rejected or revision-required. If other blocking reviews remain,
+    the review itself is marked RESOLVED, but the CompiledRule remains inactive
+    and un-published until all reviews have cleared the gate.
 
-    compiled_rule: CompiledRule | None = None
-    if review.compiled_rule_id is not None:
-        compiled_rule = await session.get(CompiledRule, review.compiled_rule_id)
-        if compiled_rule is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated compiled_rules row no longer exists.")
-
-        await session.execute(
-            CompiledRule.__table__.update()
-            .where(CompiledRule.rule_id == compiled_rule.rule_id, CompiledRule.id != compiled_rule.id)
-            .values(is_active=False)
-        )
-        compiled_rule.is_active = True
-        compiled_rule.hitl_status = "RESOLVED"
-
-    review.status = "RESOLVED"
-    review.compliance_officer_id = principal.subject
-    review.resolution_notes = resolution.notes
-    review.resolved_at = dt.datetime.now(dt.timezone.utc)
-
-    await session.commit()
-    await session.refresh(review)
-    logger.info("HITL review '%s' APPROVED by compliance officer '%s'", review_id, principal.subject)
-
-    if compiled_rule is not None:
-        try:
-            await policy_publisher.publish_approved(compiled_rule, approved_by=principal.subject)
-        except Exception:  # noqa: BLE001 - the approval itself is already durably committed; a pub/sub
-            # publish failure must never turn into a 500 that makes the officer think approval didn't
-            # happen. PolicyCache's TTL safety net (app/execution/policy_cache.py) still bounds staleness.
-            logger.exception(
-                "Approval of review '%s' committed, but publishing its PolicyEvent failed -- "
-                "OPA hot-reload for rule_id=%s will lag until the next event or cache TTL expiry.",
-                review_id, compiled_rule.rule_id,
-            )
-
+    Requires step-up MFA (app.security.step_up.require_step_up_mfa).
+    """
+    review, _rule_activated, _compiled_rule = await HITLReviewService.approve_review(
+        session=session,
+        review_id=review_id,
+        principal_subject=principal.subject,
+        notes=resolution.notes,
+        policy_publisher=policy_publisher,
+    )
     return review
 
 
@@ -173,23 +131,29 @@ async def reject_review(
     session: AsyncSession = Depends(get_db_session),
     principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER)),
 ) -> HITLReview:
-    """Rejects the compiled policy: it is never activated. The clause
-    stays flagged for re-extraction/manual authoring; this does not delete
-    the CompiledRule row (kept for audit trail of what was proposed and
-    why it was refused)."""
-    review = await _get_review_or_404(session, review_id)
-    if review.status != "PENDING":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Review '{review_id}' is already '{review.status}'; cannot re-reject.",
-        )
+    """Rejects the compiled policy review: it is never activated. The clause
+    stays flagged for re-extraction/manual authoring."""
+    return await HITLReviewService.reject_review(
+        session=session,
+        review_id=review_id,
+        principal_subject=principal.subject,
+        notes=resolution.notes,
+    )
 
-    review.status = "REJECTED"
-    review.compliance_officer_id = principal.subject
-    review.resolution_notes = resolution.notes
-    review.resolved_at = dt.datetime.now(dt.timezone.utc)
 
-    await session.commit()
-    await session.refresh(review)
-    logger.info("HITL review '%s' REJECTED by compliance officer '%s'", review_id, principal.subject)
-    return review
+@router.post("/{review_id}/request-revision", response_model=HITLReviewOut)
+@router.post("/{review_id}/revision-required", response_model=HITLReviewOut, include_in_schema=False)
+async def request_revision_review(
+    review_id: str,
+    resolution: ReviewResolutionRequest,
+    session: AsyncSession = Depends(get_db_session),
+    principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER)),
+) -> HITLReview:
+    """Flags the review as requiring revision: the policy is not activated
+    and routes back for re-extraction."""
+    return await HITLReviewService.request_revision(
+        session=session,
+        review_id=review_id,
+        principal_subject=principal.subject,
+        notes=resolution.notes,
+    )
