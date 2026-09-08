@@ -302,13 +302,13 @@ generic endpoint handles every DLQ-routed task type).
 
 ## Frontend dashboard
 
-Four views, backed today by `frontend/src/mock/mockData.js` (shaped 1:1 to the backend Pydantic models, so
-swapping mock state for `fetch()` calls is a data-layer change, not a component rewrite):
+Five views, backed directly by the backend REST API:
 
 - **Pipeline** — PDF upload + ingestion → extraction → verification → compilation tracker
 - **Split View** — raw legal text beside its compiled Rego, with linked clause/code highlighting
+- **Policy Playground** — interactive zero-latency in-memory OPA Wasm / JSON-Logic testing and HITL submission
 - **HITL Review** — compliance-officer queue for compiler-flagged clauses and undecidable live transactions
-- **Audit Vault** — live transaction feed with clause-hash links and an on-demand chain-integrity check
+- **Audit Vault** — live transaction feed with clause-hash links and cryptographic chain-integrity verification
 
 ```bash
 cd frontend && npm run build     # production bundle -> frontend/dist/

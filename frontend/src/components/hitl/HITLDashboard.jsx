@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import Card from "../shared/Card";
 import HITLCaseCard from "./HITLCaseCard";
@@ -8,7 +9,7 @@ const FILTERS = [
   { id: "all", label: "All" },
 ];
 
-export default function HITLDashboard({ cases, onResolveCase }) {
+export default function HITLDashboard({ cases = [], onResolveCase, isLoading = false }) {
   const [filter, setFilter] = useState("pending");
 
   const visible = useMemo(() => {
@@ -53,17 +54,23 @@ export default function HITLDashboard({ cases, onResolveCase }) {
           <span className="text-right">Action</span>
         </div>
         <div className="h-[calc(100%-2.25rem)] divide-y divide-ink-800 overflow-y-auto scrollbar-thin">
-          {visible.map((c) => (
-            <HITLCaseCard
-              key={c.caseId}
-              hitlCase={c}
-              onResolve={onResolveCase}
-            />
-          ))}
-          {visible.length === 0 && (
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-sm text-slate-400">
+              <Loader2 className="mb-2 h-6 w-6 animate-spin text-blue-500" />
+              <span>Loading review cases...</span>
+            </div>
+          ) : visible.length === 0 ? (
             <p className="py-16 text-center text-sm text-slate-400">
               No cases in this filter.
             </p>
+          ) : (
+            visible.map((c) => (
+              <HITLCaseCard
+                key={c.caseId}
+                hitlCase={c}
+                onResolve={onResolveCase}
+              />
+            ))
           )}
         </div>
       </Card>

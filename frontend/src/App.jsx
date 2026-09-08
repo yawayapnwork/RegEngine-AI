@@ -140,6 +140,10 @@ export default function App() {
   const [hitlCases, setHitlCases] = useState([]);
   const [ledgerFeed, setLedgerFeed] = useState([]);
   const [pipelineRuns, setPipelineRuns] = useState([]);
+  const [selectedCircularId, setSelectedCircularId] = useState(null);
+
+  const [dataLoading, setDataLoading] = useState(false);
+  const [dataError, setDataError] = useState(null);
 
   const [uploadState, setUploadState] = useState("idle"); // idle | uploading | processing | success | error
   const [uploadResult, setUploadResult] = useState(null);
@@ -168,28 +172,46 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [session]);
 
-  const loadBackendData = async () => {
+  const loadBackendData = async (targetCircularId = null) => {
     if (!session?.token) return;
     const token = session.token;
+    setDataLoading(true);
+    setDataError(null);
     try {
       const [circList, hitlList, ledgerList] = await Promise.all([
-        listCirculars({ accessToken: token }).catch(() => []),
-        listHitlReviews({ accessToken: token }).catch(() => []),
-        getLedgerEntries({ limit: 50, accessToken: token }).catch(() => []),
+        listCirculars({ accessToken: token }).catch((err) => {
+          console.warn("Failed to fetch circulars:", err);
+          return [];
+        }),
+        listHitlReviews({ accessToken: token }).catch((err) => {
+          console.warn("Failed to fetch reviews:", err);
+          return [];
+        }),
+        getLedgerEntries({ limit: 50, accessToken: token }).catch((err) => {
+          console.warn("Failed to fetch ledger entries:", err);
+          return [];
+        }),
       ]);
 
       setPipelineRuns(buildPipelineRuns(circList));
       setHitlCases(mapHitlReviewsToCases(hitlList));
       setLedgerFeed(mapLedgerEntries(ledgerList));
 
-      if (circList && circList.length > 0) {
-        const details = await getCircularDetails(circList[0].id, { accessToken: token }).catch(() => null);
+      const activeId = targetCircularId || selectedCircularId || circList?.[0]?.id;
+      if (activeId) {
+        setSelectedCircularId(activeId);
+        const details = await getCircularDetails(activeId, { accessToken: token }).catch(() => null);
         if (details) {
           setClauses(mapCircularDetailsToClauses(details));
         }
+      } else {
+        setClauses([]);
       }
     } catch (err) {
       console.error("Failed to load initial backend state:", err);
+      setDataError(err instanceof Error ? err.message : "Failed to load backend state.");
+    } finally {
+      setDataLoading(false);
     }
   };
 
@@ -322,6 +344,25 @@ export default function App() {
     ]);
   };
 
+  const handleSelectRun = async (run) => {
+    const circId = run.id.replace(/^run-/, "");
+    setSelectedCircularId(circId);
+    if (session?.token) {
+      setDataLoading(true);
+      try {
+        const details = await getCircularDetails(circId, { accessToken: session.token });
+        if (details) {
+          setClauses(mapCircularDetailsToClauses(details));
+        }
+      } catch (err) {
+        console.error("Failed to load circular details:", err);
+      } finally {
+        setDataLoading(false);
+      }
+    }
+    setActiveView("splitview");
+  };
+
   const pendingHitlCount = hitlCases.filter((c) => c.status === "pending").length;
 
   if (!isAuthenticated) {
@@ -356,6 +397,17 @@ export default function App() {
           onLogout={handleLogout}
         />
         <main className="flex-1 overflow-y-auto scrollbar-thin p-4">
+          {dataError && (
+            <div className="mb-4 flex items-center justify-between rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <span>Failed to fetch backend data: {dataError}</span>
+              <button
+                onClick={() => loadBackendData()}
+                className="rounded bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-800 hover:bg-red-200"
+              >
+                Retry
+              </button>
+            </div>
+          )}
           {activeView === "pipeline" && (
             <PipelineTracker
               runs={pipelineRuns}
@@ -363,11 +415,13 @@ export default function App() {
               uploadState={uploadState}
               uploadResult={uploadResult}
               uploadError={uploadError}
+              isLoading={dataLoading}
+              onSelectRun={handleSelectRun}
             />
           )}
           {activeView === "splitview" && (
             <div className="h-[calc(100vh-7.5rem)]">
-              <ClauseSplitView clauses={clauses} />
+              <ClauseSplitView clauses={clauses} isLoading={dataLoading} />
             </div>
           )}
           {activeView === "playground" && (
@@ -384,6 +438,7 @@ export default function App() {
               <HITLDashboard
                 cases={hitlCases}
                 onResolveCase={resolveHitlCase}
+                isLoading={dataLoading}
               />
             </div>
           )}

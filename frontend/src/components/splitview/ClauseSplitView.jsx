@@ -1,11 +1,11 @@
-import { FileCode2, FileText } from "lucide-react";
+import { FileCode2, FileText, Loader2 } from "lucide-react";
 import { useState } from "react";
 import Card from "../shared/Card";
 import StatusBadge from "../shared/StatusBadge";
 import RawTextPane from "./RawTextPane";
 import RegoPane from "./RegoPane";
 
-export default function ClauseSplitView({ clauses = [] }) {
+export default function ClauseSplitView({ clauses = [], isLoading = false }) {
   const [selectedRuleId, setSelectedRuleId] = useState(clauses[0]?.ruleId);
   const [activeIndex, setActiveIndex] = useState(null);
   const clause = clauses.find((c) => c.ruleId === selectedRuleId) ?? clauses[0];
@@ -14,6 +14,20 @@ export default function ClauseSplitView({ clauses = [] }) {
     setSelectedRuleId(ruleId);
     setActiveIndex(null);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-center">
+        <Card className="max-w-md p-6">
+          <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-blue-500" />
+          <h3 className="text-base font-semibold text-slate-800">Loading Clauses...</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Fetching parsed circular clauses and compiled Rego rules from the backend.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   if (!clauses || clauses.length === 0 || !clause) {
     return (

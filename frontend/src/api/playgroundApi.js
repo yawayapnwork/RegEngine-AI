@@ -1,18 +1,9 @@
 // Real fetch client for the Policy Playground's "Submit for HITL Review"
-// action (Requirement 3). Written against the intended REST contract so
-// wiring it in later requires no component changes -- see
-// src/mock/mockData.js's own module comment for why this codebase's
-// convention is "shape mock state exactly like the real contract now,
-// swap the fetch call in later," rather than build components against
-// an ad hoc mock shape that would need rewriting.
+// action. Written against the intended REST contract so backend integration
+// requires no component changes.
 //
-// PolicyPlayground.jsx does not call this module directly in the
-// bundled demo -- App.jsx wires a local mock handler
-// (`submitPlaygroundDraftForReview`) that appends to `hitlCases` state,
-// exactly like every other view's callback props (`onResolveCase`,
-// `onUpload`). Swap that handler's body for `submitForHitlReview(...)`
-// from this module once a backend endpoint matching this contract
-// exists, matching the request/response shapes documented below.
+// App.jsx handles draft review submissions by updating the in-memory review
+// queue, or calling submitForHitlReview(...) when the dedicated endpoint is active.
 //
 // Intended backend contract (not yet implemented server-side):
 //   POST /v1/hitl-reviews/playground-submissions

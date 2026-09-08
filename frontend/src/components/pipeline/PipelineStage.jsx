@@ -1,11 +1,4 @@
-import { PIPELINE_STAGES } from "../../mock/mockData";
-
-const STAGE_LABELS = {
-  ingestion: "Ingestion",
-  extraction: "Extraction",
-  verification: "Verification",
-  compilation: "Compilation",
-};
+import { PIPELINE_STAGES, STAGE_LABELS } from "../../constants/pipeline";
 
 function segmentClasses(status) {
   if (status === "complete") return "bg-green-500";

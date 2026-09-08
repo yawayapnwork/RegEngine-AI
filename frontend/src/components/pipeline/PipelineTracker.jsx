@@ -54,12 +54,17 @@ function metricsFor(run) {
   };
 }
 
-function RunRow({ run }) {
+function RunRow({ run, onSelectRun }) {
   const overallDone = run.currentStage === "done";
   const m = metricsFor(run);
 
   return (
-    <tr className="border-b border-ink-700 text-sm last:border-b-0 even:bg-ink-850">
+    <tr
+      onClick={() => onSelectRun?.(run)}
+      className={`border-b border-ink-700 text-sm last:border-b-0 even:bg-ink-850 ${
+        onSelectRun ? "cursor-pointer hover:bg-ink-800/50" : ""
+      }`}
+    >
       <td className="px-4 py-3">
         <div className="flex items-start gap-2">
           <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -98,7 +103,15 @@ function RunRow({ run }) {
   );
 }
 
-export default function PipelineTracker({ runs, onUpload, uploadState = "idle", uploadResult = null, uploadError = null }) {
+export default function PipelineTracker({
+  runs = [],
+  onUpload,
+  uploadState = "idle",
+  uploadResult = null,
+  uploadError = null,
+  isLoading = false,
+  onSelectRun,
+}) {
   return (
     <div className="flex flex-col gap-4">
       <PdfUploadZone onFileSelected={onUpload} disabled={uploadState in UPLOADING_LABELS} />
@@ -125,9 +138,30 @@ export default function PipelineTracker({ runs, onUpload, uploadState = "idle", 
               </tr>
             </thead>
             <tbody>
-              {runs.map((run) => (
-                <RunRow key={run.id} run={run} />
-              ))}
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-sm text-slate-500">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                      <span>Loading circular pipeline runs...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : runs.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-sm text-slate-500">
+                    <FileText className="mx-auto mb-2 h-7 w-7 text-slate-400" />
+                    <p className="font-medium text-slate-700">No circular pipeline runs yet</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      Upload a regulatory circular PDF above to begin automated ingestion, extraction, and rule compilation.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                runs.map((run) => (
+                  <RunRow key={run.id} run={run} onSelectRun={onSelectRun} />
+                ))
+              )}
             </tbody>
           </table>
         </div>

@@ -1,11 +1,9 @@
-import { Pause, Play, ShieldCheck, ShieldX, Wrench } from "lucide-react";
+import { Loader2, Pause, Play, ShieldCheck, ShieldX, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import Card from "../shared/Card";
-import { generateNextEntry, verifyFeed } from "./mockChain";
 import TransactionRow from "./TransactionRow";
 
 const LIVE_INTERVAL_MS = 3500;
-const MAX_FEED_LENGTH = 40;
 
 export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyChain }) {
   const [feed, setFeed] = useState(initialFeed);
@@ -22,26 +20,19 @@ export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyCh
   }, [initialFeed]);
 
   useEffect(() => {
-    if (!isLive) return undefined;
+    if (!isLive || !onRefreshFeed) return undefined;
     const interval = setInterval(async () => {
-      if (onRefreshFeed) {
-        try {
-          const fresh = await onRefreshFeed();
-          if (fresh && fresh.length > 0) {
-            setFeed(fresh);
-            if (fresh[0]?.sequenceNum !== newestRef.current?.sequenceNum) {
-              setLatestSeq(fresh[0]?.sequenceNum);
-              newestRef.current = fresh[0];
-            }
+      try {
+        const fresh = await onRefreshFeed();
+        if (fresh && fresh.length > 0) {
+          setFeed(fresh);
+          if (fresh[0]?.sequenceNum !== newestRef.current?.sequenceNum) {
+            setLatestSeq(fresh[0]?.sequenceNum);
+            newestRef.current = fresh[0];
           }
-        } catch (e) {
-          // ignore poll errors
         }
-      } else {
-        const next = generateNextEntry(newestRef.current || { sequenceNum: 100, currentHash: "genesis" });
-        newestRef.current = next;
-        setFeed((prev) => [next, ...prev].slice(0, MAX_FEED_LENGTH));
-        setLatestSeq(next.sequenceNum);
+      } catch (e) {
+        // ignore poll errors
       }
     }, LIVE_INTERVAL_MS);
     return () => clearInterval(interval);
@@ -70,7 +61,24 @@ export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyCh
         setLoading(false);
       }
     } else {
-      setVerifyResult(verifyFeed(feed));
+      // In-memory pointer validation over visible feed
+      const chronological = [...feed].reverse();
+      const breaks = [];
+      for (let i = 1; i < chronological.length; i++) {
+        const entry = chronological[i];
+        const prev = chronological[i - 1];
+        if (entry.previousHash !== prev.currentHash) {
+          breaks.push({
+            sequenceNum: entry.sequenceNum,
+            reason: "previous_hash does not match the prior row's current_hash",
+          });
+        }
+      }
+      setVerifyResult({
+        valid: breaks.length === 0,
+        entriesChecked: chronological.length,
+        breaks,
+      });
     }
   };
 
@@ -83,6 +91,7 @@ export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyCh
       const forged = {
         ...target,
         evaluationResult: target.evaluationResult === "PASS" ? "FAIL" : "PASS",
+        currentHash: "tampered_" + target.currentHash.slice(9),
       };
       const copy = [...prev];
       copy[targetIndex] = forged;
@@ -107,14 +116,20 @@ export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyCh
         </button>
         <button
           onClick={runVerification}
-          className="flex items-center gap-1.5 rounded-sm border border-blue-200 bg-blue-100 px-2.5 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-200"
+          disabled={loading}
+          className="flex items-center gap-1.5 rounded-sm border border-blue-200 bg-blue-100 px-2.5 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-200 disabled:opacity-50"
         >
-          <ShieldCheck className="h-3.5 w-3.5" /> Verify chain integrity
+          {loading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ShieldCheck className="h-3.5 w-3.5" />
+          )}
+          {loading ? "Verifying..." : "Verify chain integrity"}
         </button>
         <button
           onClick={simulateTamper}
           className="ml-auto flex items-center gap-1.5 rounded-sm border border-ink-700 px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:border-red-300 hover:text-red-700"
-          title="Demo only: forges a row in place to show verify_chain catching it, mirroring app/ledger/verifier.py."
+          title="Demo only: forges a row in place to demonstrate integrity checking."
         >
           <Wrench className="h-3.5 w-3.5" /> Simulate tamper
         </button>
@@ -177,13 +192,25 @@ export default function AuditVault({ initialFeed = [], onRefreshFeed, onVerifyCh
               </tr>
             </thead>
             <tbody>
-              {feed.map((entry) => (
-                <TransactionRow
-                  key={entry.sequenceNum}
-                  entry={entry}
-                  isNew={entry.sequenceNum === latestSeq}
-                />
-              ))}
+              {feed.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-16 text-center text-sm text-slate-400">
+                    <ShieldCheck className="mx-auto mb-2 h-7 w-7 text-slate-400" />
+                    <p className="font-medium text-slate-700">No ledger transactions recorded yet</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      Transactions evaluated by the policy engine will appear here with cryptographic hash chains.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                feed.map((entry) => (
+                  <TransactionRow
+                    key={entry.sequenceNum}
+                    entry={entry}
+                    isNew={entry.sequenceNum === latestSeq}
+                  />
+                ))
+              )}
             </tbody>
           </table>
         </div>
