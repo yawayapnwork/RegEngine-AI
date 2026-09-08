@@ -102,7 +102,12 @@ returns 503.
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+
+# Install runtime dependencies:
+pip install .                    # or: pip install -r requirements.txt
+
+# Or install editable with development and test dependencies:
+pip install -e ".[dev]"          # or for tests only: pip install -e ".[test]"
 
 cp .env.example .env             # see Configuration below
 uvicorn app.main:app --reload --port 8000

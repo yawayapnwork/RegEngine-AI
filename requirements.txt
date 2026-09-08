@@ -1,3 +1,11 @@
+# Runtime dependencies for RegEngine AI.
+# The canonical dependency definition is maintained in pyproject.toml ([project.dependencies]).
+# This file mirrors pyproject.toml runtime dependencies for Docker build layer caching
+# and CI vulnerability scanning (pip-audit, trivy).
+#
+# For test or development environments, install via:
+#   pip install -e ".[test]"  OR  pip install -e ".[dev]"
+
 fastapi>=0.111
 uvicorn[standard]>=0.30
 pydantic>=2.7
@@ -153,7 +161,15 @@ langdetect>=1.0.9        # regional-language auto-detection (app.localization.pi
 paramiko>=3.4
 jsonschema>=4.22
 
-# Testing
-pytest>=8.2
-pytest-asyncio>=0.23
-aiosqlite>=0.20  # in-memory ledger tests only; production ledger targets PostgreSQL
+# -----------------------------------------------------------------------------
+# Development & Testing Dependencies
+# -----------------------------------------------------------------------------
+# Note: Testing and dev dependencies are intentionally excluded from this file
+# and defined canonically in pyproject.toml under [project.optional-dependencies]:
+#   - test: pytest, pytest-asyncio, aiosqlite, pytest-cov
+#   - dev: test dependencies + ruff, mypy, bandit, and type stubs
+#
+# To install for local development and running tests:
+#   pip install -e ".[test]"
+# or for full development tools:
+#   pip install -e ".[dev]"

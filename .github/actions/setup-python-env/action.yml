@@ -54,14 +54,14 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    # Cache key incorporates the full requirements.txt hash so any change
+    # Cache key incorporates the requirements.txt and pyproject.toml hash so any change
     # to pinned versions busts the cache automatically.
     - name: Restore pip cache
       id: cache
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: pip-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('requirements.txt') }}
+        key: pip-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
         restore-keys: |
           pip-${{ runner.os }}-py${{ inputs.python-version }}-
 
@@ -75,14 +75,7 @@ runs:
       if: inputs.install-dev-tools == 'true'
       shell: bash
       run: |
-        pip install \
-          "ruff>=0.4" \
-          "mypy>=1.10" \
-          "bandit[toml]>=1.7" \
-          "pytest-cov>=5.0" \
-          "types-redis" \
-          "types-python-dateutil" \
-          "types-beautifulsoup4"
+        pip install -e ".[dev]"
 
     - name: Install extra packages
       if: inputs.extras != ''
