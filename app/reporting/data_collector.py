@@ -49,6 +49,8 @@ class SourceCircularRecord(BaseModel):
     title: str | None
     issue_date: dt.date | None
     source_url: str | None
+    source_document_sha256: str | None = None
+    extracted_text_sha256: str | None = None
     raw_text_digest: str
     department: str | None
 
@@ -139,6 +141,8 @@ async def collect_referenced_circulars(db: AsyncSession, rule_changes: list[Rule
             title=c.title,
             issue_date=c.issue_date,
             source_url=c.source_url,
+            source_document_sha256=getattr(c, "source_document_sha256", None),
+            extracted_text_sha256=c.raw_text_digest,
             raw_text_digest=c.raw_text_digest,
             department=c.department,
         )

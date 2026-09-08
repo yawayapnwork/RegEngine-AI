@@ -69,6 +69,7 @@ async def poll_status(task_id: str) -> dict:
 class UploadJobResponse(BaseModel):
     job_id: str
     status: str
+    source_document_sha256: str | None = None
 
 
 class UploadJobStatusResponse(BaseModel):
@@ -77,6 +78,7 @@ class UploadJobStatusResponse(BaseModel):
     status: str
     chunks_indexed: int | None = None
     error_message: str | None = None
+    source_document_sha256: str | None = None
 
 
 @router.post(
@@ -85,16 +87,16 @@ class UploadJobStatusResponse(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[_require_ingestion_role],
 )
-async def create_upload_job(
+async def upload_circular_pdf(
     file: UploadFile = File(...),
-    principal: Principal = Depends(get_current_principal),
-    settings: Settings = Depends(get_settings),
+    principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER, Role.SYSTEM_ADMIN)),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> UploadJobResponse:
-    """Stages the uploaded PDF in object storage and enqueues
+    """Accept a user-uploaded SEBI Master Circular PDF, write it to object
+    storage, and enqueue a Celery task
     `process_manual_upload_task` to parse + index it, instead of doing that
-    work inline (see module docstring). Returns immediately with a job_id
-    the caller polls via GET /uploads/{job_id}."""
+    work inside this HTTP request."""
     if file.content_type not in ("application/pdf", "application/octet-stream", None):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -109,6 +111,7 @@ async def create_upload_job(
         )
 
     from pathlib import Path
+    from app.parsing.hashing import sha256_of_bytes
     from app.storage.object_store import (
         FileTooLargeError,
         InvalidFileTypeError,
@@ -124,6 +127,9 @@ async def create_upload_job(
             detail="Only PDF files (.pdf) are supported for regulatory circular ingestion.",
         )
 
+    # Requirement 1 & 8: Calculate SHA-256 over raw uploaded PDF bytes
+    source_document_sha256 = sha256_of_bytes(body)
+
     job_id = str(uuid.uuid4())
     object_key = f"uploads/{job_id}/{clean_filename}"
 
@@ -134,6 +140,7 @@ async def create_upload_job(
             job_id=job_id,
             filename=clean_filename,
             object_key=object_key,
+            source_document_sha256=source_document_sha256,
             status="queued",
             created_by=principal.subject,
         )
@@ -165,7 +172,11 @@ async def create_upload_job(
             detail="Internal error while starting the upload job.",
         ) from exc
 
-    return UploadJobResponse(job_id=job_id, status="queued")
+    return UploadJobResponse(
+        job_id=job_id,
+        status="queued",
+        source_document_sha256=source_document_sha256,
+    )
 
 
 @router.get(
@@ -188,4 +199,5 @@ async def get_upload_job(
         status=job.status,
         chunks_indexed=job.chunks_indexed,
         error_message=job.error_message,
+        source_document_sha256=job.source_document_sha256,
     )

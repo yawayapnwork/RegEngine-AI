@@ -35,6 +35,7 @@ from app.compiler.pipeline import compile_audited_rule
 from app.config import Settings, get_settings
 from app.db.models import Circular, Clause, CompiledRule, HITLReview, Tenant
 from app.models import ClauseChunk, ParseResult
+from app.parsing.hashing import sha256_of_bytes, sha256_of_extracted_text
 from app.services.pipeline import parse_pdf_bytes
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,9 @@ DEFAULT_TENANT_ID = "sebi_baseline"
 class ProcessE2EResult(BaseModel):
     circular_id: int
     circular_number: str
-    document_hash: str
+    source_document_sha256: str
+    extracted_text_sha256: str
+    document_hash: str  # Kept for backward compatibility; maps to source_document_sha256
     clause_count: int
     rules_compiled: int
     review_count: int
@@ -58,7 +61,9 @@ class CircularStatusResult(BaseModel):
     circular_id: int
     circular_number: str
     status: str
-    raw_text_digest: str
+    source_document_sha256: str | None = None
+    extracted_text_sha256: str | None = None
+    raw_text_digest: str  # Historical extracted text digest preserved
     clause_count: int
     compiled_rule_count: int
     hitl_review_count: int
@@ -109,11 +114,24 @@ class E2EOrchestrator:
         filename: str | None,
         tenant_id: str = DEFAULT_TENANT_ID,
     ) -> Circular:
-        """Persists the Circular entity with document SHA-256 digest and metadata."""
+        """Persists the Circular entity with source document SHA-256 digest,
+        extracted text digest, and metadata."""
         await self.ensure_baseline_tenant(session, tenant_id)
 
+        # Requirement 1 & 8: Calculate SHA-256 over raw uploaded PDF bytes
+        source_document_sha256 = (
+            parsed.source_document_sha256
+            if parsed and parsed.source_document_sha256
+            else sha256_of_bytes(file_bytes)
+        )
+
+        # Requirement 3: Separately calculate SHA-256 of normalized/extracted text
         combined_text = "\n\n".join(c.text for c in parsed.chunks) if parsed.chunks else file_bytes.decode("utf-8", errors="ignore")
-        raw_text_digest = hashlib.sha256(combined_text.encode("utf-8")).hexdigest()
+        raw_text_digest = (
+            parsed.extracted_text_sha256
+            if parsed and parsed.extracted_text_sha256
+            else sha256_of_extracted_text(combined_text)
+        )
 
         circular_number = parsed.metadata.circular_number
         if not circular_number:
@@ -124,11 +142,15 @@ class E2EOrchestrator:
                 select(Circular).where(
                     (Circular.circular_number == circular_number)
                     | (Circular.raw_text_digest == raw_text_digest)
+                    | (Circular.source_document_sha256 == source_document_sha256)
                 )
             )
         ).scalar_one_or_none()
 
         if existing is not None:
+            if existing.source_document_sha256 is None and source_document_sha256:
+                existing.source_document_sha256 = source_document_sha256
+                await session.flush()
             return existing
 
         circular = Circular(
@@ -139,6 +161,7 @@ class E2EOrchestrator:
             issue_date=parsed.metadata.issue_date or dt.date.today(),
             source_url=filename or None,
             department=parsed.metadata.department or "MRD",
+            source_document_sha256=source_document_sha256,
             raw_text_digest=raw_text_digest,
         )
         session.add(circular)
@@ -344,7 +367,9 @@ class E2EOrchestrator:
         return ProcessE2EResult(
             circular_id=circular.id,
             circular_number=circular.circular_number,
-            document_hash=circular.raw_text_digest,
+            source_document_sha256=circular.source_document_sha256 or "",
+            extracted_text_sha256=circular.raw_text_digest,
+            document_hash=circular.source_document_sha256 or circular.raw_text_digest,
             clause_count=len(clauses),
             rules_compiled=rules_compiled_count,
             review_count=len(review_ids),
@@ -408,6 +433,8 @@ class E2EOrchestrator:
             circular_id=circular.id,
             circular_number=circular.circular_number,
             status=status,
+            source_document_sha256=circular.source_document_sha256,
+            extracted_text_sha256=circular.raw_text_digest,
             raw_text_digest=circular.raw_text_digest,
             clause_count=len(clauses),
             compiled_rule_count=len(rules),
@@ -418,3 +445,4 @@ class E2EOrchestrator:
             reviews=[{"review_id": r.review_id, "status": r.status, "severity": r.severity} for r in reviews],
             rules=[{"rule_id": r.rule_id, "is_active": r.is_active, "hitl_status": r.hitl_status} for r in rules],
         )
+

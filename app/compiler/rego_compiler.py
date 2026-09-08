@@ -170,6 +170,10 @@ def compile_rule_to_rego(rule: ExtractedComplianceRule) -> CompiledRego:
     lines.append(f"#   clause_number: {clause}")
     lines.append(f"#   circular_number: {rule.circular_number or 'unknown'}")
     lines.append(f"#   source_sha256: {rule.source_sha256}")
+    if rule.source_document_sha256:
+        lines.append(f"#   source_document_sha256: {rule.source_document_sha256}")
+    if rule.extracted_text_sha256:
+        lines.append(f"#   extracted_text_sha256: {rule.extracted_text_sha256}")
     lines.append(f"#   obligation_type: {rule.obligation_type.value}")
     lines.append(f"#   generated_at: {dt.datetime.utcnow().isoformat()}Z")
     lines.append(f"#   compiler: sebi-rego-compiler/1.0.0")

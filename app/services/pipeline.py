@@ -18,6 +18,7 @@ from app.observability.tracing import traced_span
 from app.parsing.chunker import chunk_elements
 from app.parsing.exceptions import ParsingError
 from app.parsing.extractor import extract_pdf
+from app.parsing.hashing import sha256_of_bytes, sha256_of_extracted_text
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +124,17 @@ async def parse_pdf_bytes(
     settings = settings or get_settings()
     warnings: list[str] = []
 
+    # Requirement 1 & 8: Calculate SHA-256 over ORIGINAL uploaded PDF bytes
+    # BEFORE any parsing, temporary file creation, decoding, or text extraction.
+    source_document_sha256 = sha256_of_bytes(file_bytes)
+
     async with _gate(settings):
         with observe_ingestion_latency(), traced_span(
-            "ingestion.parse_pdf_bytes", filename=filename, size_bytes=len(file_bytes), backend=settings.extraction_backend
+            "ingestion.parse_pdf_bytes",
+            filename=filename,
+            size_bytes=len(file_bytes),
+            backend=settings.extraction_backend,
+            source_document_sha256=source_document_sha256,
         ), tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir) / (filename or "upload.pdf")
             try:
@@ -142,6 +151,8 @@ async def parse_pdf_bytes(
             except Exception as exc:  # noqa: BLE001 - convert unexpected errors to typed ones
                 raise ParsingError(f"Unexpected failure while extracting '{filename}': {exc!r}") from exc
 
+            metadata.source_document_sha256 = source_document_sha256
+
             if metadata.circular_number is None:
                 warnings.append("Could not auto-detect circular_number; consider supplying it explicitly.")
             if metadata.issue_date is None:
@@ -151,9 +162,17 @@ async def parse_pdf_bytes(
             chunks, localization_warnings = await _localize_chunks(chunks, settings)
             warnings.extend(localization_warnings)
 
+            # Requirement 3: Separately calculate the SHA-256 of normalized/extracted text
+            combined_text = "\n\n".join(c.text for c in chunks) if chunks else "\n\n".join(e.text for e in elements)
+            extracted_text_sha256 = sha256_of_extracted_text(combined_text)
+            metadata.extracted_text_sha256 = extracted_text_sha256
+
             return ParseResult(
                 metadata=metadata,
                 chunks=chunks,
                 element_count=len(elements),
                 warnings=warnings,
+                source_document_sha256=source_document_sha256,
+                extracted_text_sha256=extracted_text_sha256,
             )
+

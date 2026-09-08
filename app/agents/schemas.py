@@ -115,6 +115,12 @@ class ExtractedComplianceRule(BaseModel):
     rule_id: str = Field(..., description="Stable ID, derived as f'{source_sha256}:{clause_number}'.")
     source_chunk_id: str
     source_sha256: str
+    source_document_sha256: str | None = Field(
+        None, description="SHA-256 of the original source PDF bytes."
+    )
+    extracted_text_sha256: str | None = Field(
+        None, description="SHA-256 of the normalized extracted text of the document."
+    )
     circular_number: str | None = None
     clause_number: str | None = None
     section_path: list[str] = Field(default_factory=list)

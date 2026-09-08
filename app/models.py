@@ -59,6 +59,12 @@ class CircularMetadata(BaseModel):
     department: str | None = None
     regulator: Regulator = Regulator.SEBI
     document_type: DocumentType = DocumentType.CIRCULAR
+    source_document_sha256: str | None = Field(
+        None, description="SHA-256 hex digest of the raw uploaded document bytes (e.g. PDF container)."
+    )
+    extracted_text_sha256: str | None = Field(
+        None, description="SHA-256 hex digest of the normalized extracted text."
+    )
 
 
 class ClauseChunk(BaseModel):
@@ -78,6 +84,9 @@ class ClauseChunk(BaseModel):
     circular_number: str | None = None
     issue_date: dt.date | None = None
     source_filename: str | None = None
+    source_document_sha256: str | None = Field(
+        None, description="SHA-256 hex digest of the parent source document bytes."
+    )
     regulator: Regulator = Regulator.SEBI
     document_type: DocumentType = DocumentType.CIRCULAR
     extra: dict[str, Any] = Field(default_factory=dict)
@@ -88,6 +97,12 @@ class ParseResult(BaseModel):
     chunks: list[ClauseChunk]
     element_count: int
     warnings: list[str] = Field(default_factory=list)
+    source_document_sha256: str | None = Field(
+        None, description="SHA-256 hex digest of the original source PDF bytes."
+    )
+    extracted_text_sha256: str | None = Field(
+        None, description="SHA-256 hex digest of the normalized extracted text."
+    )
 
 
 class IndexRequest(BaseModel):

@@ -161,6 +161,8 @@ class RuleProvenance(BaseModel):
     clause_number: str | None
     clause_text: str | None
     clause_sha256: str | None
+    source_document_sha256: str | None = None
+    extracted_text_sha256: str | None = None
     created_at: dt.datetime
 
 
@@ -178,6 +180,8 @@ class CircularSummary(BaseModel):
     is_shared: bool
     tenant_id: str
     clause_count: int = 0
+    source_document_sha256: str | None = None
+    extracted_text_sha256: str | None = None
 
 
 # ---------------------------------------------------------------------------

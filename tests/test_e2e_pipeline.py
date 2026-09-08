@@ -364,6 +364,11 @@ async def test_complete_e2e_pipeline(e2e_environment) -> None:
         assert circular_id > 0
         assert data["circular_number"] == "SEBI/HO/MRD/2026/045"
         assert len(data["document_hash"]) == 64
+        assert len(data["source_document_sha256"]) == 64
+        assert len(data["extracted_text_sha256"]) == 64
+        # Proves original PDF bytes hash is distinct from extracted text hash
+        assert data["source_document_sha256"] != data["extracted_text_sha256"]
+        assert data["document_hash"] == data["source_document_sha256"]
         assert data["clause_count"] >= 2
         assert data["rules_compiled"] >= 1
         assert data["status"] == "review_required"
@@ -376,7 +381,9 @@ async def test_complete_e2e_pipeline(e2e_environment) -> None:
             circular = await session.get(Circular, circular_id)
             assert circular is not None
             assert circular.circular_number == "SEBI/HO/MRD/2026/045"
-            assert circular.raw_text_digest == data["document_hash"]
+            assert circular.source_document_sha256 == data["source_document_sha256"]
+            assert circular.raw_text_digest == data["extracted_text_sha256"]
+            assert circular.extracted_text_sha256 == data["extracted_text_sha256"]
             assert circular.is_shared is True
 
             clauses = (

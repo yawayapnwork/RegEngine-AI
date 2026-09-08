@@ -199,9 +199,18 @@ class Circular(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     department: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # SHA-256 of the original uploaded raw document bytes (e.g. PDF container)
+    # computed before any parsing, decoding, or text extraction.
+    source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # SHA-256 of the full raw parsed text, ahead of chunking. Lets a re-poll
     # of an already-ingested circular short-circuit without re-parsing.
     raw_text_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    @property
+    def extracted_text_sha256(self) -> str:
+        """Alias for raw_text_digest reflecting unambiguous extracted-text digest naming."""
+        return self.raw_text_digest
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -219,6 +228,7 @@ class Circular(Base):
         UniqueConstraint("circular_number", name="uq_circulars_circular_number"),
         UniqueConstraint("raw_text_digest", name="uq_circulars_raw_text_digest"),
         Index("ix_circulars_issue_date", "issue_date"),
+        Index("ix_circulars_source_document_sha256", "source_document_sha256"),
         # Tenant-scoped range scan index (the dominant audit-report query shape).
         Index("ix_circulars_tenant_id", "tenant_id", "issue_date"),
         # Partial index: fast lookup of shared circulars visible to all tenants.
@@ -228,6 +238,10 @@ class Circular(Base):
             postgresql_where=sa_text("is_shared = true"),
         ),
         CheckConstraint("length(raw_text_digest) = 64", name="raw_text_digest_len"),
+        CheckConstraint(
+            "source_document_sha256 IS NULL OR length(source_document_sha256) = 64",
+            name="source_document_sha256_len",
+        ),
     )
 
 
@@ -621,6 +635,8 @@ class IngestionUploadJob(Base):
 
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    # SHA-256 of the uploaded raw bytes, computed on upload before dispatch to storage.
+    source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="queued")
     chunks_indexed: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -638,5 +654,10 @@ class IngestionUploadJob(Base):
     __table_args__ = (
         UniqueConstraint("job_id", name="uq_ingestion_upload_jobs_job_id"),
         Index("ix_ingestion_upload_jobs_status", "status"),
+        Index("ix_ingestion_upload_jobs_source_doc_sha256", "source_document_sha256"),
         CheckConstraint(f"status IN {_INGESTION_UPLOAD_STATUSES!r}", name="status"),
+        CheckConstraint(
+            "source_document_sha256 IS NULL OR length(source_document_sha256) = 64",
+            name="upload_jobs_source_doc_sha256_len",
+        ),
     )

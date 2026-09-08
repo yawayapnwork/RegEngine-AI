@@ -1,15 +1,37 @@
-"""Cryptographic hashing utilities for clause-level traceability.
+"""Cryptographic hashing utilities for document and clause-level traceability.
 
-Every extracted clause block gets a SHA-256 digest computed over a
-normalized, canonical representation of its content and identifying
-metadata. This lets downstream systems (audit trails, dedup, diffing
-against a re-issued circular) verify that a chunk's text has not been
-altered without needing to re-fetch the source PDF.
+RegEngine separates document-level and clause-level identity across distinct,
+unambiguous cryptographic hashes:
+
+1. `source_document_sha256`: SHA-256 computed over the ORIGINAL uploaded raw bytes
+   (e.g. PDF container) BEFORE any parsing, decoding, or text transformation.
+   This provides an immutable cryptographic fingerprint of the physical uploaded artifact.
+   Filenames are never used as a cryptographic identity.
+
+2. `extracted_text_sha256` (historically `raw_text_digest`): SHA-256 computed over
+   the canonicalized, extracted textual content across all chunks/elements.
+   This identifies the document's legal text independently of container/encoding artifacts.
+   Two different PDF files (e.g. with differing metadata, digital signatures, or comments)
+   that contain identical legal text will have different `source_document_sha256` values
+   but identical `extracted_text_sha256` values.
+
+3. `clause.sha256`: SHA-256 scoped to a specific clause block
+   (circular_number + clause_number + canonicalized clause text).
 """
 from __future__ import annotations
 
 import hashlib
 import unicodedata
+
+
+def sha256_of_bytes(data: bytes) -> str:
+    """Calculates the immutable cryptographic SHA-256 hex digest over raw binary
+    content (e.g. original uploaded PDF bytes).
+
+    MUST be computed directly on the source byte stream before any extraction,
+    transcoding, or text parsing. Never uses filenames as cryptographic identity.
+    """
+    return hashlib.sha256(data).hexdigest()
 
 
 def _canonicalize(text: str) -> str:
@@ -21,8 +43,18 @@ def _canonicalize(text: str) -> str:
 
 
 def sha256_of_text(text: str) -> str:
+    """Calculates the SHA-256 digest over normalized text."""
     canonical = _canonicalize(text)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def sha256_of_extracted_text(text: str) -> str:
+    """Calculates the SHA-256 digest of normalized extracted text from a document.
+
+    Alias/wrapper for sha256_of_text with explicit semantic naming for
+    document-level extracted text digests (`extracted_text_sha256`).
+    """
+    return sha256_of_text(text)
 
 
 def sha256_of_clause(
@@ -37,3 +69,4 @@ def sha256_of_clause(
     parts = [circular_number or "", clause_number or "", _canonicalize(text)]
     payload = "\x1f".join(parts)  # unit-separator avoids field-collision
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
