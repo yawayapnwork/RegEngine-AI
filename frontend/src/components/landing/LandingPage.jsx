@@ -26,12 +26,12 @@ const PIPELINE_STAGES = [
   {
     icon: FileStack,
     title: "Ingestion",
-    detail: "SEBI circular PDFs (including scanned/OCR-fallback documents) are pulled and layout-aware parsed within minutes of publication.",
+    detail: "SEBI circular PDFs (including scanned/OCR-fallback documents) are ingested via automated feeds and parsed into structured clauses upon publication.",
   },
   {
     icon: Scale,
     title: "Domain NLP",
-    detail: "Regulatory-tuned language models extract clauses, obligations, and cross-references from the parsed circular text.",
+    detail: "Dual extraction agents and logic auditors extract clauses, obligations, and cross-references from the parsed circular text.",
   },
   {
     icon: GitBranch,
@@ -56,7 +56,7 @@ const PIPELINE_STAGES = [
 ];
 
 const COMPARISON_ROWS = [
-  { label: "Time to enforce a new circular", manual: "3–7 days of manual legal review", regengine: "Under 10 minutes, end to end" },
+  { label: "Time to enforce a new circular", manual: "3–7 business days (typical industry estimate; unbenchmarked)", regengine: "< 10 minutes (engineering target; benchmark pending)" },
   { label: "Consistency across desks", manual: "Varies by reviewer, error-prone", regengine: "One compiled policy, applied uniformly" },
   { label: "Audit trail", manual: "Scattered emails and spreadsheets", regengine: "Hash-chained, tamper-evident ledger" },
   { label: "Traceability to source clause", manual: "Manually cross-referenced, if at all", regengine: "Every decision hash-linked to source text" },
@@ -157,8 +157,8 @@ function Hero({ onOpenAuth }) {
           </div>
           <div className="mt-4 grid grid-cols-3 gap-3 text-center">
             <div className="rounded-lg border border-slate-200 p-3">
-              <p className="text-lg font-bold text-slate-900">&lt;10min</p>
-              <p className="text-2xs text-slate-500">Circular → policy</p>
+              <p className="text-lg font-bold text-slate-900">&lt;10min (Target)</p>
+              <p className="text-2xs text-slate-500">Design goal: circular → policy</p>
             </div>
             <div className="rounded-lg border border-slate-200 p-3">
               <p className="text-lg font-bold text-slate-900">100%</p>
@@ -187,27 +187,39 @@ function ProblemSolution() {
         </div>
         <div className="grid gap-6 md:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <XCircle className="h-5 w-5 text-red-500" />
-              <h3 className="font-semibold text-slate-900">Manual Translation Lag</h3>
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <XCircle className="h-5 w-5 text-red-500" />
+                <h3 className="font-semibold text-slate-900">Manual Workflow Baseline</h3>
+              </div>
+              <span className="rounded bg-slate-200/80 px-2 py-0.5 text-2xs font-medium text-slate-600">
+                Industry Estimate (Unbenchmarked)
+              </span>
             </div>
-            <p className="mb-4 text-3xl font-bold text-slate-900">3–7 Days</p>
+            <p className="mb-1 text-3xl font-bold text-slate-900">3–7 Days*</p>
+            <p className="mb-4 text-xs text-slate-500">Typical qualitative industry baseline for manual legal &amp; compliance interpretation</p>
             <ul className="space-y-2 text-sm text-slate-600">
-              <li>Legal teams manually read and interpret each circular.</li>
-              <li>Rules are hand-translated into policy, inconsistently.</li>
-              <li>Errors surface only after an audit or incident.</li>
+              <li>Legal teams manually read, analyze, and cross-reference each circular.</li>
+              <li>Rules are hand-translated into desk manuals or spreadsheets, inconsistently.</li>
+              <li>Interpretation gaps surface only after an audit exception or incident.</li>
             </ul>
           </div>
           <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              <h3 className="font-semibold text-slate-900">RegEngine AI Velocity</h3>
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                <h3 className="font-semibold text-slate-900">Automated Pipeline Target</h3>
+              </div>
+              <span className="rounded bg-blue-100 px-2 py-0.5 text-2xs font-semibold text-blue-800">
+                Engineering Target
+              </span>
             </div>
-            <p className="mb-4 text-3xl font-bold text-blue-800">&lt; 10 Minutes</p>
+            <p className="mb-1 text-3xl font-bold text-blue-800">&lt; 10 Minutes (Target)*</p>
+            <p className="mb-4 text-xs text-blue-700/80">Architectural design goal from document upload to HITL review readiness</p>
             <ul className="space-y-2 text-sm text-slate-600">
-              <li>Domain NLP extracts obligations directly from source text.</li>
-              <li>Policy compiles automatically, with an HITL sign-off gate.</li>
-              <li>Every decision is hash-traceable back to its clause.</li>
+              <li>Dual extraction agents structure obligations directly from source text.</li>
+              <li>Policy compiles automatically, queueing for Human-in-the-Loop approval.</li>
+              <li>Formal empirical benchmark on real SEBI circulars currently on roadmap.</li>
             </ul>
           </div>
         </div>
@@ -232,6 +244,10 @@ function ProblemSolution() {
             </tbody>
           </table>
         </div>
+
+        <p className="mt-3 text-center text-xs text-slate-500">
+          * Note: "3–7 business days" represents a typical qualitative industry baseline for multi-stakeholder manual legal and compliance review across broker desks, not an empirically measured RegEngine benchmark. "&lt;10 minutes" is an architectural engineering design target and goal for automated ingestion through HITL review readiness, not demonstrated performance. A formal multi-run benchmark on real SEBI circulars is planned on the roadmap.
+        </p>
       </div>
     </section>
   );

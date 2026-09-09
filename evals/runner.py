@@ -14,6 +14,13 @@ Runs two independent eval suites in parallel:
     the extractor so we test the auditor in isolation) and measures HDS, BCR,
     FPR, VerdictAccuracy, and FidelityCorrelation.
 
+  Suite C [TODO / Roadmap] — End-to-End Ingestion Velocity Benchmark
+    Measures wall-clock processing duration from PDF upload through layout
+    parsing, dual-agent extraction, logic audit, and compilation to AWAITING_HITL
+    status on real multi-page SEBI circulars across multiple runs (N >= 10),
+    reporting median and p95 timings under fixed hardware/model configuration to
+    rigorously verify the <10 minute architectural target.
+
 Both suites write:
   evals/reports/<run_id>/results.json    — full machine-readable results
   evals/reports/<run_id>/report.html     — human-readable HTML dashboard
