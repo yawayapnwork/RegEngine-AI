@@ -216,7 +216,7 @@ Every subsystem across the RegEngine AI codebase is cataloged below with its exp
 | **Compliance Case-Law Memory Agent** | `app/case_law/` | **`CURRENT`** | **No** | Advisory memory agent (`case_law_memory_enabled=True`); tenant-isolated Qdrant indexing of approved HITL reviews only; non-blocking advisory context | **No** |
 | **Compliance-as-Collateral Protocol** | N/A | **`ROADMAP`** | **No** | Proposed cryptographic collateral verification protocol | **No** |
 | **Real-Data Rule-Impact Preview** | N/A | **`ROADMAP`** | **No** | Proposed live pre-deployment transaction preview | **No** |
-| **M&A Compliance Due-Diligence Agent**| N/A | **`ROADMAP`** | **No** | Proposed autonomous historical compliance auditor | **No** |
+| **M&A Compliance Due-Diligence Agent**| `app/mna_due_diligence/` | **`CURRENT`** | **No** | Dual-authorized cross-entity compliance auditor (`POST /v1/mna/compare`); zero-mutation; advisory LLM semantics | **No** |
 | **Empirical Ingestion Velocity Benchmark** | `benchmarks/` (planned) | **`ROADMAP`** | **No** | Target: `<10 min`; formal benchmark harness pending | **No** |
 
 ---
@@ -346,9 +346,19 @@ flowchart TD
 - **Digital Twin Scope**: Historical backtesting and impact preview are strictly deterministic replays against immutable historical transaction logs; speculative generative market simulations are explicitly unsupported.
 
 
-### 8.5 M&A Compliance Due-Diligence Agent [`ROADMAP`]
-- **Proposed Capability**: An autonomous compliance due-diligence agent that ingests multi-year trading records, historical circular versions, and entity filings of an acquisition target to produce an automated regulatory liability report.
-- **Current Status**: **ROADMAP** (Proposed / Not Implemented; zero code in repository).
+### 8.5 M&A Compliance Due-Diligence Agent [`VERIFIED CURRENT`]
+- **Implemented Capability**: An autonomous, read-only compliance due-diligence agent (`app/mna_due_diligence/`, `app/api/mna_routes.py`) that compares compliance configurations, risk overlays, compiled rules, numerical thresholds, statutory obligations, pending HITL reviews, and historical violation profiles belonging to two explicitly authorized regulated entities (`entity_a_id` and `entity_b_id`).
+- **Current Status**: **VERIFIED CURRENT** (Implemented, tested, and active under `/v1/mna`).
+- **Trust Boundary & Safety Invariants**:
+  1. *Dual Authorization Required*: The requesting principal MUST have permission to access BOTH entities. Cross-entity authorization is NEVER inferred from access to one entity. Single-tenant machine clients attempting cross-tenant comparison are rejected with HTTP 403.
+  2. *Strict Multi-Tenant Scoping*: Every query is strictly partitioned by `tenant_id == entity_id`. Entity A data and Entity B data are never mixed.
+  3. *Zero Production State Mutation*: Comparison is strictly read-only; production policies (`is_active`), compiled rules, and risk overlays remain completely unmutated. No automatic merging or policy migration occurs.
+  4. *Advisory-Only LLM Semantics*: LLM semantic comparisons are strictly advisory (`is_advisory = True`). The LLM is prohibited from declaring two policies legally equivalent without quoting explicit, verified textual evidence.
+  5. *Deterministic Preservation*: Deterministic comparisons (rules, threshold deltas, operator flips, missing policies, unresolved HITL items) remain deterministic (`is_advisory = False`).
+  6. *Provenance Retention*: Every finding retains complete provenance back to Entity A artifact, Entity B artifact, and policy/clause hashes.
+  7. *Data Minimization*: Raw transaction-level data, proprietary client account IDs, and trade values are never leaked in reports.
+  8. *Tamper-Evident Audit Logging*: Every initiated comparison is logged to `compliance_audit_ledger` recording the initiator subject, entities compared, and snapshot hashes.
+
 
 ### 8.6 Dynamic LangGraph Orchestration Layer [`IN PROGRESS`]
 - **Existing Implementation**: `app/agents/graph/` contains an implemented `StateGraph` featuring complexity classification, conditional routing to specialist nodes, and Redis checkpointing.

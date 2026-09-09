@@ -210,6 +210,14 @@ class Settings(BaseSettings):
     rule_preview_default_lookback_days: int = 30
     rule_preview_redis_ttl_seconds: int = 86400
 
+    # --- M&A Compliance Due-Diligence Agent (app.mna_due_diligence) ---
+    mna_due_diligence_enabled: bool = True
+    mna_job_timeout_seconds: float = 300.0
+    mna_key_prefix: str = "regengine:mna"
+    celery_mna_queue: str = "regengine_mna"
+    mna_llm_advisory_enabled: bool = True
+    mna_redis_ttl_seconds: int = 30 * 86400
+
     # --- Shadow execution / canary release service (app.canary) ---
     # Distinct from app.backtest: backtest replays PAST ledger transactions
     # offline, on demand, against a separate OPA instance; canary shadows

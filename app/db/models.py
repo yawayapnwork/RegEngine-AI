@@ -467,7 +467,7 @@ class CompiledRule(Base):
     hitl_reviews: Mapped[list["HITLReview"]] = relationship(back_populates="compiled_rule")
 
     __table_args__ = (
-        UniqueConstraint("rule_id", "rule_version", name="uq_compiled_rules_rule_id_rule_version"),
+        UniqueConstraint("rule_id", "tenant_id", "rule_version", name="uq_compiled_rules_rule_id_rule_version"),
         Index("ix_compiled_rules_clause_id", "clause_id"),
         Index("ix_compiled_rules_hitl_status", "hitl_status"),
         Index("ix_compiled_rules_tenant_id", "tenant_id", "is_active"),
@@ -477,6 +477,7 @@ class CompiledRule(Base):
         Index(
             "uq_compiled_rules_one_active_per_rule_id",
             "rule_id",
+            "tenant_id",
             unique=True,
             postgresql_where=sa_text("is_active = true"),
             sqlite_where=sa_text("is_active = 1"),
@@ -756,3 +757,63 @@ class IngestionUploadJob(Base):
             name="upload_jobs_source_doc_sha256_len",
         ),
     )
+
+
+# --------------------------------------------------------------------------
+# M&A Compliance Due-Diligence Jobs -- app.mna_due_diligence
+# --------------------------------------------------------------------------
+
+_MNA_JOB_STATUSES = (
+    "QUEUED",
+    "SNAPSHOT_ACQUISITION",
+    "DETERMINISTIC_DIFFING",
+    "SEMANTIC_ANALYSIS",
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED",
+)
+
+
+class MNAComparisonJob(Base):
+    """Tracks an M&A compliance due-diligence comparison between two regulated entities.
+
+    Stores audit trail of the comparison job, including who initiated it,
+    the two entities compared, snapshot hashes, status progression,
+    and the final generated due-diligence report artifact.
+    """
+
+    __tablename__ = "mna_comparison_jobs"
+
+    id: Mapped[int] = mapped_column(_ID_TYPE, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    entity_a_id: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_b_id: Mapped[str] = mapped_column(Text, nullable=False)
+    initiator_subject: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="QUEUED")
+    progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    current_step: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    entity_a_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entity_b_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    overall_risk_score: Mapped[float | None] = mapped_column(nullable=True)
+    findings_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    report_data: Mapped[dict | None] = mapped_column(_JSON_TYPE, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_mna_comparison_jobs_job_id"),
+        Index("ix_mna_comparison_jobs_status", "status"),
+        Index("ix_mna_comparison_jobs_entities", "entity_a_id", "entity_b_id"),
+        Index("ix_mna_comparison_jobs_initiator", "initiator_subject"),
+        CheckConstraint(f"status IN {_MNA_JOB_STATUSES!r}", name="mna_job_status"),
+    )
+

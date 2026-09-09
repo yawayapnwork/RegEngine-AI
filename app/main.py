@@ -33,6 +33,7 @@ from app.api.grievance_routes import router as grievance_router
 from app.api.sandbox_routes import router as sandbox_router
 from app.api.translation_parity_routes import router as translation_parity_router
 from app.api.zkp_routes import router as zkp_router
+from app.api.mna_routes import router as mna_router
 from app.config import Settings, get_settings
 from app.db.session import get_session_factory
 from app.execution.dependencies import get_opa_engine, get_policy_cache, get_policy_registry, get_redis_pool
@@ -293,6 +294,7 @@ app.include_router(explainability_router)     # /v1/explainability (Tree reasoni
 app.include_router(incident_router)           # /v1/incidents (Incident management)
 app.include_router(governance_router)         # /v1/governance (Board kill-switch)
 app.include_router(saml_router)               # /v1/auth/saml (Enterprise SSO)
+app.include_router(mna_router)                # /v1/mna (M&A Compliance Due-Diligence)
 
 
 
