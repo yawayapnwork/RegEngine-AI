@@ -45,9 +45,10 @@ The Core MVP is defined as the deterministic 8-stage processing pipeline:
              │   - Returns deterministic allow / deny / flagged outcomes with cited clause violations
              ▼
 [8. Cryptographic Append-Only Audit Ledger] (app/ledger)
-                 - Writes immutable SHA-256 hash-chained journal entry to PostgreSQL
+                 - PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003
+                 - Writes immutable SHA-256 hash-chained journal entry to PostgreSQL (compliance_audit_ledger)
                  - Binds transaction ID to exact source_document_sha256 and clause_hash
-                 - Database immutability triggers prevent UPDATE/DELETE operations
+                 - Database immutability triggers prevent UPDATE/DELETE operations; no AWS QLDB dependency
                  - On-demand verification CLI validates chain continuity and detects tampering
 ```
 
@@ -64,7 +65,7 @@ The Core MVP is defined as the deterministic 8-stage processing pipeline:
 | **HITL Review Management** | `app/api/hitl_review_routes.py` | **Core MVP** | **Yes** | PostgreSQL review records. |
 | **Policy Registry & Hot-Reload** | `app/execution/policy_*` | **Core MVP** | **Yes** | In-process L1 cache + Redis L2 pub/sub. |
 | **OPA Transaction Evaluation** | `app/execution/evaluator.py` | **Core MVP** | **Yes** | Co-located OPA server over HTTP. |
-| **Cryptographic Audit Ledger** | `app/ledger/` | **Core MVP** | **Yes** | PostgreSQL append-only hash chain. |
+| **Cryptographic Audit Ledger** | `app/ledger/` | **Core MVP** | **Yes** | PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003. |
 | **Auth & Security** | `app/security/` | **Core MVP** | **Yes** | JWT, RBAC, step-up MFA, tenant crypto. |
 | **Zero-Knowledge Proofs (ZKP)** | `app/zkp/` | **Frozen / Non-MVP** | **No** | Gated behind `settings.zkp_enabled=False`. |
 | **FIX Protocol Gateway** | `app/fix_gateway/` | **Frozen / Non-MVP** | **No** | Gated behind `settings.fix_gateway_enabled=False`. |

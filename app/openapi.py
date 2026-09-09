@@ -31,7 +31,7 @@ API_DESCRIPTION = """
 1. **Regulatory Ingestion**: Automated SEBI RSS feed polling, layout-aware PDF parsing, clause chunking, and vector indexation.
 2. **Agent Rules Engine**: Multi-agent extraction (Extraction Agent) and logic auditing (Logic Auditor Agent) compiling compliance obligations into Rego & JSON-Logic ASTs.
 3. **OPA Policy Evaluation**: Sub-millisecond synchronous transaction compliance evaluation against persistent, co-located Open Policy Agent (OPA) policy engines.
-4. **Cryptographic Audit Vault**: Append-only, tamper-evident audit ledger (`compliance_audit_ledger`) backed by monotonic sequence numbers and SHA-256 block hash chains.
+4. **Cryptographic Audit Vault**: PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003 (`compliance_audit_ledger`) backed by monotonic sequence numbers and tamper-evident block hash chains.
 5. **HITL Management**: Human-in-the-Loop review portals, live transaction flagging, and Slack / MS Teams interactive quick-approval webhooks.
 
 ---

@@ -45,7 +45,7 @@ flowchart LR
 | **3. Compilation & HITL Gate** | `app.compiler`, `app.api.hitl_review_routes` | Compiles audited deterministic clauses into **OPA Rego** policies and structurally validated **JSON-Logic** ASTs. Any ambiguous, qualitative, low-confidence, or conflicting clauses generate `HITLReview` records. A rule can **never** become active while any blocking HITL review remains unresolved. State: `COMPILING` &rarr; `AWAITING_HITL`. |
 | **4. Approval & Hot-Reload** | `app.execution.publisher`, `app.execution.policy_hot_reload` | Authorized compliance officers review and approve flagged items (protected by step-up MFA). Approving all blocking reviews transitions the rule to active and publishes it to OPA. A Redis pub/sub subscriber notifies worker pods to hot-reload OPA and invalidate local L1 caches without requiring container restarts. State: `APPROVED` &rarr; `DEPLOYED`. |
 | **5. Execution Engine** | `app.execution`, `app.api.execution_routes` | Evaluates live broker transactions against deployed OPA policies, returning synchronous `allow`, `deny`, or `flagged` decisions. Asynchronous batch files and database CDC events are processed via dedicated Celery/Redis worker queues. |
-| **6. Cryptographic Audit Ledger** | `app.ledger` | Every compliance evaluation is written to a PostgreSQL append-only, SHA-256 hash-chained ledger table protected by database immutability triggers. Each record binds the transaction to the exact circular and clause hashes that governed the decision. An on-demand verification CLI verifies chain continuity and pinpoints any tampered block. |
+| **6. Cryptographic Audit Ledger** | `app.ledger` | Realized as a PostgreSQL-native, append-only ledger with SHA-256 hash-chained blocks following a QLDB-journal-inspired design per [ADR-0003](docs/adr/0003-sha256-hash-chain-audit-log.md) (not an external AWS QLDB dependency). Every compliance evaluation is written to an immutable ledger table protected by database triggers. Each record binds the transaction to the exact circular and clause hashes that governed the decision. An on-demand verification CLI verifies chain continuity and pinpoints any tampered block. |
 | **7. Dashboard UI** | `frontend/` | React (Vite + Tailwind CSS) client driven directly by the backend REST API: circular pipeline tracking, side-by-side legal text/Rego split view, zero-latency in-memory Policy Playground (OPA Wasm), HITL review portal, and live transaction audit vault. |
 
 ---
@@ -69,7 +69,7 @@ For full architectural details, rules, and runtime guarantees, see [`docs/archit
 | `app/compiler` | **Core MVP** | Yes | Deterministic Rego & JSON-Logic compilation, HITL ambiguity flagging. |
 | `app/execution` | **Core MVP** | Yes | Policy evaluator, OPA client/publisher, hot-reload, Celery batch worker. |
 | `app/services` | **Core MVP** | Yes | Orchestrator, HITL lifecycle service, circular processing pipeline. |
-| `app/ledger` | **Core MVP** | Yes | Append-only SHA-256 hash-chained tamper-evident audit ledger. |
+| `app/ledger` | **Core MVP** | Yes | PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003. |
 | `app/db` | **Core MVP** | Yes | Relational models (`Circular`, `Clause`, `CompiledRule`, `HITLReview`, `Ledger`). |
 | `app/api` | **Core MVP** | Yes | REST routes (`/v1/circulars`, `/v1/execution`, `/v1/hitl-reviews`, `/v1/auth`). |
 | `app/storage` | **Core MVP** | Yes | Local filesystem and S3 storage abstraction. |
@@ -109,7 +109,7 @@ app/
   compiler/         [Core MVP] Rego + JSON-Logic compilers, naming conventions, HITL flagging
   execution/        [Core MVP] Evaluator, OPA client, policy publisher, Celery tasks, HITL queue
   services/         [Core MVP] Orchestrator, HITL review lifecycle service, pipeline coordination
-  ledger/           [Core MVP] SHA-256 hash-chain primitives, LedgerService, verifier CLI
+  ledger/           [Core MVP] PostgreSQL append-only SHA-256 hash-chained audit ledger (QLDB-journal-inspired design per ADR-0003), verifier CLI
   db/               [Core MVP] SQLAlchemy ORM models (circulars, clauses, rules, reviews, ledger)
   storage/          [Core MVP] Storage abstraction: LocalFilesystemStorage and S3Storage
   security/         [Core MVP] OAuth2/JWT auth, RBAC, step-up MFA, tenant crypto, secrets backends
@@ -151,7 +151,7 @@ requirements.txt    Mirrored runtime dependencies for Docker layer caching
 |---|---|---|---|
 | **Python** | 3.11, 3.12 (`>=3.11`) | Backend application and CLI tools | Python 3.11 is used in CI; Python 3.12-slim is used in production Dockerfiles. |
 | **Node.js** | 18+ | Frontend dashboard | Bundled with Vite and Tailwind CSS. |
-| **PostgreSQL** | 14+ (16 recommended) | Main relational schema & Audit Ledger | Requires `sql/ledger_schema.sql` applied before migrations. |
+| **PostgreSQL** | 14+ (16 recommended) | Main relational schema & Audit Ledger | Hosts the append-only SHA-256 hash-chained ledger per ADR-0003. Requires `sql/ledger_schema.sql` applied before migrations. |
 | **Redis** | 6+ (7 recommended) | Celery broker/backend, policy registry, hot-reload pub/sub | |
 | **Open Policy Agent** | 0.68+ | Embedded policy evaluation | Run as local/sidecar server: `opa run --server`. |
 | **Qdrant** | 1.10+ | Vector database for clause retrieval | Optional for offline tests; required for vector search. |
@@ -396,6 +396,9 @@ python -m app.ledger.verify_cli --start 2026-01-01 --end 2026-12-31
 - `POST /v1/execution/transactions/evaluate`: Evaluates transactions against OPA policies and writes an append-only audit ledger entry.
 - `GET /v1/execution/ledger/entries`: Fetches recent audit ledger entries.
 - `POST /v1/execution/ledger/verify`: Verifies hash chain integrity across stored blocks.
+
+> [!NOTE]
+> The cryptographic audit vault is implemented entirely natively in PostgreSQL using append-only, SHA-256 hash-chained blocks (a QLDB-journal-inspired design per [ADR-0003](docs/adr/0003-sha256-hash-chain-audit-log.md)), requiring no AWS QLDB or external managed ledger service.
 
 ### Authentication (`/v1/auth`)
 - `POST /v1/auth/login`: Authenticates user credentials and issues JWT token.

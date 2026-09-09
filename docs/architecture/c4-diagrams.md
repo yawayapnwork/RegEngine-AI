@@ -55,7 +55,7 @@ C4Container
         Container(nativeKernel, "Native Policy Kernel", "C++17, header-only + C-ABI", "Allocation-free compiled-policy evaluator — the sub-millisecond hot path, embedded in the FIX Gateway")
         Container(opa, "OPA Server", "Open Policy Agent", "Evaluates compiled Rego policy for the general synchronous/batch/CDC path")
 
-        ContainerDb(postgres, "PostgreSQL", "App schema + Audit Ledger", "Circulars, clauses, compiled rules, HITL reviews, and the SHA-256 hash-chained compliance_audit_ledger")
+        ContainerDb(postgres, "PostgreSQL", "App schema + Audit Ledger", "Circulars, clauses, compiled rules, HITL reviews, and PostgreSQL append-only SHA-256 hash-chained compliance_audit_ledger (QLDB-journal-inspired design per ADR-0003)")
         ContainerDb(redis, "Redis", "Cache / Queue / Pub-Sub", "Celery broker, policy registry (L2), HITL/grievance/canary/negotiation queues, incident pub-sub")
         ContainerDb(qdrant, "Qdrant", "Vector Store", "Clause embeddings for semantic retrieval and hybrid Graph-RAG")
         ContainerDb(neo4j, "Neo4j", "Knowledge Graph", "Circular/Clause/Obligation/Penalty graph, supersession & conflict edges")
@@ -128,8 +128,7 @@ C4Component
 
 ## Level 4 — Code (the audit-ledger hash-chain module)
 
-The most safety-critical single module in the platform (ADR 0003), at
-class/function granularity.
+The most safety-critical single module in the platform: PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per [ADR-0003](../adr/0003-sha256-hash-chain-audit-log.md) (with no active AWS QLDB dependency), at class/function granularity.
 
 ```mermaid
 classDiagram

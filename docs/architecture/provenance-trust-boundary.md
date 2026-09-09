@@ -60,7 +60,7 @@ $$\begin{aligned}
    - A later policy version (e.g. version 2) cannot overwrite or alter the provenance chain of an earlier decision made under version 1.
    - Every historical decision permanently references the exact policy version and policy hash that governed it.
 4. **Append-Only Sequence Integrity**:
-   - The hash-chained ledger (`current_hash = SHA-256(previous_hash || payload_digest || seq || evaluated_at)`) prevents retroactive insertion, deletion, or reordering of compliance decisions without invalidating all subsequent blocks.
+   - The PostgreSQL-native hash-chained ledger (`current_hash = SHA-256(previous_hash || payload_digest || seq || evaluated_at)`, built with a QLDB-journal-inspired design per ADR-0003) prevents retroactive insertion, deletion, or reordering of compliance decisions without invalidating all subsequent blocks, eliminating any dependency on external managed ledger services such as AWS QLDB.
 
 ---
 

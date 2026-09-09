@@ -22,7 +22,7 @@ Therefore, RegEngine AI explicitly distinguishes:
 | `extracted_text_sha256` / `raw_text_digest` | Extracted Text Corpus | `SHA-256(canonicalize(extracted_text))` | Computed on normalized text (NFKC unicode normalization, whitespace collapsing). Guarantees textual identity across different layout engines or PDF encoding variations. |
 | `clause.sha256` | Single Clause Block | `SHA-256(circular_number \x1f clause_number \x1f canonicalize(clause_text))` | Identifies a specific regulatory clause scoped to its circular and section number for citation and rule derivation. |
 | `payload_digest` | Evaluation Event | `SHA-256(canonical_json(business_fields))` | Fixed deterministic JSON serialization of transaction evaluation outcome and evidence. |
-| `current_hash` | Audit Ledger Block | `SHA-256(previous_hash \|\| payload_digest \|\| sequence_num \|\| evaluated_at)` | Merkle-linked cryptographic chain of custody providing tamper-evident append-only journal integrity. |
+| `current_hash` | Audit Ledger Block | `SHA-256(previous_hash \|\| payload_digest \|\| sequence_num \|\| evaluated_at)` | PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003, providing tamper-evident journal integrity without external managed ledger dependencies. |
 
 ---
 
@@ -52,7 +52,7 @@ RegEngine AI links compliance decisions back to original regulatory source docum
 [7. Evidence]                 ComplianceEvaluationEvent.details (snapshot of facts & rule provenance)
         │
         ▼
-[8. Ledger]                   compliance_audit_ledger (hash-chained payload_digest & current_hash)
+[8. Ledger]                   compliance_audit_ledger (PostgreSQL append-only SHA-256 hash-chained blocks per ADR-0003)
 ```
 
 1. **Original PDF**: Raw bytes are received and immediately hashed (`source_document_sha256`).
@@ -62,7 +62,15 @@ RegEngine AI links compliance decisions back to original regulatory source docum
 5. **HITL Approval**: Required human-in-the-loop review approves the rule, locking its parameters.
 6. **Evaluation**: Live transactions evaluate against the active policy.
 7. **Evidence**: An immutable snapshot of the facts, violation details, and rule provenance is captured.
-8. **Ledger**: The evaluation is committed to the hash-chained audit ledger with cryptographic forward links.
+8. **Ledger**: The evaluation is committed to the PostgreSQL-native hash-chained audit ledger (`compliance_audit_ledger`) with cryptographic forward links.
+
+### 3.1 Audit Ledger Architecture & ADR-0003 Alignment
+
+RegEngine AI implements its audit vault using **PostgreSQL, append-only, SHA-256 hash-chained blocks** with a **QLDB-journal-inspired design per ADR-0003**. It does **NOT** use AWS QLDB or any external cloud-managed ledger service. Immutability and tamper-evidence are guaranteed directly within PostgreSQL via:
+1. `BEFORE UPDATE/DELETE` database triggers unconditionally raising exceptions (`sql/ledger_schema.sql`).
+2. Strict application role privilege separation (`INSERT` and `SELECT` only; `UPDATE`, `DELETE`, `TRUNCATE` revoked).
+3. Monotonic, sequential SHA-256 hash chaining (`current_hash = SHA-256(previous_hash || payload_digest || sequence_num || evaluated_at)`), ensuring that any database modification invalidates all subsequent blocks.
+4. Independent re-verifiability via on-demand verification CLI (`app.ledger.verify_cli`) and offline WebAssembly verification tooling (`verification-portal/`).
 
 ---
 
