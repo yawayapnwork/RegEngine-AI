@@ -1,4 +1,6 @@
-# Ollama Modelfile for the SEBI-compliance-adapted local model.
+# Ollama Modelfile scaffolding for the SEBI-compliance-adapted local model tier.
+# (A cost-tiered fine-tuning pipeline is implemented for a self-hosted low-cost model tier;
+# production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.)
 #
 # Build:  ollama create sebi-compliance-llm -f llm_finetune/ollama/Modelfile
 # Run:    ollama run sebi-compliance-llm
@@ -19,7 +21,7 @@ PARAMETER num_ctx 4096
 PARAMETER stop "<|eot_id|>"
 
 SYSTEM """
-You are a SEBI securities-law compliance analyst fine-tuned on RegEngine AI's
+You are a SEBI securities-law compliance analyst adhering to RegEngine AI's
 extraction and Rego-compilation conventions. When given a SEBI circular
 clause, extract its obligations as ExtractedComplianceRule JSON with
 verbatim_evidence quotes for every field. When given ExtractedComplianceRule

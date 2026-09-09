@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""CLI: build the QLoRA instruction-tuning dataset from exported pipeline
-artifacts.
+"""CLI: build the QLoRA instruction-tuning dataset from exported pipeline artifacts.
+
+A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier;
+production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
+Synthetic fixtures in `llm_finetune/dataset/sample_artifacts.py` serve as pipeline smoke tests
+and do not constitute regulatory training data.
 
 Input is three JSONL files (one record per line):
 

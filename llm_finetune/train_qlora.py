@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""QLoRA (4-bit NF4 + LoRA) domain-adaptation fine-tuning for RegEngine AI.
+"""QLoRA (4-bit NF4 + LoRA) domain-adaptation fine-tuning scaffolding for RegEngine AI.
 
-Adapts an open-source base model (Llama-3-70B-Instruct or Mistral-7B/8x7B
--Instruct) to SEBI securities-law terminology and this project's exact
-structured-output conventions (ExtractedComplianceRule JSON, Rego module
-shape) using the instruction JSONL produced by
-`llm_finetune/dataset/build_dataset.py`.
+A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost
+model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item,
+not yet complete. Synthetic fixtures in `llm_finetune/dataset/sample_artifacts.py` serve
+strictly as pipeline smoke tests and do not constitute regulatory training data.
+
+When executed against real pipeline outputs, this script adapts an open-source base
+model (Llama-3-70B-Instruct or Mistral-7B/8x7B-Instruct) to SEBI securities-law terminology
+and this project's exact structured-output conventions (ExtractedComplianceRule JSON,
+Rego module shape) using the instruction JSONL produced by `llm_finetune/dataset/build_dataset.py`.
 
 Why QLoRA specifically: the base models here are large enough (70B) that
 full fine-tuning needs multi-node infra RegEngine AI doesn't otherwise

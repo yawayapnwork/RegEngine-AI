@@ -29,7 +29,7 @@ metadata = Base.metadata
 
 class ModelTier(str, Enum):
     CACHE_HIT = "cache_hit"        # no model invoked at all
-    CHEAP_LOCAL = "cheap_local"    # e.g. the QLoRA-fine-tuned model via vLLM/Ollama (llm_finetune/)
+    CHEAP_LOCAL = "cheap_local"    # Self-hosted low-cost model tier (scaffolding in llm_finetune/). Production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
     FRONTIER = "frontier"          # e.g. Qwen2.5-72B-Instruct via Hugging Face Inference
 
 

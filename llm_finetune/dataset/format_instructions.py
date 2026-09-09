@@ -1,17 +1,22 @@
-"""Converts RegEngine AI's own pipeline artifacts -- parsed SEBI clause
+"""Converts RegEngine AI's pipeline artifacts -- parsed SEBI clause
 chunks (`app.models.ClauseChunk`), extraction-agent AST outputs
 (`app.agents.schemas.ExtractedComplianceRule` / `AuditedComplianceRule`),
 and compiled OPA modules (`app.compiler.models.CompiledRego`) -- into
 chat-format instruction-tuning JSONL.
 
+A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier;
+production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
+Synthetic fixtures in `llm_finetune/dataset/sample_artifacts.py` serve strictly as pipeline
+smoke tests and schema validation fixtures, not regulatory training data.
+
 Why these artifacts and not a hand-written dataset: the production system
-(CrewAI + Qwen via Hugging Face, see `app.agents.crew`) already produces exactly the
-input/output pairs a domain-adapted local model needs to imitate --
+(CrewAI + Qwen via Hugging Face, see `app.agents.crew`) already produces the
+input/output pairs a domain-adapted local model would need to imitate --
 clause text in, structured JSON out; structured JSON in, Rego out. Every
-example here is therefore something the *real* pipeline actually did and
-a human (via the Logic Auditor Agent / HITL review) already had a chance
+example here is therefore something the pipeline produced and
+a human (via the Logic Auditor Agent / HITL review) had a chance
 to catch if it was wrong -- see `_only_trustworthy` below, which is the
-single most important filter in this module.
+filter in this module.
 
 Two task families, matching the two structured-output stages of the
 compiler pipeline:
@@ -21,7 +26,7 @@ compiler pipeline:
     (shall/shall not/may), and the verbatim-evidence discipline.
   - "rego_compile": `ExtractedComplianceRule` JSON -> Rego module.
     Teaches the exact Rego package/rule-naming conventions
-    `app.compiler.rego_compiler` uses, so a fine-tuned model's output is
+    `app.compiler.rego_compiler` uses, so a future fine-tuned model's output is
     something the rest of the pipeline (OPA, `app.execution.opa_engine`)
     can consume unmodified.
 

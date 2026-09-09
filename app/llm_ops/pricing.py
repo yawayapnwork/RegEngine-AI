@@ -29,12 +29,12 @@ FRONTIER_MODEL_PRICING: dict[str, ModelPricing] = {
     "huggingface/Qwen/Qwen2.5-72B-Instruct": ModelPricing(input_per_1k_usd=0.0009, output_per_1k_usd=0.0009),
 }
 
-# The "cheap" tier is a self-hosted, QLoRA-fine-tuned model (llm_finetune/)
-# served locally via vLLM/Ollama -- there is no per-token API bill. The
-# non-zero figure here is an amortized GPU-hour cost estimate (compute +
-# power / tokens served), so the dashboard's "$ saved by routing to the
-# cheap tier" number reflects a real, if approximate, marginal cost rather
-# than claiming these requests are literally free.
+# The "cheap" tier represents a planned self-hosted low-cost model tier (scaffolding in llm_finetune/).
+# A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier;
+# production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
+# The non-zero figure here is an amortized GPU-hour cost estimate (compute + power / tokens served),
+# so the dashboard's "$ saved by routing to the cheap tier" metric reflects an estimated marginal cost
+# for architecture modeling rather than claiming completed local fine-tuning is deployed.
 CHEAP_TIER_PRICING: dict[str, ModelPricing] = {
     "sebi-compliance-llm": ModelPricing(input_per_1k_usd=0.0001, output_per_1k_usd=0.0002),
 }

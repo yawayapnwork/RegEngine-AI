@@ -9,7 +9,8 @@ CrewAI dual-agent crew for the extraction step:
         -> SemanticPromptCache.get()          [Redis exact / Qdrant semantic]
         -> HIT?  return cached ExtractedComplianceRule, no model call at all
         -> MISS: ModelRouter.decide()          [pre-call complexity heuristic]
-        -> CHEAP_LOCAL: call the QLoRA-fine-tuned model (llm_finetune/)
+        -> CHEAP_LOCAL: call self-hosted low-cost tier model (llm_finetune/ scaffolding;
+             production fine-tuning on a real annotated SEBI corpus is a roadmap item)
              via its vLLM OpenAI-compatible endpoint
                 -> low confidence / bad schema / ambiguous_spans?
                      ModelRouter.should_escalate() -> retry on FRONTIER

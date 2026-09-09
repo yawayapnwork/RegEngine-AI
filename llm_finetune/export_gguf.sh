@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Converts a merged HF checkpoint (llm_finetune/merge_adapter.py's output)
-# into GGUF and quantizes it for local Ollama inference.
+# into GGUF and quantizes it for local Ollama inference scaffolding.
+#
+# (A cost-tiered fine-tuning pipeline is implemented for a self-hosted low-cost model tier;
+# production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.)
 #
 # Requires llama.cpp checked out alongside this repo (or set LLAMA_CPP_DIR):
 #   git clone https://github.com/ggml-org/llama.cpp ../llama.cpp

@@ -2,6 +2,9 @@
 """Merges a trained LoRA adapter back into the base model's weights,
 producing a standalone fp16/bf16 checkpoint.
 
+A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier;
+production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
+
 Two consumers need this merged checkpoint rather than the bare adapter:
 
   - `llama.cpp`'s `convert_hf_to_gguf.py` (see export_gguf.sh), for Ollama
@@ -16,9 +19,9 @@ Two consumers need this merged checkpoint rather than the bare adapter:
     artifact to distribute.
 
 Usage:
-  python llm_finetune/merge_adapter.py \\
-      --base-model meta-llama/Meta-Llama-3-70B-Instruct \\
-      --adapter-dir llm_finetune/checkpoints/sebi-llama3-70b-qlora \\
+  python llm_finetune/merge_adapter.py \
+      --base-model meta-llama/Meta-Llama-3-70B-Instruct \
+      --adapter-dir llm_finetune/checkpoints/sebi-llama3-70b-qlora \
       --output-dir llm_finetune/merged/sebi-llama3-70b
 """
 from __future__ import annotations

@@ -82,6 +82,7 @@ The Core MVP is defined as the deterministic 8-stage processing pipeline:
 | **Incident Breach Broadcaster** | `app/incident/` | **Frozen / Non-MVP** | **No** | Gated behind `settings.incident_broadcast_enabled=False` in `app/main.py` lifespan. |
 | **Regulatory Version Diffing** | `app/diffing/` | **Frozen / Non-MVP** | **No** | Standalone master circular diffing router. |
 | **Operational Analytics** | `app/analytics/`, `app/llm_ops/` | **Frozen / Non-MVP** | **No** | Telemetry and cost tracking routers. |
+| **LLM Fine-Tuning Scaffolding** | `llm_finetune/` | **Frozen / Non-MVP** | **No** | A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete. Synthetic fixtures provide smoke-test scaffolding only. |
 
 ---
 

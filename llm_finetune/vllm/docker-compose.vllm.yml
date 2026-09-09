@@ -1,7 +1,8 @@
 # =============================================================================
-# vLLM Sidecar: OpenAI-compatible low-latency inference for the SEBI-adapted
-# local LLM, serving the LoRA adapter on top of the (unquantized-in-VRAM,
-# vLLM-quantized-at-load) base model.
+# vLLM Sidecar: OpenAI-compatible low-latency inference scaffolding for the
+# self-hosted low-cost model tier. (A cost-tiered fine-tuning pipeline is
+# implemented for a self-hosted low-cost model tier; production fine-tuning
+# on a real annotated SEBI corpus is a roadmap item, not yet complete.)
 # =============================================================================
 # Why vLLM here rather than Ollama in production: vLLM's PagedAttention +
 # continuous batching give materially better throughput/latency under

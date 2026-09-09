@@ -743,8 +743,9 @@ class Settings(BaseSettings):
     )
     llm_cache_redis_key_prefix: str = "regengine:llm_cache"
 
-    # Local low-cost tier: the QLoRA-fine-tuned model served by
-    # llm_finetune/vllm (or Ollama) for deterministic/simple clauses.
+    # Local low-cost tier: scaffolding for a self-hosted low-cost model tier (llm_finetune/).
+    # A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier;
+    # production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
     llm_router_cheap_model: str = "sebi-compliance-llm"
     llm_router_cheap_model_base_url: str = "http://localhost:8000/v1"
     llm_router_frontier_model: str = "huggingface/Qwen/Qwen2.5-72B-Instruct"

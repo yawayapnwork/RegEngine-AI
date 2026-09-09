@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Minimal example client for the vLLM sidecar (docker-compose.vllm.yml),
-showing the request shape needed to hit the fine-tuned "sebi-compliance"
-LoRA adapter through vLLM's OpenAI-compatible `/v1/chat/completions`
-endpoint, and validating the response back against the project's own
-`ExtractedComplianceRule` schema so a bad generation fails loudly instead
-of silently entering the pipeline.
+showing the request shape needed to hit a "sebi-compliance" LoRA adapter
+(via the llm_finetune/ QLoRA scaffolding; note: production fine-tuning on a real
+annotated SEBI corpus is a roadmap item, not yet complete) through vLLM's
+OpenAI-compatible `/v1/chat/completions` endpoint, and validating the response
+back against the project's own `ExtractedComplianceRule` schema so a bad
+generation fails loudly instead of silently entering the pipeline.
 
 This mirrors the same prompt shape `llm_finetune/dataset/format_instructions.py`
-trained on (system prompt = EXTRACTION_SYSTEM_PROMPT, user content = clause
-text) -- if this drifts from the training-time template, expect a
-measurable quality regression even though nothing errors.
+is designed for (system prompt = EXTRACTION_SYSTEM_PROMPT, user content = clause
+text) -- if this drifts from the template, expect a measurable quality regression
+even though nothing errors.
 
 Usage:
   python llm_finetune/vllm/client_example.py --clause-text "..." --circular "SEBI/HO/.../2024/100" --clause-number "3.2"
@@ -59,7 +60,7 @@ def extract_via_local_llm(
     resp.raise_for_status()
     raw_content = resp.json()["choices"][0]["message"]["content"]
 
-    # Validate immediately: a locally fine-tuned 7B/70B model producing
+    # Validate immediately: a local 7B/70B model producing
     # malformed JSON must be caught here, not three pipeline stages later
     # when app.compiler.rego_compiler chokes on a missing field.
     return ExtractedComplianceRule.model_validate_json(raw_content)

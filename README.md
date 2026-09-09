@@ -33,6 +33,7 @@ flowchart LR
 - [API Surface](#api-surface)
 - [Testing Guide](#testing-guide)
 - [Operational & Hardening Considerations](#operational--hardening-considerations)
+- [Model Fine-Tuning & Roadmap](#model-fine-tuning--roadmap)
 
 ---
 
@@ -41,7 +42,7 @@ flowchart LR
 | Stage | Key Modules | What it does |
 |---|---|---|
 | **1. Ingestion & Provenance** | `app.parsing`, `app.storage`, `app.vectorstore` | Ingests circular PDFs via local filesystem or S3. Computes two distinct SHA-256 digests: `source_document_sha256` (over raw uploaded PDF bytes) and `extracted_text_sha256` (over normalized extracted text). Parses layout-aware clauses (`unstructured` with OCR/Tika fallbacks), chunks clauses deterministically, and indexes clause embeddings into Qdrant. State: `INGESTED`. |
-| **2. Extraction & Audit** | `app.agents`, `app.services.orchestrator` | Runs dual-agent compliance analysis with bounded concurrency (preventing worker memory and provider rate-limit exhaustion). An **Extraction Agent** structures clauses into obligations, numerical thresholds, and entity targets; an independent **Logic Auditor Agent** verifies extraction fidelity before downstream compilation. State: `EXTRACTING` &rarr; `EXTRACTED`. |
+| **2. Extraction & Audit** | `app.agents`, `app.services.orchestrator` | Runs dual-agent compliance analysis with bounded concurrency (preventing worker memory and provider rate-limit exhaustion). An **Extraction Agent** structures clauses into obligations, numerical thresholds, and entity targets; an independent **Logic Auditor Agent** verifies extraction fidelity before downstream compilation. State: `EXTRACTING` &rarr; `EXTRACTED`. *(Note: A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete).* |
 | **3. Compilation & HITL Gate** | `app.compiler`, `app.api.hitl_review_routes` | Compiles audited deterministic clauses into **OPA Rego** policies and structurally validated **JSON-Logic** ASTs. Any ambiguous, qualitative, low-confidence, or conflicting clauses generate `HITLReview` records. A rule can **never** become active while any blocking HITL review remains unresolved. State: `COMPILING` &rarr; `AWAITING_HITL`. |
 | **4. Approval & Hot-Reload** | `app.execution.publisher`, `app.execution.policy_hot_reload` | Authorized compliance officers review and approve flagged items (protected by step-up MFA). Approving all blocking reviews transitions the rule to active and publishes it to OPA. A Redis pub/sub subscriber notifies worker pods to hot-reload OPA and invalidate local L1 caches without requiring container restarts. State: `APPROVED` &rarr; `DEPLOYED`. |
 | **5. Execution Engine** | `app.execution`, `app.api.execution_routes` | Evaluates live broker transactions against deployed OPA policies, returning synchronous `allow`, `deny`, or `flagged` decisions. Asynchronous batch files and database CDC events are processed via dedicated Celery/Redis worker queues. |
@@ -88,6 +89,7 @@ For full architectural details, rules, and runtime guarantees, see [`docs/archit
 | `app/graph` | **Frozen / Experimental** | No | Circular-to-clause dependency knowledge graph engine. |
 | `app/diffing` | **Frozen / Experimental** | No | Regulatory supersession diffing and amendatory clause tracking. |
 | `app/incident` | **Frozen / Experimental** | No | Real-time breach notification WebSockets (gated behind `incident_broadcast_enabled=False`). |
+| `llm_finetune/` | **Scaffolding / Roadmap** | No | A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete. Synthetic fixtures provide smoke-test scaffolding only. |
 | Multi-Regulator (RBI/IRDAI/PFRDA) | **Frozen / Experimental** | No | `Regulator.SEBI` is the sole active core MVP regulator; others marked frozen. |
 
 ### Architectural Boundary Guarantees
@@ -131,6 +133,7 @@ app/
   graph/                [Frozen] Cross-circular dependency knowledge graph
   diffing/              [Frozen] Regulatory supersession and amendatory diffing
   incident/             [Frozen] WebSocket breach event streaming
+  llm_finetune/         [Scaffolding / Roadmap] QLoRA fine-tuning pipeline scaffolding and synthetic fixture generator
 frontend/
   src/constants/    Canonical constants (pipeline stage definitions, labels)
   src/components/   UI views: pipeline, splitview, playground, hitl, vault, layout
@@ -447,3 +450,18 @@ pytest tests/test_circular_resumability.py -v
    - The multi-stage `Dockerfile` pre-warms ML layout detection weights during the builder stage. When deploying into restricted air-gapped environments, build container images in a network-accessible staging pipeline before promoting to private registries.
 5. **CORS Configuration**:
    - In split frontend/backend deployments, explicitly configure `CORS_ALLOWED_ORIGINS` with the exact frontend domain (e.g. `["https://compliance.internal.bank"]`).
+
+---
+
+## Model Fine-Tuning & Roadmap
+
+### Current Status: Scaffolding & Tiered Architecture
+- **Active Extraction Path**: RegEngine AI's active extraction and logic auditing pipeline uses general-purpose frontier LLMs (such as Qwen2.5-72B-Instruct via Hugging Face Inference) and deterministic offline rule extractors (`LLM_PROVIDER=offline`).
+- **Cost-Tiered Scaffolding (`llm_finetune/`)**: A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete.
+- **Synthetic Fixtures**: The fixtures in `llm_finetune/dataset/sample_artifacts.py` serve strictly as pipeline smoke tests and schema validation fixtures. They do not constitute regulatory training data.
+- **No Unbenchmarked Accuracy Claims**: No accuracy improvements or domain-adapted performance gains are claimed prior to formal benchmarking against real regulatory ground-truth datasets.
+
+### Roadmap Items
+1. **Curated SEBI Regulatory Dataset**: Assemble and manually verify an annotated corpus of historical and current SEBI master circulars, amendments, and gazettes.
+2. **Production QLoRA Training**: Execute supervised fine-tuning across domain-specific tokenizers and models once the curated corpus is complete.
+3. **Empirical Benchmarking**: Benchmark extraction F1, numerical precision, and obligation classification accuracy against baseline models before promoting fine-tuned checkpoints to production.
