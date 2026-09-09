@@ -22,6 +22,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.models import Circular, CircularStateTransition, Clause, CompiledRule, HITLReview
 from app.execution.policy_publisher import PolicyPublisher
 
