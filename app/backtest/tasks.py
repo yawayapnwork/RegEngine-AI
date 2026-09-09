@@ -13,7 +13,13 @@ import logging
 import redis as sync_redis
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.backtest.models import BacktestOutcome, BacktestRun, BacktestRunRequest, BacktestStatus
+from app.backtest.models import (
+    BacktestOutcome,
+    BacktestRun,
+    BacktestRunRequest,
+    BacktestStatus,
+    RuleImpactPreviewReport,
+)
 from app.backtest.orchestrator import run_backtest
 from app.config import get_settings
 from app.execution.celery_app import celery_app
@@ -90,3 +96,84 @@ def run_backtest_task(self, run_id: str, request_dict: dict) -> dict:
         asyncio.run(ledger_engine.dispose())
 
     return run.model_dump(mode="json")
+
+
+# --- Rule-Impact Preview / Digital Twin Task & Storage ---
+
+_IN_MEMORY_PREVIEW_REPORTS: dict[str, str] = {}
+_IN_MEMORY_CANCELLATIONS: set[str] = set()
+
+
+def _preview_key(preview_id: str) -> str:
+    return f"{get_settings().backtest_key_prefix}:preview:{preview_id}"
+
+
+def _preview_cancel_key(preview_id: str) -> str:
+    return f"{get_settings().backtest_key_prefix}:preview:{preview_id}:cancel"
+
+
+def save_preview_report(report: RuleImpactPreviewReport) -> None:
+    """Stores a RuleImpactPreviewReport in Redis (with in-memory fallback)."""
+    ttl = get_settings().rule_preview_redis_ttl_seconds
+    raw = report.model_dump_json()
+    try:
+        r = _sync_redis()
+        r.set(_preview_key(report.preview_id), raw, ex=ttl)
+    except Exception:
+        logger.debug("Redis unavailable for save_preview_report; storing in-memory.")
+        _IN_MEMORY_PREVIEW_REPORTS[report.preview_id] = raw
+
+
+def get_preview_report(preview_id: str) -> RuleImpactPreviewReport | None:
+    """Retrieves a RuleImpactPreviewReport from Redis or in-memory fallback."""
+    try:
+        r = _sync_redis()
+        raw = r.get(_preview_key(preview_id))
+        if raw:
+            return RuleImpactPreviewReport.model_validate_json(raw)
+    except Exception:
+        logger.debug("Redis unavailable for get_preview_report; falling back to in-memory.")
+    
+    raw_mem = _IN_MEMORY_PREVIEW_REPORTS.get(preview_id)
+    return RuleImpactPreviewReport.model_validate_json(raw_mem) if raw_mem else None
+
+
+def cancel_preview(preview_id: str) -> None:
+    """Sets the cancellation signal for an ongoing preview replay."""
+    try:
+        r = _sync_redis()
+        r.set(_preview_cancel_key(preview_id), "1", ex=3600)
+    except Exception:
+        _IN_MEMORY_CANCELLATIONS.add(preview_id)
+
+
+def is_preview_cancelled(preview_id: str) -> bool:
+    """Checks whether cancellation has been requested for this preview."""
+    if preview_id in _IN_MEMORY_CANCELLATIONS:
+        return True
+    try:
+        r = _sync_redis()
+        return bool(r.exists(_preview_cancel_key(preview_id)))
+    except Exception:
+        return preview_id in _IN_MEMORY_CANCELLATIONS
+
+
+@celery_app.task(name="app.backtest.tasks.run_rule_impact_preview_task", bind=True, max_retries=1)
+def run_rule_impact_preview_task(self, preview_id: str, request_dict: dict) -> dict:
+    from app.backtest.models import PreviewRunRequest
+    from app.backtest.orchestrator import run_rule_impact_preview
+
+    request = PreviewRunRequest.model_validate(request_dict)
+    settings = get_settings()
+    ledger_engine = create_async_engine(settings.ledger_database_url, pool_pre_ping=True)
+
+    try:
+        report = asyncio.run(run_rule_impact_preview(request, settings, ledger_engine, preview_id))
+        save_preview_report(report)
+        return report.model_dump(mode="json")
+    except Exception as exc:
+        logger.exception("Rule impact preview task '%s' failed: %s", preview_id, exc)
+        raise
+    finally:
+        asyncio.run(ledger_engine.dispose())
+

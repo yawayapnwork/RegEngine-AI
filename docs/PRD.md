@@ -312,10 +312,18 @@ flowchart TD
   4. *Model Heterogeneity & Same-Checkpoint Transparency*: Distinct Arbiter model configuration supported; flags `same_model_risk = True` if identical model checkpoints are used across roles.
   5. *Strict Multi-Tenancy & Provenance*: Sessions and transcripts are partitioned by `tenant_id` and sealed with tamper-evident SHA-256 cryptographic digests.
 
-### 8.4 Real-Data Rule-Impact Preview & Backtesting [`IN PROGRESS` / `ROADMAP`]
-- **Existing Implementation**: `app/backtest/replay_engine.py` provides an offline engine capable of replaying historical ledger events against candidate policies. **Status: IN PROGRESS** (Offline batch script; not integrated into live pipeline).
-- **Proposed Capability**: An interactive dashboard feature allowing compliance officers to simulate the immediate trading impact (rejection rate, margin shortfall) of a draft circular against live transaction streams prior to approval. **Status: ROADMAP** (Interactive preview proposed).
-- **Digital Twin Clarification**: "Digital Twin" market simulation is **NOT FOUND / UNSUPPORTED** anywhere in the repository; historical backtesting is strictly limited to deterministic offline transaction replays via `app/backtest/replay_engine.py`.
+### 8.4 Real-Data Rule-Impact Preview & Backtesting [`VERIFIED CURRENT`]
+- **Implemented Capabilities**:
+  1. *Historical Ledger Replay Engine* (`app/backtest/replay_engine.py`): Replays historical order-flow transactions snapshotting `facts` against candidate JSON-Logic ASTs or isolated OPA packages.
+  2. *Rule-Impact Preview / Digital Twin* (`app/backtest/orchestrator.py`, `app/api/hitl_review_routes.py`): Interactive on-demand impact preview for candidate `CompiledRule` versions awaiting human approval (`POST /v1/hitl-reviews/{review_id}/preview-impact`). Computes breach deltas, failure rate shifts, aggregate financial impact, and redacted representative examples.
+- **Trust Boundary & Safety Invariants**:
+  1. *No Production State Mutation*: Replay executes strictly read-only against `compliance_audit_ledger`; candidate rules remain `is_active = False` and are never deployed or published to live OPA.
+  2. *Strict Multi-Tenancy*: Replay queries strictly enforce `tenant_id`, preventing cross-tenant trade leakage.
+  3. *Advisory Only & Non-Inference*: Zero historical impact does NOT constitute compliance approval and does NOT infer regulatory correctness.
+  4. *Reproducibility & Tamper-Evidence*: Datasets and reports are sealed with deterministic cryptographic SHA-256 digests (`dataset_snapshot_hash`, `result_digest`).
+  5. *Trade Secrecy & Data Minimization*: Proprietary transaction IDs and PII are redacted and masked from review reports.
+- **Digital Twin Scope**: Historical backtesting and impact preview are strictly deterministic replays against immutable historical transaction logs; speculative generative market simulations are explicitly unsupported.
+
 
 ### 8.5 M&A Compliance Due-Diligence Agent [`ROADMAP`]
 - **Proposed Capability**: An autonomous compliance due-diligence agent that ingests multi-year trading records, historical circular versions, and entity filings of an acquisition target to produce an automated regulatory liability report.

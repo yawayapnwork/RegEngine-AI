@@ -25,7 +25,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.backtest.models import BacktestOutcome, BacktestRun, BacktestRunRequest, BacktestStatus
+from app.backtest.models import (
+    BacktestOutcome,
+    BacktestRun,
+    BacktestRunRequest,
+    BacktestStatus,
+    PreviewRunRequest,
+    RuleImpactPreviewReport,
+)
 from app.backtest.tasks import get_outcomes_page, get_run, run_backtest_task
 from app.security.dependencies import require_roles
 from app.security.models import Role
@@ -77,3 +84,43 @@ async def get_backtest_delta(
         "total": total,
         "entries": [e.model_dump(mode="json") for e in entries],
     }
+
+
+@router.post("/runs/{run_id}/cancel", dependencies=[Depends(_ALLOWED)])
+async def cancel_backtest_run(run_id: str) -> dict:
+    from app.backtest.tasks import cancel_preview
+    cancel_preview(run_id)
+    return {"run_id": run_id, "status": "cancellation_requested"}
+
+
+@router.post("/preview", response_model=RuleImpactPreviewReport, dependencies=[Depends(_ALLOWED)])
+async def preview_rule_impact(request: PreviewRunRequest) -> RuleImpactPreviewReport:
+    """Executes on-demand real-data rule-impact preview / digital twin replay.
+
+    Evaluates the candidate policy against historical ledger transactions with strict
+    tenant isolation, producing breach deltas, financial impact, and redacted examples.
+    """
+    from app.backtest.orchestrator import run_rule_impact_preview
+    from app.backtest.tasks import save_preview_report
+    from app.config import get_settings
+    from app.ledger.db import get_ledger_engine
+
+    if request.candidate_jsonlogic_ast is None and request.candidate_opa_package is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Exactly one of candidate_jsonlogic_ast or candidate_opa_package must be set.",
+        )
+
+    settings = get_settings()
+    ledger_engine = get_ledger_engine()
+    preview_id = str(uuid.uuid4())
+
+    report = await run_rule_impact_preview(
+        request=request,
+        settings=settings,
+        ledger_engine=ledger_engine,
+        preview_id=preview_id,
+    )
+    save_preview_report(report)
+    return report
+

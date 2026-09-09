@@ -205,6 +205,10 @@ class Settings(BaseSettings):
     backtest_concurrency: int = 32  # bounded replay concurrency; see app.backtest.replay_engine
     backtest_key_prefix: str = "regengine:backtest"
     celery_backtest_queue: str = "regengine_backtest"
+    rule_preview_max_transactions: int = 10000
+    rule_preview_timeout_seconds: float = 30.0
+    rule_preview_default_lookback_days: int = 30
+    rule_preview_redis_ttl_seconds: int = 86400
 
     # --- Shadow execution / canary release service (app.canary) ---
     # Distinct from app.backtest: backtest replays PAST ledger transactions

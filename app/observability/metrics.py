@@ -227,6 +227,34 @@ ARBITRATION_ESCALATION_TOTAL = Counter(
     registry=REGISTRY,
 )
 
+# --- Real-Data Rule-Impact Preview / Digital Twin metrics (app.backtest) ---
+RULE_PREVIEW_EXECUTIONS_TOTAL = Counter(
+    "rule_preview_executions_total",
+    "Total count of rule-impact preview executions by status outcome.",
+    labelnames=("status",),  # "completed" | "failed" | "timeout" | "cancelled"
+    registry=REGISTRY,
+)
+
+RULE_PREVIEW_DURATION_SECONDS = Histogram(
+    "rule_preview_duration_seconds",
+    "Wall-clock duration of rule-impact preview executions across historical transactions.",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+    registry=REGISTRY,
+)
+
+RULE_PREVIEW_TRANSACTIONS_EVALUATED_TOTAL = Counter(
+    "rule_preview_transactions_evaluated_total",
+    "Total historical transactions evaluated in rule-impact previews.",
+    registry=REGISTRY,
+)
+
+RULE_PREVIEW_NEW_FAILURES_TOTAL = Counter(
+    "rule_preview_new_failures_total",
+    "Total transactions newly failing under candidate policy in rule-impact previews.",
+    registry=REGISTRY,
+)
+
+
 # --- FIX Protocol gateway metrics (app.fix_gateway) ---
 # Bucketed in MICROSECONDS-equivalent seconds (1e-6 to 1e-2) since this
 # path's whole point is sub-500-microsecond validation -- the default

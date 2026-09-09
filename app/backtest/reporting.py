@@ -11,11 +11,22 @@ produced the rows.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 import pandas as pd
 
-from app.backtest.models import BacktestOutcome, BacktestSummary, BrokerImpactBreakdown, DeltaChangeType, HistoricalTransaction
+from app.backtest.models import (
+    AggregateFinancialImpact,
+    BacktestOutcome,
+    BacktestSummary,
+    BrokerImpactBreakdown,
+    DeltaChangeType,
+    HistoricalTransaction,
+    PreviewDatasetScope,
+    RepresentativeExample,
+    RuleImpactPreviewReport,
+)
 from app.execution.models import Decision
 
 
@@ -44,6 +55,7 @@ def build_outcomes(replayed: list[tuple[HistoricalTransaction, str, list[str]]])
             new_decision=new_decision,
             new_violations=new_violations,
             change_type=_classify(txn.old_decision, new_decision),
+            financial_amount=txn.financial_amount,
         )
         for txn, new_decision, new_violations in replayed
     ]
@@ -127,3 +139,154 @@ def build_summary(candidate_rule_id: str, lookback_days: int, outcomes: list[Bac
         unchanged_count=unchanged_count,
         broker_breakdown=broker_breakdown,
     )
+
+
+# --- Rule-Impact Preview / Digital Twin Reporting Functions ---
+
+_REDACTED_FACT_KEYS = frozenset({
+    "pan", "aadhaar", "trader_id", "client_id", "account_number", "ssn",
+    "secret", "token", "password", "internal_id", "client_name", "tax_id",
+})
+
+
+def mask_transaction_id(txn_id: str) -> str:
+    """Redacts raw transaction ID to prevent leaking proprietary trade details."""
+    if len(txn_id) <= 8:
+        return f"txn_***{txn_id[-2:]}"
+    return f"{txn_id[:4]}...{txn_id[-4:]}"
+
+
+def build_representative_examples(
+    replayed: list[tuple[HistoricalTransaction, str, list[str]]],
+    max_per_category: int = 3,
+) -> list[RepresentativeExample]:
+    """Extracts sanitized, redacted sample transactions for key impact categories."""
+    examples_by_type: dict[DeltaChangeType, list[RepresentativeExample]] = {
+        DeltaChangeType.NEW_FAILURE: [],
+        DeltaChangeType.NEWLY_PASSING: [],
+        DeltaChangeType.UNDEFINED_NOW: [],
+        DeltaChangeType.UNCHANGED_FAIL: [],
+    }
+
+    for txn, new_decision, new_violations in replayed:
+        change_type = _classify(txn.old_decision, new_decision)
+        if change_type not in examples_by_type:
+            continue
+        if len(examples_by_type[change_type]) >= max_per_category:
+            continue
+
+        # Redact any proprietary or PII keys from facts
+        sanitized_facts = {
+            k: v for k, v in txn.facts.items()
+            if k.lower() not in _REDACTED_FACT_KEYS
+        }
+
+        examples_by_type[change_type].append(
+            RepresentativeExample(
+                masked_transaction_id=mask_transaction_id(txn.transaction_id),
+                evaluated_at=txn.evaluated_at,
+                change_type=change_type,
+                old_decision=txn.old_decision,
+                new_decision=new_decision,
+                old_violations=txn.old_violations,
+                new_violations=new_violations,
+                relevant_facts=sanitized_facts,
+                financial_amount=txn.financial_amount,
+            )
+        )
+
+    # Flatten categories
+    flattened: list[RepresentativeExample] = []
+    for cat in (DeltaChangeType.NEW_FAILURE, DeltaChangeType.NEWLY_PASSING, DeltaChangeType.UNDEFINED_NOW, DeltaChangeType.UNCHANGED_FAIL):
+        flattened.extend(examples_by_type.get(cat, []))
+    return flattened
+
+
+def build_aggregate_financial_impact(outcomes: list[BacktestOutcome]) -> AggregateFinancialImpact:
+    """Computes aggregate financial magnitude across changed transactions."""
+    new_failure_amt = 0.0
+    newly_passing_amt = 0.0
+    new_failure_count_with_amt = 0
+
+    for o in outcomes:
+        if o.financial_amount is not None:
+            if o.change_type == DeltaChangeType.NEW_FAILURE:
+                new_failure_amt += o.financial_amount
+                new_failure_count_with_amt += 1
+            elif o.change_type == DeltaChangeType.NEWLY_PASSING:
+                newly_passing_amt += o.financial_amount
+
+    avg_new_failure = (new_failure_amt / new_failure_count_with_amt) if new_failure_count_with_amt > 0 else 0.0
+
+    return AggregateFinancialImpact(
+        currency="INR",
+        total_new_failure_amount=round(new_failure_amt, 2),
+        total_newly_passing_amount=round(newly_passing_amt, 2),
+        avg_new_failure_amount=round(avg_new_failure, 2),
+        affected_transactions_with_amounts=new_failure_count_with_amt,
+    )
+
+
+def compute_preview_result_digest(
+    candidate_hash: str,
+    dataset_snapshot_hash: str,
+    total: int,
+    new_fail: int,
+    newly_pass: int,
+    delta_pct: float,
+) -> str:
+    """Generates cryptographic SHA-256 seal of the preview outcomes and inputs."""
+    payload = f"{candidate_hash}:{dataset_snapshot_hash}:{total}:{new_fail}:{newly_pass}:{delta_pct:.4f}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_rule_impact_preview_report(
+    candidate_rule_id: str,
+    candidate_policy_hash: str,
+    scope: PreviewDatasetScope,
+    dataset_snapshot_hash: str,
+    replayed: list[tuple[HistoricalTransaction, str, list[str]]],
+    candidate_version: int | None = None,
+    baseline_policy_hash: str | None = None,
+    evaluator_version: str = "regengine-jsonlogic-v1",
+    preview_id: str | None = None,
+) -> RuleImpactPreviewReport:
+    """Assembles the complete RuleImpactPreviewReport for HITL review."""
+    outcomes = build_outcomes(replayed)
+    summary = build_summary(candidate_rule_id, scope.lookback_days, outcomes)
+    financial_impact = build_aggregate_financial_impact(outcomes)
+    representative_examples = build_representative_examples(replayed)
+    result_digest = compute_preview_result_digest(
+        candidate_hash=candidate_policy_hash,
+        dataset_snapshot_hash=dataset_snapshot_hash,
+        total=summary.total_transactions,
+        new_fail=summary.new_failures,
+        newly_pass=summary.newly_passing,
+        delta_pct=summary.delta_failure_rate_pct,
+    )
+
+    return RuleImpactPreviewReport(
+        preview_id=preview_id or summary.run_id,
+        candidate_rule_id=candidate_rule_id,
+        candidate_policy_hash=candidate_policy_hash,
+        candidate_version=candidate_version,
+        baseline_policy_hash=baseline_policy_hash,
+        evaluator_version=evaluator_version,
+        scope=scope,
+        dataset_snapshot_hash=dataset_snapshot_hash,
+        total_evaluated=summary.total_transactions,
+        newly_affected=summary.new_failures,
+        no_longer_affected=summary.newly_passing,
+        unchanged_count=summary.unchanged_count,
+        undefined_count=summary.undefined_count,
+        old_fail_count=summary.old_fail_count,
+        new_fail_count=summary.new_fail_count,
+        old_failure_rate_pct=summary.old_failure_rate_pct,
+        new_failure_rate_pct=summary.new_failure_rate_pct,
+        delta_failure_rate_pct=summary.delta_failure_rate_pct,
+        financial_impact=financial_impact,
+        representative_examples=representative_examples,
+        result_digest=result_digest,
+        is_live_policy_safe=True,
+    )
+
