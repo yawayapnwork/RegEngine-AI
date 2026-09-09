@@ -302,8 +302,15 @@ flowchart TD
 - **Proposed Protocol**: "Compliance-as-Collateral" proposes enabling brokers to cryptographically prove client margin sufficiency to clearing corporations via zero-knowledge proofs without revealing proprietary portfolio positions. **Status: ROADMAP** (Protocol and clearing integration proposed).
 
 ### 8.3 Multi-Agent Negotiation & Arbitration [`IN PROGRESS`]
-- **Existing Implementation**: `app/negotiation/` implements a multi-agent consensus protocol (`DomainAgent`, `ConflictArbiterAgent`) to resolve conflicting multi-clause compliance interpretations across trading domains.
-- **Current Status**: **IN PROGRESS** (Implementation exists; gated behind `settings.negotiation_enabled=False`; decoupled from live pipeline; not verified end-to-end).
+- **Implemented Capabilities**:
+  1. *Clause Extraction & Auditing Arbitration* (`app/negotiation/arbitration_engine.py`): Deliberation protocol between Extractor Agent and Logic Auditor Agent over ambiguous regulatory clauses. Cross-examines arguments against verbatim source quotes, canonical taxonomy (`app/regulatory/facts.py`), and deterministic constraints. Disagreements produce `REVIEW_REQUIRED` and route to HITL. Gated behind `settings.arbitration_enabled=False`.
+  2. *Execution-Time Trade Negotiation* (`app/negotiation/orchestrator.py`): Consensus protocol among domain agents (`MarginAgent`, `RiskDisclosureAgent`, `FundSegregationAgent`) to resolve multi-clause compliance outcomes during transaction evaluation. Gated behind `settings.negotiation_enabled=False`.
+- **Trust Boundary & Safety Invariants**:
+  1. *No Direct Policy Activation*: Arbitration never deploys, activates, or compiles a policy directly; all outputs require standard compiler validation and HITL sign-off.
+  2. *Untrusted Data Boundary*: Regulatory PDF text is treated as untrusted user data. Boundary isolation and anti-injection defenses prevent prompt injections from overriding system instructions.
+  3. *No Fact Invention*: Arbiter verifies quotes bit-for-bit against source text and canonical fact taxonomy; cannot invent thresholds or obligations.
+  4. *Model Heterogeneity & Same-Checkpoint Transparency*: Distinct Arbiter model configuration supported; flags `same_model_risk = True` if identical model checkpoints are used across roles.
+  5. *Strict Multi-Tenancy & Provenance*: Sessions and transcripts are partitioned by `tenant_id` and sealed with tamper-evident SHA-256 cryptographic digests.
 
 ### 8.4 Real-Data Rule-Impact Preview & Backtesting [`IN PROGRESS` / `ROADMAP`]
 - **Existing Implementation**: `app/backtest/replay_engine.py` provides an offline engine capable of replaying historical ledger events against candidate policies. **Status: IN PROGRESS** (Offline batch script; not integrated into live pipeline).

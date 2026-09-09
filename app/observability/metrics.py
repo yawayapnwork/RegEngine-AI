@@ -191,6 +191,42 @@ NEGOTIATION_DURATION_SECONDS = Histogram(
     registry=REGISTRY,
 )
 
+# --- Multi-agent arbitration metrics (app.negotiation) ---
+ARBITRATION_ROUNDS_TOTAL = Counter(
+    "arbitration_rounds_total",
+    "Total count of arbitration debate rounds executed by status outcome.",
+    labelnames=("status",),  # "consensus" | "disagreement" | "timeout"
+    registry=REGISTRY,
+)
+
+ARBITRATION_OUTCOME_TOTAL = Counter(
+    "arbitration_outcome_total",
+    "Total completed clause arbitrations by final outcome.",
+    labelnames=("outcome",),  # "consensus" | "review_required" | "security_blocked" | "timeout"
+    registry=REGISTRY,
+)
+
+ARBITRATION_DURATION_SECONDS = Histogram(
+    "arbitration_duration_seconds",
+    "Wall-clock duration of full multi-agent clause arbitration.",
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
+    registry=REGISTRY,
+)
+
+ARBITRATION_DISAGREEMENT_TOTAL = Counter(
+    "arbitration_disagreement_total",
+    "Count of material disagreements between Extractor and Auditor agents.",
+    labelnames=("disagreement_type",),  # "threshold_mismatch" | "operator_mismatch" | "obligation_mismatch" | "entity_mismatch"
+    registry=REGISTRY,
+)
+
+ARBITRATION_ESCALATION_TOTAL = Counter(
+    "arbitration_escalation_total",
+    "Count of arbitration escalations to Human-in-the-Loop review.",
+    labelnames=("reason",),  # "material_disagreement" | "ambiguity" | "fact_conflict" | "low_confidence" | "prompt_injection" | "timeout"
+    registry=REGISTRY,
+)
+
 # --- FIX Protocol gateway metrics (app.fix_gateway) ---
 # Bucketed in MICROSECONDS-equivalent seconds (1e-6 to 1e-2) since this
 # path's whole point is sub-500-microsecond validation -- the default

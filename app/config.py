@@ -303,6 +303,16 @@ class Settings(BaseSettings):
     negotiation_state_key_prefix: str = "regengine:negotiation"
     negotiation_state_ttl_seconds: int = 7 * 24 * 3600
 
+    # --- Multi-agent arbitration for clause extraction/audit (PRD Section 8.3) ---
+    # Disabled by default; engages when extraction & logic auditor agents disagree.
+    arbitration_enabled: bool = False
+    arbitration_max_rounds: int = 2
+    arbitration_timeout_seconds: float = 30.0
+    arbitration_confidence_threshold: float = 0.85
+    arbitration_arbiter_provider: str | None = None
+    arbitration_arbiter_model: str | None = None
+    arbitration_redis_ttl_seconds: int = 86400
+
     # --- Execution service: Celery ---
     celery_task_default_queue: str = "regengine_default"
     celery_batch_queue: str = "regengine_batch"
