@@ -32,7 +32,7 @@ Usage:
     python regengine-cli.py                                    # full run, synthetic sample, real agents
     python regengine-cli.py --offline-agents                    # no HUGGINGFACEHUB_API_TOKEN required
     python regengine-cli.py --pdf ./my_circular.pdf              # ingest a real file
-    python regengine-cli.py --pdf https://example.com/c.pdf      # ingest from a URL
+    python regengine-cli.py --pdf https://www.sebi.gov.in/circulars/sample.pdf  # ingest from a circular URL
     python regengine-cli.py --facts '{"upfront_margin_pct": 25}' # demonstrate an ALLOW instead of DENY
     python regengine-cli.py --dry-run                            # steps 1-3 only, no OPA/Postgres needed
 """

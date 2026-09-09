@@ -177,16 +177,16 @@ probes:
     failureThreshold: 24  # up to 2 minutes for a cold start (model load, DB pool warmup)
 
 ingress:
-  enabled: true
+  enabled: false
   className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/proxy-body-size: 64m  # PDF uploads, bounded separately by max_upload_mb
-  host: regengine.example.com
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/proxy-body-size: 64m  # PDF uploads, bounded separately by max_upload_mb
+  host: ""  # Configure with your verified cluster ingress FQDN
   path: /
   pathType: Prefix
   tls:
-    enabled: true
+    enabled: false
     secretName: regengine-ai-tls
 
 # --- Non-secret application configuration -> rendered into a ConfigMap and

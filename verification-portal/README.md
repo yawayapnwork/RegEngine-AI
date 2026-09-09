@@ -6,7 +6,7 @@ RegEngine AI audit-log packages (`regengine-report.py`'s audit binder
 ZIPs, or a bare `ledger_proof.json`/`audit_binder.json`), with no
 network calls and no dependency on this platform's servers.
 
-Published live at: https://claude.ai/code/artifact/c24470c0-f416-474b-a030-1b9a53a72b7c
+Hosted demo: Not publicly available. Open the local offline tool directly at [`verification-portal/custody-chain.html`](custody-chain.html).
 
 ## Files
 
