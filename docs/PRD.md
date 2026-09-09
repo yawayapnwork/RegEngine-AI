@@ -297,9 +297,30 @@ flowchart TD
   4. *No Invention*: Historical precedent is never used to invent thresholds, deadlines, or obligations.
   5. *Untrusted Data Boundary*: Precedent text is treated as untrusted historical data and cannot execute instructions.
 
-### 8.2 Compliance-as-Collateral / Zero-Knowledge Proofs (ZKP) [`IN PROGRESS` / `ROADMAP`]
-- **Existing Implementation**: `app/zkp/` contains a pure-Python BN254 Groth16 proof verifier (`groth16_verifier.py`) and Circom circuits for margin compliance. **Status: IN PROGRESS** (Gated behind `settings.zkp_enabled=False`; not in live pipeline).
-- **Proposed Protocol**: "Compliance-as-Collateral" proposes enabling brokers to cryptographically prove client margin sufficiency to clearing corporations via zero-knowledge proofs without revealing proprietary portfolio positions. **Status: ROADMAP** (Protocol and clearing integration proposed).
+### 8.2 Compliance-as-Collateral / Zero-Knowledge Proof of Adherence [`VERIFIED CURRENT`]
+- **Implemented Capability**: `app/zkp/` implements the Compliance-as-Collateral / Zero-Knowledge Proof of Adherence capability (PRD Addendum v2 Section 8.2), enabling brokers to cryptographically prove that an evaluated batch of transactions over a reporting period satisfied the approved upfront margin compliance predicate without disclosing proprietary trade amounts, margins, or client account identifiers.
+- **Circuit Architecture** (`zk/circuits/compliance_collateral.circom`):
+  1. *Predicate*: Evaluates $N$ transactions in an isolated batch, enforcing $\text{collected\_margin}[i] \ge \text{required\_margin}[i]$ via `GreaterEqThan(64)`.
+  2. *Commitments*: Computes Poseidon(4) leaf commitments over `(transaction_id, collected_margin, required_margin, salt)` and a Poseidon(N) root dataset commitment.
+  3. *Public Inputs*: `[policy_hash, reporting_period_id, dataset_commitment, margin_threshold]`.
+  4. *Private Inputs*: `[collected_margin, required_margin, transaction_ids, salts]`.
+- **Deterministic Witness Generator** (`app/zkp/witness.py`):
+  - Validates that every transaction satisfies $\text{collected} \ge \text{required}$; fails closed with `CompliancePredicateViolationError` immediately if any violation occurs.
+  - Implements pure-Python BN254 scalar field Poseidon hashing for deterministic leaf and root commitment calculation.
+- **Pure-Python Groth16 Verifier** (`app/zkp/groth16_verifier.py`):
+  - Evaluates the standard Groth16 pairing equation $e(\pi_a, \pi_b) == e(\alpha_1, \beta_2) \cdot e(vk_x, \gamma_2) \cdot e(\pi_c, \delta_2)$ over BN254 without external subprocesses or Node/snarkjs toolchain dependencies.
+  - Features iterative binary exponentiation (O(1) stack depth) to eliminate recursion limits across Python 3.12+ environments.
+- **Verification Service & Public API** (`app/zkp/verification_service.py`, `app/api/zkp_routes.py`):
+  - Exposes `POST /v1/zkp/verify-collateral` accepting strictly public proof inputs.
+  - Anti-replay protection: Rejects duplicate proof submissions (`proof_hash` deduplication).
+  - Fail-closed validation: Asserts that public signals match submitted policy hash, period, and commitment.
+  - Ledger evidence: On success, appends an entry to `compliance_audit_ledger` recording `details.compliance_collateral` with proof hash and commitments; strictly omits proprietary trade amounts (`facts`).
+- **Trust Boundary & Safety Invariants**:
+  1. *Trusted Setup Assumptions*: Groth16 is **NOT** transparent. It relies on a universal Phase 1 ceremony (Powers of Tau) and circuit-specific Phase 2 MPC. Security strictly assumes honest disposal of toxic waste trapdoors.
+  2. *Cryptographic vs. Legal Compliance Distinction*: Cryptographic proof verification proves that the prover possessed an arithmetic witness satisfying R1CS constraints; it does **NOT** certify that underlying off-chain accounting data was authentic, complete, or unmanipulated prior to witness generation.
+  3. *No Automatic Policy Activation*: Proof verification is an advisory evidence submission mechanism; it **NEVER** automatically activates, deploys, or alters compiled rules (`is_active` remains untouched).
+  4. *Strict Multi-Tenancy & Zero Trade Leakage*: Enforces tenant verification at the API boundary; private trade amounts and account identifiers never leave prover infrastructure.
+
 
 ### 8.3 Multi-Agent Negotiation & Arbitration [`IN PROGRESS`]
 - **Implemented Capabilities**:

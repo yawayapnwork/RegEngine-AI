@@ -35,13 +35,44 @@ from dataclasses import dataclass
 
 from app.zkp.models import Groth16Proof, Groth16VerificationKey
 
-# 64 MiB is the largest value Windows/CPython accepts here in practice --
-# 256 MiB was rejected outright with `ValueError: size not valid`; 64 MiB
-# is comfortably enough headroom for the ~3000-bit final-exponentiation
-# recursion this module drives. Linux threads default to a much larger
-# stack already, so this is a no-op there in all but the most
-# stack-constrained containers.
-_PAIRING_THREAD_STACK_SIZE = 64 * 1024 * 1024
+def _patch_py_ecc_exponentiation() -> None:
+    """Replaces py_ecc's recursive FQP.__pow__ with iterative binary exponentiation.
+    In py_ecc, FQP.__pow__ is implemented recursively. For the BN254 pairing
+    final exponentiation (exponent (p^12 - 1) // r, ~3000 bits), this produces
+    ~3000 recursive frames that cause RecursionError or stack overflow on Python
+    3.12+ (PEP 651). The iterative implementation computes the exact same field
+    operations with O(1) stack depth.
+    """
+    try:
+        import py_ecc.fields.field_elements as fe
+
+        if getattr(fe.FQP, "_regengine_iterative_pow_installed", False):
+            return
+
+        def _iterative_pow(self, other: int):
+            if other == 0:
+                return type(self)([1] + [0] * (self.degree - 1))
+            if other == 1:
+                return type(self)(self.coeffs)
+            base = self
+            result = type(self)([1] + [0] * (self.degree - 1))
+            n = int(other)
+            while n > 0:
+                if n & 1:
+                    result = result * base
+                base = base * base
+                n >>= 1
+            return result
+
+        fe.FQP.__pow__ = _iterative_pow
+        fe.FQP._regengine_iterative_pow_installed = True
+    except Exception:
+        pass
+
+
+_patch_py_ecc_exponentiation()
+
+_PAIRING_THREAD_STACK_SIZE = 16 * 1024 * 1024
 _PAIRING_RECURSION_LIMIT = 100_000
 
 
@@ -70,25 +101,39 @@ def _run_with_enlarged_stack(fn):
 
     def _worker() -> None:
         try:
+            sys.setrecursionlimit(_PAIRING_RECURSION_LIMIT)
+        except (ValueError, RuntimeError):
+            pass
+        try:
             result["value"] = fn()
         except BaseException as exc:  # noqa: BLE001 - re-raised verbatim in the caller below
             result["error"] = exc
 
     old_limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(max(old_limit, _PAIRING_RECURSION_LIMIT))
     try:
-        threading.stack_size(_PAIRING_THREAD_STACK_SIZE)
+        sys.setrecursionlimit(max(old_limit, _PAIRING_RECURSION_LIMIT))
     except (ValueError, RuntimeError):
-        # A platform that rejects this explicit size (observed for larger
-        # sizes on Windows) or that has already started threads with a
-        # different size this process -- fall back to the default and let
-        # the recursion-limit raise still help where it can.
         pass
 
-    thread = threading.Thread(target=_worker)
-    thread.start()
-    thread.join()
-    sys.setrecursionlimit(old_limit)
+    old_stack = 0
+    try:
+        old_stack = threading.stack_size(_PAIRING_THREAD_STACK_SIZE)
+    except (ValueError, RuntimeError):
+        pass
+
+    try:
+        thread = threading.Thread(target=_worker)
+        thread.start()
+        thread.join()
+    finally:
+        try:
+            threading.stack_size(old_stack)
+        except (ValueError, RuntimeError):
+            pass
+        try:
+            sys.setrecursionlimit(old_limit)
+        except (ValueError, RuntimeError):
+            pass
 
     if "error" in result:
         raise result["error"]

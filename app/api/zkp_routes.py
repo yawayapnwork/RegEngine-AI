@@ -25,8 +25,13 @@ from app.ledger.dependencies import get_ledger_service
 from app.ledger.service import LedgerService
 from app.security.dependencies import require_roles
 from app.security.models import Principal, Role
-from app.zkp.models import MarginComplianceProofSubmission, ZKProofVerificationResult
-from app.zkp.verification_service import verify_and_log_proof
+from app.zkp.models import (
+    ComplianceCollateralProofSubmission,
+    ComplianceCollateralVerificationResult,
+    MarginComplianceProofSubmission,
+    ZKProofVerificationResult,
+)
+from app.zkp.verification_service import verify_and_log_collateral_proof, verify_and_log_proof
 
 logger = logging.getLogger(__name__)
 
@@ -59,3 +64,38 @@ async def verify_proof(
             submission.broker_id, submission.transaction_id, submission.circuit_id, result.reason,
         )
     return result
+
+
+@router.post("/verify-collateral", response_model=ComplianceCollateralVerificationResult, dependencies=[Depends(_ALLOWED)])
+async def verify_collateral_proof(
+    submission: ComplianceCollateralProofSubmission,
+    settings: Settings = Depends(get_settings),
+    ledger: LedgerService = Depends(get_ledger_service),
+    principal: Principal = Depends(_ALLOWED),
+) -> ComplianceCollateralVerificationResult:
+    """Public verification endpoint for Compliance-as-Collateral / Zero-Knowledge Proof of Adherence
+    (PRD Addendum v2 Section 8.2).
+
+    Accepts ONLY public signals and proof elements:
+      - policy_id / policy_hash
+      - reporting_period_id
+      - dataset_commitment
+      - margin_threshold
+      - Groth16 proof (pi_a, pi_b, pi_c)
+
+    Never exposes or accepts private transaction data, trade values, or account IDs.
+    Fails closed on altered inputs, bad proofs, or replay attacks.
+    """
+    _require_enabled(settings)
+
+    if not principal.is_admin() and submission.broker_id != (principal.tenant_id or ""):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token tenant_id does not match submission.broker_id.")
+
+    result = await verify_and_log_collateral_proof(ledger, settings, submission)
+    if not result.verified:
+        logger.warning(
+            "Compliance collateral zk-SNARK proof rejected: broker_id=%s policy_id=%s circuit_id=%s reason=%s",
+            submission.broker_id, submission.policy_id, submission.circuit_id, result.reason,
+        )
+    return result
+

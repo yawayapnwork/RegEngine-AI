@@ -65,3 +65,51 @@ class ZKProofVerificationResult(BaseModel):
     proof_hash: str = Field(..., description="SHA-256 over the canonical (proof, public_signals, circuit_id) JSON -- what gets written into the ledger's `details.zk_proof.proof_hash`, not the proof bytes themselves.")
     ledger_sequence_num: int | None = Field(None, description="Set only when verification succeeded and the ledger write completed.")
     reason: str | None = Field(None, description="Set only when verified=False -- why (bad circuit_id, malformed points, or the pairing equation not holding).")
+
+
+ADVISORY_COMPLIANCE_NOTICE: str = (
+    "Cryptographically verified compliance predicate. This cryptographic proof demonstrates "
+    "that the prover possesses a witness satisfying the circuit constraints for the declared public signals. "
+    "It does NOT certify that underlying off-chain transactions were authentic, unmanipulated, or complete "
+    "prior to witness generation, and does not constitute regulatory certification or automatic policy activation."
+)
+
+
+class ComplianceCollateralProofSubmission(BaseModel):
+    """What a Broker_API_Client POSTs to /v1/zkp/verify-collateral (PRD Addendum v2 Section 8.2).
+    Strictly accepts ONLY public proof inputs and metadata. Underlying transactions, proprietary margins,
+    and client account identifiers remain strictly on the broker infrastructure."""
+
+    circuit_id: str = Field("compliance_collateral_v1", description="Key into app.zkp.verification_key_registry.")
+    proof: Groth16Proof
+    public_signals: list[str] = Field(
+        ...,
+        description="Decimal-string field elements matching circuit public declaration: [policy_hash, reporting_period_id, dataset_commitment, margin_threshold].",
+    )
+
+    broker_id: str
+    policy_id: str
+    policy_hash: str
+    reporting_period_id: str
+    dataset_commitment: str
+    margin_threshold: str
+    circular_id: str = "SEBI/HO/MIRSD/2026/01"
+    clause_hash: str | None = None
+    section_reference: str = "3.2.1"
+    rule_id: str = "compliance_collateral"
+    num_transactions: int = Field(4, ge=1)
+
+
+class ComplianceCollateralVerificationResult(BaseModel):
+    verified: bool
+    circuit_id: str
+    proof_hash: str = Field(..., description="SHA-256 digest of canonical (proof, public_signals, circuit_id).")
+    policy_id: str
+    policy_hash: str
+    reporting_period_id: str
+    dataset_commitment: str
+    margin_threshold: str
+    ledger_sequence_num: int | None = Field(None, description="Set only when verification succeeded and the ledger write completed.")
+    advisory_notice: str = ADVISORY_COMPLIANCE_NOTICE
+    reason: str | None = Field(None, description="Set only when verified=False -- failure reason (bad key, malformed points, mismatch, or replay).")
+
