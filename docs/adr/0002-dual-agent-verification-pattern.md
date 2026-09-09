@@ -7,8 +7,9 @@ Accepted
 ## Context
 
 RegEngine AI's compliance rules are extracted from raw SEBI circular
-text by an LLM (Qwen2.5, via Hugging Face Inference, through CrewAI,
-`app.agents.crew`, and an equivalent LangGraph-based orchestration in
+text by an LLM (Qwen2.5-72B-Instruct, via Hugging Face Inference, through
+the active sequential CrewAI pipeline in `app.agents.crew`, with an in-progress,
+feature-flagged LangGraph-based dynamic orchestration layer in
 `app.agents.graph`). An
 LLM extracting a `NumericalThreshold` (e.g. "Upfront Margin >= 20%")
 from legal prose can hallucinate: invent a threshold value not actually
@@ -53,13 +54,13 @@ roles**, not one:
 (`app.graph`), or the audit ledger (`app.ledger`).** `NEEDS_REVISION`
 re-enters the Extraction Agent for a bounded number of additional
 rounds (`MAX_REVISION_ROUNDS = 2`, enforced identically in both
-`app.agents.crew` and `app.agents.graph.nodes`) — a revision attempt
-also escalates to a different model/checkpoint
-(`settings.agent_fallback_model`, currently
+`app.agents.crew` and `app.agents.graph.nodes`). In the in-progress LangGraph
+architecture (`app.agents.graph`), a revision attempt also escalates to a
+secondary model/checkpoint (`settings.agent_fallback_model`, currently
 `huggingface/Qwen/Qwen2.5-7B-Instruct`) when `extraction_confidence` falls
-below `settings.agent_confidence_threshold` (0.85), rather than
-re-asking the identical model the identical question. `REJECTED` (or a
-revision budget exhausted with any `BLOCKER`-severity finding still
+below `settings.agent_confidence_threshold` (0.85); in the active sequential
+CrewAI pipeline, the primary model re-extracts with the auditor's findings attached.
+`REJECTED` (or a revision budget exhausted with any `BLOCKER`-severity finding still
 open) never auto-compiles — it routes to the HITL review queue
 (`app.db.models.HITLReview`), the same "false precision is worse than
 acknowledged ambiguity" posture `app.compiler.hitl` documents for every

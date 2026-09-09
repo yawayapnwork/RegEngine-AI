@@ -20,7 +20,7 @@ C4Context
     System_Ext(sebiSources, "SEBI Circular Sources", "RSS feeds and HTML notice pages publishing new/amended circulars")
     System_Ext(brokerOms, "Broker OMS / RMS", "Order Management / Risk Management System submitting live orders via FIX")
     System_Ext(scores, "SEBI SCORES Portal", "Regulator grievance-redress REST API")
-    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted", "Qwen2.5-72B-Instruct (Primary) & Qwen2.5-7B-Instruct (Fallback) — dual-agent clause extraction and audit")
+    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted", "Qwen2.5-72B-Instruct (Active primary dual-agent extraction & audit; 7B fallback wired into in-progress LangGraph layer)")
 
     System(regengine, "RegEngine AI", "Extracts, compiles, executes, and audits SEBI compliance rules against live broker transactions")
 
@@ -290,7 +290,7 @@ sequenceDiagram
 | Evaluator / OPAEngine / HITLQueue | `app/execution/` |
 | Ledger Integration / hash_chain / verify_chain | `app/ledger/` |
 | Compiler (Rego + JSON-Logic) | `app/compiler/rego_compiler.py`, `app/compiler/jsonlogic_compiler.py` |
-| Extraction + Logic Auditor Agents | `app/agents/crew.py`, `app/agents/graph/` |
+| Extraction + Logic Auditor Agents | `app/agents/crew.py` (active sequential pipeline), `app/agents/graph/` (in-progress LangGraph layer, feature-flagged) |
 | Negotiation Orchestrator | `app/negotiation/` |
 | Canary Orchestrator | `app/canary/` |
 | Grievance Escalation | `app/grievance_escalation/` |

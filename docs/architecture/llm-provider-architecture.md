@@ -8,8 +8,8 @@ This document establishes the authoritative architecture, configuration, and run
 Early drafts and external PRD references historically cited proprietary models (such as Claude 3.5 Sonnet) or alternative open-weight architectures (such as Llama-3-70B) as the live agentic core. **Those models are not part of the active production execution pipeline.**
 
 The actual configured and executed production pipeline utilizes a **single-provider open-weight model strategy**:
-- **Primary Model**: `Qwen/Qwen2.5-72B-Instruct` via Hugging Face Inference or self-hosted container.
-- **Confidence Fallback Model**: `huggingface/Qwen/Qwen2.5-7B-Instruct` (invoked when extraction confidence drops below 0.85).
+- **Primary Production Model**: `Qwen/Qwen2.5-72B-Instruct` via Hugging Face Inference or self-hosted container (active in sequential CrewAI dual-agent pipeline).
+- **Confidence Fallback Model (In-Progress / Feature-Flagged)**: `huggingface/Qwen/Qwen2.5-7B-Instruct` (wired into the disabled LangGraph dynamic state machine; dormant in production while `agent_graph_orchestration_enabled=False`).
 - **Offline / Deterministic Mode**: `OfflineLLMProvider` (regex and heuristic extractor for local POCs, testing, and air-gapped evaluation).
 - **Pluggable Provider Abstraction**: Production-grade abstraction layer (`app.agents.providers`) supporting OpenAI and Anthropic adapters, preserved for enterprise extensibility but dormant in default deployments.
 
@@ -21,8 +21,8 @@ The table below delineates the exact relationship between supported providers, c
 
 | Provider Identifier | Supported Status | Default / Configured Model | Runtime Role in Pipeline | Actually Executed in Production? | Network Target |
 |---|---|---|---|:---:|---|
-| `huggingface` | **Active Production** | `Qwen/Qwen2.5-72B-Instruct` (`hf_model_id`) | **Primary Extraction & Logic Audit** (dual-agent analysis) | **Yes** (when configured with `HF_TOKEN`) | Hugging Face Serverless Inference API or private TGI / vLLM endpoint |
-| `huggingface` | **Active Fallback** | `Qwen/Qwen2.5-7B-Instruct` (`agent_fallback_model`) | **Low-Confidence Fallback** (invoked when confidence < 0.85 in dynamic agent graph) | **Yes** (on ambiguous / complex clauses) | Hugging Face Serverless Inference API or private TGI / vLLM endpoint |
+| `huggingface` | **Active Production** | `Qwen/Qwen2.5-72B-Instruct` (`hf_model_id`) | **Primary Extraction & Logic Audit** (dual-agent sequential CrewAI) | **Yes** (when configured with `HF_TOKEN`) | Hugging Face Serverless Inference API or private TGI / vLLM endpoint |
+| `huggingface` | **In-Progress / Feature-Flagged** | `Qwen/Qwen2.5-7B-Instruct` (`agent_fallback_model`) | **Low-Confidence Fallback** (in disabled dynamic LangGraph layer) | **No** (dormant; requires `AGENT_GRAPH_ORCHESTRATION_ENABLED=true`) | Hugging Face Serverless Inference API or private TGI / vLLM endpoint |
 | `offline` | **Active Development** | Deterministic Heuristic Engine (`OfflineLLMProvider`) | **Local Testing & Air-Gapped Demos** (verbatim regex quote extraction) | **Yes** (default when credentials absent) | In-process (Zero network calls) |
 | `openai` | **Supported Abstraction** | `gpt-4o` (`openai_model_id`) | Alternative commercial provider adapter | **No** (dormant in standard pipeline) | OpenAI API |
 | `anthropic` | **Supported Abstraction** | `claude-3-5-sonnet-20241022` (`anthropic_model_id`) | Alternative commercial provider adapter | **No** (dormant in standard pipeline) | Anthropic API |
@@ -33,7 +33,7 @@ The table below delineates the exact relationship between supported providers, c
 ## 3. The Single-Provider Open-Weight Architecture
 
 ### Architectural Rationale
-RegEngine AI standardizes on the **Qwen2.5** open-weight family for its production extraction pipeline based on deliberate architectural considerations:
+RegEngine AI standardizes on the **Qwen2.5** open-weight family for its extraction pipeline based on deliberate architectural considerations:
 
 1. **Deployment Flexibility & Data Sovereignty**:
    Because Qwen2.5 is an open-weight model family, deployments have the architectural choice between:
@@ -41,8 +41,8 @@ RegEngine AI standardizes on the **Qwen2.5** open-weight family for its producti
    - Dedicated private hosting in a regulated financial institution's on-premises Virtual Private Cloud (VPC) using vLLM or Text Generation Inference (TGI), satisfying strict data localization requirements.
 2. **Consistent Prompt & Output Geometry**:
    Utilizing `Qwen2.5-72B-Instruct` as the primary engine and `Qwen2.5-7B-Instruct` as the confidence fallback maintains structural consistency across tokenizers, chat templates, and JSON instruction adherence, reducing schema drift during model escalation.
-3. **Dual-Model Confidence Cascade**:
-   In the dynamic agent graph (`app.agents.graph`), clauses with extraction confidence scores below 0.85 are routed to `fallback_extraction_node`. Instead of making a redundant retry against the same 72B model, the pipeline invokes the 7B checkpoint with a fresh prompt state to obtain a diverse extraction hypothesis before presenting findings to the Logic Auditor Agent.
+3. **Dual-Model Confidence Cascade (In-Progress LangGraph Architecture)**:
+   The codebase implements a dual-model confidence cascade within the dynamic LangGraph layer (`app.agents.graph`): clauses with extraction confidence scores below 0.85 route to `fallback_extraction_node` (`Qwen2.5-7B-Instruct`) with a fresh prompt state to obtain an alternative extraction hypothesis before presenting findings to the Logic Auditor Agent. **Current Production Status**: This dynamic cascade is gated behind `settings.agent_graph_orchestration_enabled=False` and is not active in production. The active production execution path uses the fixed two-agent sequential CrewAI loop (`app.agents.crew`), which executes `Qwen2.5-72B-Instruct` for both initial extraction and any revision passes.
 4. **Predictable Operational Economics**:
    Standardizing on open-weight inference avoids proprietary per-token surge pricing, rate-limit thrashing, and third-party API deprecation schedules.
 
@@ -90,7 +90,11 @@ LLM_PROVIDER=huggingface
 HUGGINGFACEHUB_API_TOKEN=hf_...
 HF_MODEL_ID=Qwen/Qwen2.5-72B-Instruct
 
-# Dynamic agent fallback model (used when extraction_confidence < 0.85)
+# Dynamic agent graph orchestration (LangGraph state machine)
+# Opt-in feature flag; defaults to false (preserving fixed sequential CrewAI pipeline)
+AGENT_GRAPH_ORCHESTRATION_ENABLED=false
+
+# Dynamic agent fallback model (wired into LangGraph fallback node; active only when enabled)
 AGENT_FALLBACK_MODEL=huggingface/Qwen/Qwen2.5-7B-Instruct
 AGENT_CONFIDENCE_THRESHOLD=0.85
 AGENT_MAX_FALLBACK_ATTEMPTS=2
