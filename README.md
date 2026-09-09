@@ -4,12 +4,12 @@
 
 ```mermaid
 flowchart LR
-    A["<b>Ingestion</b><br/>Circular PDF upload<br/>Layout-aware parse<br/>(Unstructured/OCR) +<br/>Dual SHA-256 hashes"]
-    B["<b>Extraction & Audit</b><br/>CrewAI dual-agent<br/>extract +<br/>Logic Auditor<br/>(Bounded concurrency)"]
-    C["<b>Compilation & HITL</b><br/>Rego + JSON-Logic<br/>compilation +<br/>blocking HITL gate"]
-    D["<b>Execution</b><br/>FastAPI + embedded<br/>OPA engine, Celery<br/>batch/CDC, Redis<br/>hot-reload"]
-    E["<b>Audit</b><br/>PostgreSQL<br/>append-only<br/>hash-chained<br/>ledger (SHA-256)"]
-    F["React Dashboard<br/>(Pipeline, Split-View, Playground,<br/>HITL Review, Audit Vault)"]
+    A["<b>Ingestion [CURRENT]</b><br/>Circular PDF upload<br/>Layout-aware parse +<br/>Dual SHA-256 hashes"]
+    B["<b>Extraction & Audit [CURRENT]</b><br/>CrewAI dual-agent<br/>extract + Logic Auditor<br/>(Bounded concurrency)"]
+    C["<b>Compilation & HITL [CURRENT]</b><br/>Rego + JSON-Logic<br/>compilation +<br/>blocking HITL gate"]
+    D["<b>Execution [CURRENT]</b><br/>FastAPI + embedded<br/>OPA engine, Celery<br/>batch/CDC, Redis hot-reload"]
+    E["<b>Audit [CURRENT]</b><br/>PostgreSQL append-only<br/>hash-chained ledger<br/>(SHA-256)"]
+    F["React Dashboard [CURRENT]<br/>(Pipeline, Split-View, Playground,<br/>HITL Review, Audit Vault)"]
 
     A --> B --> C --> D --> E
     F -.-> C
@@ -21,7 +21,7 @@ flowchart LR
 ## Contents
 
 - [Architecture & Processing Flow](#architecture--processing-flow)
-- [Core MVP Architecture vs. Frozen Subsystems](#core-mvp-architecture-vs-frozen-subsystems)
+- [Capability Status Convention & System Boundary](#capability-status-convention--system-boundary)
 - [Repository Layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Installation & Dependency Structure](#installation--dependency-structure)
@@ -52,9 +52,14 @@ flowchart LR
 
 ---
 
-## Core MVP Architecture vs. Frozen Subsystems
+## Capability Status Convention & System Boundary
 
-RegEngine's active operational scope is strictly focused on the core regulatory-compliance MVP pipeline:
+RegEngine AI formalizes an explicit three-tier capability taxonomy in alignment with the canonical [Product Requirements Document (`docs/PRD.md`)](docs/PRD.md):
+- **`CURRENT`**: Implemented, integrated into the live pipeline, and verified end-to-end.
+- **`IN PROGRESS`**: Implementation exists in code, but is not fully integrated into the live pipeline, is disabled by feature flag, or lacks end-to-end verification.
+- **`ROADMAP`**: Proposed, conceptual, or design-stage capability; not implemented in code.
+
+RegEngine's active operational scope is strictly focused on the core regulatory-compliance pipeline:
 
 $$\text{PDF regulatory document} \longrightarrow \text{extraction} \longrightarrow \text{clause interpretation} \longrightarrow \text{canonical facts} \longrightarrow \text{deterministic policy compilation} \longrightarrow \text{HITL review} \longrightarrow \text{policy activation} \longrightarrow \text{OPA evaluation} \longrightarrow \text{cryptographic evidence/audit}$$
 
@@ -62,42 +67,49 @@ $$\text{PDF regulatory document} \longrightarrow \text{extraction} \longrightarr
 
 To keep the production and CI footprint lean without losing valuable prospective code, RegEngine explicitly segregates core components from frozen/experimental extensions. Frozen directories are retained in the codebase but removed from the default startup, runtime, and background execution paths.
 
-For full architectural details, rules, and runtime guarantees, see [`docs/architecture/mvp-boundary.md`](docs/architecture/mvp-boundary.md).
+For full architectural details, rules, and runtime guarantees, see [`docs/architecture/mvp-boundary.md`](docs/architecture/mvp-boundary.md) and [`docs/PRD.md`](docs/PRD.md).
 
-| Directory / Feature | Status | In Core Path? | Description & Isolation Mode |
-|---|---|:---:|---|
-| `app/parsing` | **Core MVP** | Yes | PDF extraction, layout-aware chunking, dual SHA-256 digests. |
-| `app/agents` | **Core MVP** | Yes | CrewAI dual-agent extraction and audit under bounded concurrency. (Note: `app/agents/graph/` contains the in-progress LangGraph dynamic orchestration layer, gated behind `settings.agent_graph_orchestration_enabled=False`). |
-| `app/compiler` | **Core MVP** | Yes | Deterministic Rego & JSON-Logic compilation, HITL ambiguity flagging. |
-| `app/execution` | **Core MVP** | Yes | Policy evaluator, OPA client/publisher, hot-reload, Celery batch worker. |
-| `app/services` | **Core MVP** | Yes | Orchestrator, HITL lifecycle service, circular processing pipeline. |
-| `app/ledger` | **Core MVP** | Yes | PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003. |
-| `app/db` | **Core MVP** | Yes | Relational models (`Circular`, `Clause`, `CompiledRule`, `HITLReview`, `Ledger`). |
-| `app/api` | **Core MVP** | Yes | REST routes (`/v1/circulars`, `/v1/execution`, `/v1/hitl-reviews`, `/v1/auth`). |
-| `app/storage` | **Core MVP** | Yes | Local filesystem and S3 storage abstraction. |
-| `app/security` | **Core MVP** | Yes | JWT auth, RBAC, step-up MFA for compliance approval actions. |
-| `frontend/` | **Core MVP** | Yes | React dashboard wired to backend REST APIs (no mock dependencies). |
-| `app/zkp` | **Frozen / Experimental** | No | Zero-knowledge proof compliance proofs (preserved, not invoked). |
-| `app/fix_gateway` | **Frozen / Experimental** | No | Financial Information eXchange (FIX) protocol bridge. |
-| `app/negotiation` | **Frozen / Experimental** | No | Agent-to-agent regulatory clarification negotiation. |
-| `app/healing` | **Frozen / Experimental** | No | Autonomous policy self-healing from execution anomalies. |
-| `app/grievance_escalation` | **Frozen / Experimental** | No | SEBI SCORES / investor grievance automation (beat tasks gated off). |
-| `app/canary` | **Frozen / Experimental** | No | Canary policy deployments and rollback windows (beat tasks gated off). |
-| `app/regulatory_filing` | **Frozen / Experimental** | No | Automated regulatory filing generation (beat tasks gated off). |
-| `app/localization` | **Frozen / Experimental** | No | Multilingual OCR and vernacular circular processing. |
-| `app/translation_parity` | **Frozen / Experimental** | No | Cross-lingual legal translation verification and parity scoring. |
-| `app/backtest` | **Frozen / Experimental** | No | Historical market backtesting engine for draft policies. |
-| `app/graph` | **Frozen / Experimental** | No | Circular-to-clause dependency knowledge graph engine. |
-| `app/diffing` | **Frozen / Experimental** | No | Regulatory supersession diffing and amendatory clause tracking. |
-| `app/incident` | **Frozen / Experimental** | No | Real-time breach notification WebSockets (gated behind `incident_broadcast_enabled=False`). |
-| `llm_finetune/` | **Scaffolding / Roadmap** | No | A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete. Synthetic fixtures provide smoke-test scaffolding only. |
-| Multi-Regulator (RBI/IRDAI/PFRDA) | **Frozen / Experimental** | No | `Regulator.SEBI` is the sole active core MVP regulator; others marked frozen. |
+| Directory / Feature | Capability Status | In Core Path? | Description & Isolation Mode |
+|---|:---:|:---:|---|
+| `app/parsing` | **`CURRENT`** | Yes | PDF extraction, layout-aware chunking, dual SHA-256 digests. |
+| `app/agents/crew.py` | **`CURRENT`** | Yes | CrewAI dual-agent extraction and audit under bounded concurrency. |
+| `app/compiler` | **`CURRENT`** | Yes | Deterministic Rego & JSON-Logic compilation, HITL ambiguity flagging. |
+| `app/execution` | **`CURRENT`** | Yes | Policy evaluator, OPA client/publisher, hot-reload, Celery batch worker. |
+| `app/services` | **`CURRENT`** | Yes | Orchestrator, HITL lifecycle service, circular processing pipeline. |
+| `app/ledger` | **`CURRENT`** | Yes | PostgreSQL, append-only, SHA-256 hash-chained blocks, QLDB-journal-inspired design per ADR-0003. |
+| `app/db` | **`CURRENT`** | Yes | Relational models (`Circular`, `Clause`, `CompiledRule`, `HITLReview`, `Ledger`). |
+| `app/api` | **`CURRENT`** | Yes | REST routes (`/v1/circulars`, `/v1/execution`, `/v1/hitl-reviews`, `/v1/auth`). |
+| `app/storage` | **`CURRENT`** | Yes | Local filesystem and S3 storage abstraction. |
+| `app/security` | **`CURRENT`** | Yes | JWT auth, RBAC, step-up MFA for compliance approval actions. |
+| `frontend/` | **`CURRENT`** | Yes | React dashboard wired to backend REST APIs (no mock dependencies). |
+| `app/agents/graph/` | **`IN PROGRESS`** | No | Dynamic LangGraph orchestration layer, gated behind `settings.agent_graph_orchestration_enabled=False`. |
+| `app/zkp` | **`IN PROGRESS`** | No | Zero-knowledge proof compliance verifier, gated behind `settings.zkp_enabled=False`. |
+| `app/fix_gateway` | **`IN PROGRESS`** | No | Financial Information eXchange (FIX) protocol bridge and native C++ kernel. |
+| `app/negotiation` | **`IN PROGRESS`** | No | Multi-agent regulatory clarification and arbitration module. |
+| `app/healing` | **`IN PROGRESS`** | No | Autonomous policy self-healing from execution anomalies. |
+| `app/grievance_escalation` | **`IN PROGRESS`** | No | SEBI SCORES / investor grievance automation (beat tasks gated off). |
+| `app/canary` | **`IN PROGRESS`** | No | Canary policy deployments and rollback windows (beat tasks gated off). |
+| `app/regulatory_filing` | **`IN PROGRESS`** | No | Automated regulatory filing generation (beat tasks gated off). |
+| `app/localization` | **`IN PROGRESS`** | No | Multilingual OCR and vernacular circular processing. |
+| `app/translation_parity` | **`IN PROGRESS`** | No | Cross-lingual legal translation verification and parity scoring. |
+| `app/backtest` | **`IN PROGRESS`** | No | Historical market backtesting engine for draft policies. |
+| `app/graph` | **`IN PROGRESS`** | No | Circular-to-clause dependency knowledge graph engine (Neo4j). |
+| `app/diffing` | **`IN PROGRESS`** | No | Regulatory supersession diffing and amendatory clause tracking. |
+| `app/incident` | **`IN PROGRESS`** | No | Real-time breach notification WebSockets (gated behind `incident_broadcast_enabled=False`). |
+| `llm_finetune/` | **`IN PROGRESS`** | No | QLoRA fine-tuning pipeline scaffolding and synthetic smoke fixtures. |
+| Multi-Regulator (RBI/IRDAI/PFRDA) | **`IN PROGRESS`** | No | Example hand-crafted Rego bundles; `Regulator.SEBI` is the sole active core regulator. |
+| `sebi-compliance-llm` | **`ROADMAP`** | No | Production fine-tuned regulatory domain model on real annotated SEBI corpus. |
+| Compliance Case-Law Memory Agent | **`ROADMAP`** | No | Autonomous case-law precedent retrieval agent (`memory=False` in live pipeline). |
+| Compliance-as-Collateral Protocol | **`ROADMAP`** | No | Cryptographic zero-knowledge collateral verification protocol. |
+| Real-Data Rule-Impact Preview | **`ROADMAP`** | No | Live transaction simulation and impact preview interface prior to rule activation. |
+| M&A Compliance Due-Diligence Agent | **`ROADMAP`** | No | Autonomous multi-year historical compliance audit analysis agent. |
 
 ### Architectural Boundary Guarantees
 
 1. **Zero-Dependency Core Startup**: The core application (`uvicorn app.main:app`) does not initialize or require services, brokers, or periodic background tasks associated with non-MVP features.
 2. **Feature Flags**: Experimental Celery beat tasks and WebSocket subscribers default to `False` (`settings.canary_enabled`, `settings.regulatory_filing_enabled`, `settings.grievance_escalation_enabled`, `settings.incident_broadcast_enabled`).
 3. **No Blind Deletion**: All frozen subsystems remain present in the tree with standard `[FROZEN / NON-MVP EXPERIMENTAL SUBSYSTEM]` banners for future development.
+4. **Strict PRD Status Alignment**: No roadmap feature is represented as an existing production capability in live pipeline documentation.
 
 ---
 
@@ -488,11 +500,18 @@ pytest tests/test_circular_resumability.py -v
 - **Synthetic Fixtures**: The fixtures in `llm_finetune/dataset/sample_artifacts.py` serve strictly as pipeline smoke tests and schema validation fixtures. They do not constitute regulatory training data.
 - **No Unbenchmarked Accuracy Claims**: No accuracy improvements or domain-adapted performance gains are claimed prior to formal benchmarking against real regulatory ground-truth datasets.
 
-### Roadmap Items
+### Roadmap Items [`ROADMAP`]
+
+For the formal specification and technical prerequisites of all planned extensions, see [PRD Section 8: Roadmap, Exploratory & Future Capabilities](docs/PRD.md#8-roadmap-exploratory--future-capabilities-roadmap--in-progress).
+
 1. **Curated SEBI Regulatory Dataset**: Assemble and manually verify an annotated corpus of historical and current SEBI master circulars, amendments, and gazettes.
-2. **Production QLoRA Training**: Execute supervised fine-tuning across domain-specific tokenizers and models once the curated corpus is complete.
-3. **Empirical Benchmarking**: Benchmark extraction F1, numerical precision, and obligation classification accuracy against baseline models before promoting fine-tuned checkpoints to production.
-4. **TODO / Roadmap: End-to-End Ingestion Velocity Benchmark (Target: <10 Minutes)**:
+2. **Production QLoRA Training**: Execute supervised fine-tuning across domain-specific tokenizers and models once the curated corpus is complete (`sebi-compliance-llm`).
+3. **Compliance Case-Law Memory Agent**: Autonomous precedent retrieval agent over SAT and SEBI orders for qualitative clause interpretation.
+4. **Compliance-as-Collateral / ZKP Protocol**: Cryptographic zero-knowledge margin verification protocol with clearing corporations.
+5. **Real-Data Rule-Impact Preview**: Interactive simulation dashboard previewing candidate rule impact against live transaction streams prior to approval.
+6. **M&A Compliance Due-Diligence Agent**: Autonomous multi-year historical compliance audit analysis agent for acquisition targets.
+7. **Empirical Benchmarking**: Benchmark extraction F1, numerical precision, and obligation classification accuracy against baseline models before promoting fine-tuned checkpoints to production.
+8. **TODO / Roadmap: End-to-End Ingestion Velocity Benchmark (Target: <10 Minutes)**:
    - **Target vs. Qualitative Industry Baseline**: The system targets an end-to-end processing turnaround of `< 10 minutes` (from circular PDF upload through layout parsing, dual-agent extraction, logic audit, and compilation to an `AWAITING_HITL` state). This target is contrasted against typical qualitative industry estimates of `3–7 business days` for manual legal and compliance interpretation across broker desks. Neither figure represents an empirically verified RegEngine benchmark of demonstrated operational performance.
    - **Empirical Status**: `< 10 minutes` is an architectural engineering design target and goal, **not** a verified benchmark or proven claim. Existing micro-benchmarks measure native C++ rule evaluation latency (`native/benchmarks/`) and bounded concurrency scheduling under simulated latency (`tests/test_orchestrator_concurrency.py`), but no verified empirical benchmark currently measures end-to-end ingestion on real regulatory circulars.
    - **Benchmark Specification Required to Turn Target into a Verified Claim**:

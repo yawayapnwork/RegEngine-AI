@@ -1,0 +1,325 @@
+# RegEngine AI — Product Requirements Document (PRD)
+
+**Document Version:** 2.0  
+**Status:** Canonical Product Requirements Specification  
+**Classification:** Open Architecture & Engineering Specification  
+
+---
+
+## 1. Product Overview & Problem Statement
+
+### 1.1 Executive Summary
+RegEngine AI is a deterministic regulatory intelligence and policy enforcement platform designed specifically for financial market intermediaries governed by the Securities and Exchange Board of India (SEBI). The platform ingests complex regulatory circulars (PDFs), extracts machine-readable obligations and quantitative thresholds under bounded concurrency, compiles them into executable Open Policy Agent (OPA) Rego policies, evaluates live broker transactions in sub-millisecond timeframes, and records every evaluation into a tamper-evident, append-only PostgreSQL audit ledger.
+
+### 1.2 The Core Problem
+Financial intermediaries (stockbrokers, asset management companies, depositories, clearing corporations) face substantial operational risk due to the latency and subjectivity of manual compliance interpretation:
+- **Manual Interpretation Delays**: When SEBI issues a Master Circular or urgent circular amendment, compliance officers and legal desks typically take days to manually analyze cross-references, calculate margin multipliers, and distribute revised desk manuals.
+- **Inconsistent Execution Across Desks**: Human interpretation differences between trading desks, risk managers, and compliance teams lead to asymmetric compliance enforcement and costly audit exceptions.
+- **Absence of Cryptographic Traceability**: Traditional compliance tracking relies on decentralized emails, spreadsheets, and internal ticketing systems that cannot cryptographically prove which regulatory clause governed a specific transaction decision.
+
+### 1.3 Core Product Solution
+RegEngine AI eliminates manual latency and interpretation drift by translating natural-language regulatory circulars into deterministic code. Any clause that contains ambiguity, conflicting thresholds, or qualitative language is strictly halted at a **Human-in-the-Loop (HITL)** approval gate, preventing unverified or hallucinated rules from entering production.
+
+---
+
+## 2. Capability Status Taxonomy
+
+To maintain absolute architectural integrity and prevent roadmap ambitions from being misconstrued as live capabilities, every feature, subsystem, and component in RegEngine AI is classified under one of three strict capability statuses:
+
+| Status | Definition | Criteria Required for Classification |
+|---|---|---|
+| **`CURRENT`** | Implemented, integrated into the live pipeline, and verified end-to-end. | • Complete production code present in `app/`<br>• Directly executed by live API routes, Celery workers, or orchestrator<br>• Covered by automated end-to-end (E2E) and integration test suites<br>• Fully operational out-of-the-box in production or offline mode |
+| **`IN PROGRESS`** | Implementation exists but is not fully integrated, disabled by feature flag, or not end-to-end verified. | • Source code present in repository (e.g., experimental module or feature-flagged layer)<br>• Decoupled from the default startup/runtime path (dormant feature flag or frozen)<br>• Unit/smoke tests may exist in isolation, but lacks live end-to-end verification<br>• Not executed during standard production transaction evaluation |
+| **`ROADMAP`** | Proposed, conceptual, or architectural design; not implemented in code. | • Architectural proposal, specification, or design document<br>• Zero production implementation or only placeholder fixtures/mock interfaces<br>• No live pipeline execution or end-to-end test verification<br>• Subject to future research, dataset curation, or benchmark verification |
+
+> [!IMPORTANT]
+> **Strict PRD Boundary Rule**: No `ROADMAP` capability and no feature-flagged `IN PROGRESS` capability documented in Section 8 may be described in Sections 1 through 7 as an existing production capability. Sections 1 through 7 document exclusively the live, verified production platform.
+
+---
+
+## 3. Core Regulatory-Compliance Pipeline (Stages 1–7) [`CURRENT`]
+
+The live, active production pipeline consists of seven sequential, deterministic stages. Every stage is implemented, integrated into the core application, and verified via automated test suites:
+
+```mermaid
+flowchart LR
+    A["<b>Stage 1: Ingestion</b><br/>[CURRENT]<br/>Dual SHA-256 Hashing<br/>Layout-Aware PDF Parse"] 
+    --> B["<b>Stage 2: Extraction & Audit</b><br/>[CURRENT]<br/>Sequential CrewAI<br/>(Extraction + Auditor)<br/>Bounded Concurrency"]
+    --> C["<b>Stage 3: Compilation & HITL</b><br/>[CURRENT]<br/>OPA Rego & JSON-Logic<br/>Blocking HITL Gate"]
+    --> D["<b>Stage 4: Approval & Hot-Reload</b><br/>[CURRENT]<br/>Step-Up MFA Sign-Off<br/>Redis Pub/Sub Hot-Reload"]
+    --> E["<b>Stage 5: Live Execution</b><br/>[CURRENT]<br/>FastAPI Evaluator<br/>Embedded OPA Engine"]
+    --> F["<b>Stage 6: Audit Ledger</b><br/>[CURRENT]<br/>PostgreSQL Append-Only<br/>SHA-256 Hash Chaining"]
+    --> G["<b>Stage 7: Dashboard UI</b><br/>[CURRENT]<br/>React Verification Portal<br/>Policy Split-View & Vault"]
+```
+
+### Stage 1: Layout-Aware Ingestion & Dual Cryptographic Hashing [`CURRENT`]
+- **Modules**: `app/parsing/pdf_extractor.py`, `app/parsing/hasher.py`, `app/storage/object_store.py`
+- **Functionality**:
+  - Ingests circular PDFs via local filesystem (`STORAGE_BACKEND=local`) or S3-compatible object storage (`STORAGE_BACKEND=s3`).
+  - Computes two distinct SHA-256 digests immediately upon upload:
+    1. `source_document_sha256`: Computed over raw uploaded PDF bytes prior to any processing.
+    2. `extracted_text_sha256`: Computed over normalized extracted text.
+  - Extracts layout-aware clauses using Apache Tika and structured parsing, chunking text into clause units.
+  - State Transition: `UPLOADED` &rarr; `INGESTED`.
+- **Verification**: Verified by `tests/test_document_hashing.py` and `tests/test_parsing.py`.
+
+### Stage 2: Dual-Agent Extraction & Logic Audit [`CURRENT`]
+- **Modules**: `app/agents/crew.py`, `app/agents/pipeline.py`, `app/agents/providers.py`
+- **Functionality**:
+  - Executes fixed two-agent sequential validation using CrewAI:
+    1. **Extraction Agent**: Prompts primary open-weight model (`Qwen/Qwen2.5-72B-Instruct` via Hugging Face Inference or deterministic `OfflineLLMProvider`) to extract obligations, entities, and numerical parameters.
+    2. **Logic Auditor Agent**: Independently re-evaluates the extracted rule against the verbatim clause text, validating consistency and checking for hallucinations.
+  - Bounded concurrency governed by `EXTRACTION_CONCURRENCY` (default 4) to prevent memory and API token rate exhaustion.
+  - State Transition: `INGESTED` &rarr; `EXTRACTING` &rarr; `EXTRACTED`.
+- **Verification**: Verified by `tests/test_agent_providers.py` and `tests/test_e2e_pipeline.py`.
+
+### Stage 3: Deterministic Policy Compilation & HITL Flagging [`CURRENT`]
+- **Modules**: `app/compiler/rego_compiler.py`, `app/compiler/jsonlogic_compiler.py`, `app/compiler/hitl_flagger.py`
+- **Functionality**:
+  - Compiles audited compliance rules into production **OPA Rego** packages (`data.<regulator>.<domain>.circulars.<slug>`).
+  - Generates structural **JSON-Logic** Abstract Syntax Trees (ASTs) for non-OPA consumers.
+  - Inspects extracted rules for qualitative obligations, low auditor confidence, or conflicting parameters; automatically generates `HITLReview` records in PostgreSQL.
+  - Rules with pending reviews remain strictly blocked in `AWAITING_HITL` state; active rule count remains 0.
+  - State Transition: `EXTRACTED` &rarr; `COMPILING` &rarr; `AWAITING_HITL`.
+- **Verification**: Verified by `tests/test_compiler.py`, `tests/test_rego_compiler.py`, and `tests/test_hitl_service.py`.
+
+### Stage 4: Compliance Officer Approval & Zero-Downtime Hot-Reload [`CURRENT`]
+- **Modules**: `app/services/hitl_service.py`, `app/execution/policy_publisher.py`, `app/execution/policy_hot_reload.py`
+- **Functionality**:
+  - Authorizes Compliance Officers to inspect rule diffs, verbatim source evidence, and auditor findings.
+  - Requires Step-Up MFA authentication claims (`amr=["pwd", "mfa"]`) for all approval/rejection actions.
+  - Approving all pending reviews for a circular promotes the rules to active status (`DEPLOYED`).
+  - Publishes policies to the OPA server over HTTP and broadcasts a cache invalidation signal via Redis pub/sub (`policy_events`).
+  - Worker pods invalidate local in-process L1 policy caches without container restart.
+  - State Transition: `AWAITING_HITL` &rarr; `APPROVED` &rarr; `DEPLOYED`.
+- **Verification**: Verified by `tests/test_policy_hot_reload.py` and `tests/test_api.py`.
+
+### Stage 5: High-Throughput Live Transaction Evaluation [`CURRENT`]
+- **Modules**: `app/execution/evaluator.py`, `app/execution/opa_engine.py`, `app/api/execution_routes.py`
+- **Functionality**:
+  - Exposes synchronous REST endpoint `POST /v1/execution/transactions/evaluate`.
+  - Resolves active policies for the submitting entity type (`Stockbroker`, `AMC`, etc.) via two-tier cache (in-process L1 + Redis L2).
+  - Evaluates broker transaction payloads against active OPA Rego policies, returning deterministic `allow`, `deny`, or `flagged` outcomes.
+  - In the event of a `deny` outcome, cites the exact SEBI clause reference and violation detail.
+- **Verification**: Verified by `tests/test_evaluator.py` and `tests/test_execution_engine.py`.
+
+### Stage 6: Cryptographic Append-Only Audit Ledger [`CURRENT`]
+- **Modules**: `app/ledger/hash_chain.py`, `app/ledger/ledger_service.py`, `app/ledger/verify_cli.py`, `sql/ledger_schema.sql`
+- **Functionality**:
+  - Implemented natively in PostgreSQL using append-only, SHA-256 hash-chained journal blocks following a QLDB-journal-inspired design per [ADR-0003](docs/adr/0003-sha256-hash-chain-audit-log.md) (requires zero AWS QLDB dependencies).
+  - Every transaction evaluation appends an immutable record binding:
+    - Transaction identifier and broker code
+    - Evaluation outcome (`PASS`, `FAIL`, `HITL_REVIEW`)
+    - Exact `source_document_sha256` and `clause_hash` governing the evaluation
+    - `previous_hash`, `payload_digest`, and block `current_hash`
+  - Database-level PostgreSQL triggers strictly prevent `UPDATE` and `DELETE` operations.
+  - Includes an on-demand audit verification CLI (`python -m app.ledger.verify_cli`) that recomputes the hash chain to detect tampering.
+- **Verification**: Verified by `tests/test_ledger.py`, `tests/test_ledger_immutability.py`, and `tests/test_ledger_verify.py`.
+
+### Stage 7: Compliance IDE & Verification Portal [`CURRENT`]
+- **Modules**: `frontend/` (React + Vite + Tailwind CSS)
+- **Functionality**:
+  - Interactive web interface communicating directly with backend REST endpoints:
+    - **Circular Ingestion Tracker**: Real-time progress across pipeline stages.
+    - **Policy Split-View**: Side-by-side legal clause text and compiled OPA Rego code.
+    - **HITL Review Portal**: Review queue with auditor rationales and approval buttons.
+    - **Transaction Evaluation Playground**: Test simulator running client-side OPA Wasm or backend evaluation.
+    - **Audit Vault**: Searchable, tamper-evident ledger viewer with chain verification.
+- **Verification**: Verified by frontend build compilation (`npm run build`) and integration route tests (`tests/test_api.py`).
+
+---
+
+## 4. Live Production Architecture & Execution Path [`CURRENT`]
+
+```mermaid
+flowchart TD
+    subgraph ClientLayer["Client & Ingestion Layer [CURRENT]"]
+        PDF["Circular PDF Upload"]
+        REST["FastAPI Client / Dashboard"]
+    end
+
+    subgraph CoreBackend["RegEngine Core Backend Services [CURRENT]"]
+        Orchestrator["E2EOrchestrator<br/>(app/services/orchestrator.py)"]
+        Parser["Layout Parser & Hasher<br/>(app/parsing)"]
+        Pipeline["Agent Pipeline Dispatcher<br/>(app/agents/pipeline.py)"]
+        CrewAI["Sequential Dual-Agent Crew<br/>Extraction + Logic Auditor<br/>(app/agents/crew.py)"]
+        Compiler["OPA Rego & JSON-Logic Compiler<br/>(app/compiler)"]
+        HITL["HITL Review Lifecycle Service<br/>(app/services/hitl_service.py)"]
+        Evaluator["Transaction Evaluator<br/>(app/execution/evaluator.py)"]
+        Ledger["Hash-Chained Ledger Service<br/>(app/ledger)"]
+    end
+
+    subgraph CoreStorage["Core Infrastructure & Storage [CURRENT]"]
+        Postgres[(PostgreSQL<br/>App Schema + Audit Ledger)]
+        Redis[(Redis<br/>Celery Queue + Policy Cache)]
+        OPA["Open Policy Agent (OPA)<br/>Co-located Policy Daemon"]
+        HF["Hugging Face Inference API<br/>(Qwen2.5-72B-Instruct)"]
+    end
+
+    PDF --> Orchestrator
+    REST --> Orchestrator
+    Orchestrator --> Parser
+    Parser --> Postgres
+    Parser --> Pipeline
+    Pipeline -- "Default: Flag=False" --> CrewAI
+    CrewAI <--> HF
+    CrewAI --> Compiler
+    Compiler --> HITL
+    HITL --> Postgres
+    HITL -- "On MFA Approval" --> OPA
+    HITL -- "Cache Invalidation" --> Redis
+    REST --> Evaluator
+    Evaluator <--> OPA
+    Evaluator --> Ledger
+    Ledger --> Postgres
+```
+
+### Execution Path Guarantees:
+1. **Primary LLM**: In production environments (`LLM_PROVIDER=huggingface`), all live extraction and auditing calls execute against `Qwen/Qwen2.5-72B-Instruct`. In local/air-gapped environments (`LLM_PROVIDER=offline`), calls execute against deterministic regex extractors.
+2. **Sequential Crew Execution**: Dual-agent extraction operates as a fixed linear sequence: `Extraction Agent` &rarr; `Logic Auditor Agent` with up to 2 revision loops upon auditor rejection.
+3. **Absence of Cloud Dependencies**: Core pipeline execution requires no proprietary cloud LLM APIs (OpenAI, Anthropic), no cloud vector databases, and no cloud-managed ledger services.
+
+---
+
+## 5. Complete Subsystem & Capability Classification Matrix
+
+Every subsystem across the RegEngine AI codebase is cataloged below with its explicit capability status:
+
+| Subsystem / Capability | Directory / File Path | Status | Live Pipeline? | Evidence in Code | E2E Verified? |
+|---|---|:---:|:---:|---|:---:|
+| **Document Ingestion & Dual Hashing** | `app/parsing/`, `app/storage/` | **`CURRENT`** | **Yes** | `pdf_extractor.py`, `hasher.py`, `object_store.py` | **Yes** |
+| **Sequential Dual-Agent Extraction** | `app/agents/crew.py`, `providers.py` | **`CURRENT`** | **Yes** | `run_dual_validation()`, `ProductionLLMProvider` | **Yes** |
+| **Taxonomy & Canonical Fact Binding** | `app/regulatory/` | **`CURRENT`** | **Yes** | `taxonomy.py`, `canonical_facts.py` | **Yes** |
+| **Policy Compilation (Rego/AST)** | `app/compiler/` | **`CURRENT`** | **Yes** | `rego_compiler.py`, `jsonlogic_compiler.py` | **Yes** |
+| **HITL Review Gate & Step-Up MFA** | `app/services/hitl_service.py` | **`CURRENT`** | **Yes** | `hitl_service.py`, `app/api/hitl_review_routes.py` | **Yes** |
+| **Policy Registry & Hot-Reload** | `app/execution/policy_*` | **`CURRENT`** | **Yes** | `policy_publisher.py`, `policy_hot_reload.py` | **Yes** |
+| **Synchronous OPA Evaluation** | `app/execution/evaluator.py` | **`CURRENT`** | **Yes** | `evaluator.py`, `opa_engine.py` | **Yes** |
+| **Append-Only SHA-256 Audit Ledger** | `app/ledger/` | **`CURRENT`** | **Yes** | `hash_chain.py`, `ledger_service.py`, `sql/ledger_schema.sql` | **Yes** |
+| **Compliance IDE & Dashboard** | `frontend/` | **`CURRENT`** | **Yes** | React components wired to REST endpoints | **Yes** |
+| **Dynamic LangGraph Orchestration** | `app/agents/graph/` | **`IN PROGRESS`** | **No** | `graph.py`, `nodes.py`, `complexity_router.py` (flagged off) | **No** (stubs only) |
+| **Dual-Model Cascade (72B + 7B)** | `app/agents/graph/nodes.py` | **`IN PROGRESS`** | **No** | `fallback_extraction_node`, `agent_fallback_model` | **No** |
+| **QLoRA Fine-Tuning Scaffolding** | `llm_finetune/` | **`IN PROGRESS`** | **No** | `train_qlora.py`, `dataset/sample_artifacts.py` | **No** (smoke fixtures) |
+| **Zero-Knowledge Proofs (ZKP)** | `app/zkp/` | **`IN PROGRESS`** | **No** | `groth16_verifier.py`, `verification_service.py` (`zkp_enabled=False`) | **No** |
+| **Multi-Agent Arbitration** | `app/negotiation/` | **`IN PROGRESS`** | **No** | `consensus.py`, `arbiter.py` (`negotiation_enabled=False`) | **No** |
+| **Historical Policy Backtesting** | `app/backtest/` | **`IN PROGRESS`** | **No** | `replay_engine.py`, `app/api/backtest_routes.py` | **No** |
+| **FIX Protocol Gateway & C++ Kernel** | `app/fix_gateway/`, `native/` | **`IN PROGRESS`** | **No** | `fix_gateway.h`, QuickFIX wrapper (`fix_gateway_enabled=False`) | **No** |
+| **SCORES Grievance Escalation** | `app/grievance_escalation/` | **`IN PROGRESS`** | **No** | `escalation_engine.py` (`grievance_escalation_enabled=False`) | **No** |
+| **Autonomous Policy Self-Healing** | `app/healing/` | **`IN PROGRESS`** | **No** | `repair_agent.py` (`policy_self_healing_enabled=False`) | **No** |
+| **Shadow Canary Policy Routing** | `app/canary/` | **`IN PROGRESS`** | **No** | `traffic_splitter.py` (`canary_enabled=False`) | **No** |
+| **Regulatory Filing Adapter** | `app/regulatory_filing/` | **`IN PROGRESS`** | **No** | `filing_generator.py` (`regulatory_filing_enabled=False`) | **No** |
+| **Multilingual OCR & Translation** | `app/localization/`, `translation_parity/` | **`IN PROGRESS`** | **No** | `translation.py` (`localization_enabled=False`) | **No** |
+| **Legal Knowledge Graph (Neo4j)** | `app/graph/` | **`IN PROGRESS`** | **No** | `neo4j_client.py` (`neo4j_sync_enabled=False`) | **No** |
+| **Real-Time Incident Streaming** | `app/incident/` | **`IN PROGRESS`** | **No** | `publisher.py` (`incident_broadcast_enabled=False`) | **No** |
+| **Regulatory Version Diffing** | `app/diffing/` | **`IN PROGRESS`** | **No** | `differ.py`, `app/api/diffing_routes.py` | **No** |
+| **Multi-Regulator Extensions** | `policies/rbi/`, `irdai/`, `pfrda/` | **`IN PROGRESS`** | **No** | Example Rego bundles; core restricted to SEBI | **No** |
+| **Fine-Tuned SEBI Domain Model** | `sebi-compliance-llm` | **`ROADMAP`** | **No** | Conceptual; referenced in model enum; unweighted | **No** |
+| **Compliance Case-Law Memory Agent** | N/A | **`ROADMAP`** | **No** | Proposed; agents run with `memory=False` to prevent bleed | **No** |
+| **Compliance-as-Collateral Protocol** | N/A | **`ROADMAP`** | **No** | Proposed cryptographic collateral verification protocol | **No** |
+| **Real-Data Rule-Impact Preview** | N/A | **`ROADMAP`** | **No** | Proposed live pre-deployment transaction preview | **No** |
+| **M&A Compliance Due-Diligence Agent**| N/A | **`ROADMAP`** | **No** | Proposed autonomous historical compliance auditor | **No** |
+| **Empirical Ingestion Velocity Benchmark** | `benchmarks/` (planned) | **`ROADMAP`** | **No** | Target: `<10 min`; formal benchmark harness pending | **No** |
+
+---
+
+## 6. Non-Functional Requirements & Security Guarantees [`CURRENT`]
+
+1. **Deterministic Execution**:
+   - Machine compliance evaluation must be strictly deterministic. Given identical transaction payloads and active OPA Rego bundles, the evaluation outcome must never vary.
+2. **Audit Ledger Immutability**:
+   - Every transaction evaluation record written to PostgreSQL `compliance_audit_ledger` is protected by database triggers that reject `UPDATE` and `DELETE` queries.
+   - Hash chain continuity is verified cryptographically via SHA-256 over `(previous_hash, payload_digest, sequence_num, evaluated_at)`.
+3. **Zero Startup Dependencies for Core Pipeline**:
+   - The application boots cleanly with `uvicorn app.main:app` requiring only PostgreSQL, Redis, and OPA. External services (Neo4j, SFTP, SCORES, QuickFIX) are completely bypassed.
+4. **Environment-Enforced Security Boundaries**:
+   - Setting `DEMO_MODE=true` is strictly prohibited in `staging` and `production` environments; the application crashes at startup if misconfigured.
+   - Compliance Officer approval actions strictly require valid Step-Up MFA authentication claims.
+
+---
+
+## 7. Auditability, Verification & Testing Baseline [`CURRENT`]
+
+The platform maintains automated test suites verifying all `CURRENT` capabilities:
+- **Unit Testing**: Over 80 isolated unit tests exercising compilers, hashing algorithms, parsing logic, and ledger verification using in-memory databases (`aiosqlite`).
+- **Integration Testing**: Validates PostgreSQL advisory locking, Alembic schema migrations, Redis hot-reload pub/sub, and live OPA evaluation.
+- **End-to-End Testing**: `tests/test_e2e_pipeline.py` executes the entire pipeline from PDF circular ingestion through extraction, logic audit, Rego compilation, HITL review, and transaction evaluation.
+
+---
+
+## 8. Roadmap, Exploratory & Future Capabilities [`ROADMAP` & `IN PROGRESS`]
+
+The capabilities documented in this section represent planned research, architectural extensions, or feature-flagged experimental modules. **None of the features in this section are active in the live production pipeline.**
+
+```mermaid
+flowchart TD
+    subgraph StatusLegend["Capability Status Legend"]
+        direction LR
+        S1["[CURRENT] Live & Verified"]
+        S2["[IN PROGRESS] Implemented / Flagged Off"]
+        S3["[ROADMAP] Proposed / Design Stage"]
+    end
+
+    subgraph InProgressSubsystems["IN PROGRESS (Implemented in Code, Disabled / Decoupled from Live Pipeline)"]
+        LG["Dynamic LangGraph Orchestrator<br/>(app/agents/graph/)<br/>Flag: agent_graph_orchestration_enabled=False"]
+        DMC["Dual-Model Cascade (72B + 7B)<br/>(app/agents/graph/nodes.py)"]
+        ZKP["Zero-Knowledge Verifier<br/>(app/zkp/)<br/>Flag: zkp_enabled=False"]
+        NEG["Multi-Agent Arbitration<br/>(app/negotiation/)<br/>Flag: negotiation_enabled=False"]
+        FIX["FIX Protocol Gateway & C++ Kernel<br/>(app/fix_gateway/, native/)<br/>Flag: fix_gateway_enabled=False"]
+        SCR["SCORES Grievance Escalation<br/>(app/grievance_escalation/)<br/>Flag: grievance_escalation_enabled=False"]
+        HLG["Policy Self-Healing<br/>(app/healing/)<br/>Flag: policy_self_healing_enabled=False"]
+        CNR["Canary Policy Routing<br/>(app/canary/)<br/>Flag: canary_enabled=False"]
+        BKT["Historical Replay Backtesting<br/>(app/backtest/)"]
+        FT_S["QLoRA Fine-Tuning Scaffolding<br/>(llm_finetune/)"]
+        KNG["Neo4j Knowledge Graph<br/>(app/graph/)<br/>Flag: neo4j_sync_enabled=False"]
+        FIL["Regulatory Filing Generator<br/>(app/regulatory_filing/)<br/>Flag: regulatory_filing_enabled=False"]
+    end
+
+    subgraph RoadmapSubsystems["ROADMAP (Proposed Architectural Features, Not Implemented)"]
+        CLM["Compliance Case-Law Memory Agent<br/>(Long-term legal precedent vector memory)"]
+        CAC["Compliance-as-Collateral / ZKP Protocol<br/>(Cryptographic margin compliance verification)"]
+        RDP["Real-Data Rule-Impact Preview<br/>(Interactive pre-deployment impact simulator)"]
+        MAD["M&A Compliance Due-Diligence Agent<br/>(Multi-year historical compliance auditor)"]
+        FT_M["Fine-Tuned Domain Model (sebi-compliance-llm)<br/>(Production model trained on verified SEBI corpus)"]
+        BMK["Ingestion Velocity Benchmark Harness<br/>(Empirical verification of &lt;10 min pipeline target)"]
+    end
+```
+
+### 8.1 Compliance Case-Law Memory Agent [`ROADMAP`]
+- **Proposed Capability**: An autonomous memory agent maintaining an indexed vector memory of Securities Appellate Tribunal (SAT) orders, SEBI adjudication orders, and informal guidances.
+- **Architectural Intent**: When a new circular contains qualitative directives (e.g., *"fit and proper person"*, *"adequate internal controls"*), the agent is designed to retrieve relevant historical case law to assist the compliance officer during HITL review.
+- **Current Status**: **ROADMAP** (Proposed / Not Implemented). In the live pipeline, agents execute with `memory=False` to strictly prevent cross-clause context bleeding.
+
+### 8.2 Compliance-as-Collateral / Zero-Knowledge Proofs (ZKP) [`IN PROGRESS` / `ROADMAP`]
+- **Existing Implementation**: `app/zkp/` contains a pure-Python BN254 Groth16 proof verifier (`groth16_verifier.py`) and Circom circuits for margin compliance. **Status: IN PROGRESS** (Gated behind `settings.zkp_enabled=False`; not in live pipeline).
+- **Proposed Protocol**: "Compliance-as-Collateral" proposes enabling brokers to cryptographically prove client margin sufficiency to clearing corporations via zero-knowledge proofs without revealing proprietary portfolio positions. **Status: ROADMAP** (Protocol and clearing integration proposed).
+
+### 8.3 Multi-Agent Negotiation & Arbitration [`IN PROGRESS`]
+- **Existing Implementation**: `app/negotiation/` implements a multi-agent consensus protocol (`DomainAgent`, `ConflictArbiterAgent`) to resolve conflicting multi-clause compliance interpretations across trading domains.
+- **Current Status**: **IN PROGRESS** (Implementation exists; gated behind `settings.negotiation_enabled=False`; decoupled from live pipeline; not verified end-to-end).
+
+### 8.4 Real-Data Rule-Impact Preview & Backtesting [`IN PROGRESS` / `ROADMAP`]
+- **Existing Implementation**: `app/backtest/replay_engine.py` provides an offline engine capable of replaying historical ledger events against candidate policies. **Status: IN PROGRESS** (Offline batch script; not integrated into live pipeline).
+- **Proposed Capability**: An interactive dashboard feature allowing compliance officers to simulate the immediate trading impact (rejection rate, margin shortfall) of a draft circular against live transaction streams prior to approval. **Status: ROADMAP** (Interactive preview proposed).
+
+### 8.5 M&A Compliance Due-Diligence Agent [`ROADMAP`]
+- **Proposed Capability**: An autonomous compliance due-diligence agent that ingests multi-year trading records, historical circular versions, and entity filings of an acquisition target to produce an automated regulatory liability report.
+- **Current Status**: **ROADMAP** (Proposed / Not Implemented; zero code in repository).
+
+### 8.6 Dynamic LangGraph Orchestration Layer [`IN PROGRESS`]
+- **Existing Implementation**: `app/agents/graph/` contains an implemented `StateGraph` featuring complexity classification, conditional routing to specialist nodes, and Redis checkpointing.
+- **Current Status**: **IN PROGRESS** (Topology-tested with stub nodes; gated behind `settings.agent_graph_orchestration_enabled=False`; inactive in production).
+
+### 8.7 Fine-Tuned Regulatory Domain Model (`sebi-compliance-llm`) [`IN PROGRESS` / `ROADMAP`]
+- **Existing Implementation**: `llm_finetune/` contains a QLoRA fine-tuning training script, dataset formatting utilities, and synthetic smoke fixtures. **Status: IN PROGRESS** (Scaffolding only).
+- **Proposed Model**: A domain-adapted 7B/14B parameter model trained on an annotated corpus of verified historical SEBI circulars, gazettes, and amendments. **Status: ROADMAP** (Production training and deployment proposed).
+
+### 8.8 Automated Grievance Escalation (SEBI SCORES) [`IN PROGRESS`]
+- **Existing Implementation**: `app/grievance_escalation/` provides automated evidence assembly and REST client for the SEBI SCORES portal.
+- **Current Status**: **IN PROGRESS** (Gated behind `settings.grievance_escalation_enabled=False`; excluded from default Celery beat schedule).
+
+### 8.9 FIX Protocol Gateway & Native C++ Policy Kernel [`IN PROGRESS`]
+- **Existing Implementation**: `app/fix_gateway/` and `native/include/regengine/fix_gateway.h` contain an allocation-free C++ policy evaluator and QuickFIX bridge.
+- **Current Status**: **IN PROGRESS** (Gated behind `settings.fix_gateway_enabled=False`; tested in isolation; not integrated into live HTTP/Celery pipeline).
+
+### 8.10 Ingestion Velocity Benchmark Harness (Target: <10 Minutes) [`ROADMAP`]
+- **Proposed Benchmark**: A reproducible, multi-run automated benchmark measuring end-to-end processing turnaround from circular PDF upload to `AWAITING_HITL` readiness on pinned hardware.
+- **Current Status**: **ROADMAP** (Engineering target; benchmark harness pending).

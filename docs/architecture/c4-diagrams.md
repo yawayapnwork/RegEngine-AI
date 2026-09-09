@@ -6,6 +6,11 @@ explicitly: SEBI RSS ingest, and broker OMS/FIX order validation. All
 diagrams are Mermaid.js — GitHub, GitLab, and most IDE Markdown
 previews render these fences natively with no extra tooling.
 
+Every element is tagged with its explicit capability status per the RegEngine PRD:
+- **`[CURRENT]`**: Implemented, integrated into the live production pipeline, and verified end-to-end.
+- **`[IN PROGRESS]`**: Implemented in code, but decoupled/feature-flagged from the default production pipeline.
+- **`[ROADMAP]`**: Proposed or design-stage capability; not implemented in code.
+
 ## Level 1 — System Context
 
 Who and what RegEngine AI talks to, and why.
@@ -14,23 +19,27 @@ Who and what RegEngine AI talks to, and why.
 C4Context
     title RegEngine AI — System Context
 
-    Person(officer, "Compliance Officer", "Reviews HITL-flagged rules/transactions, approves policy publication, confirms grievance filings")
-    Person(inspector, "SEBI Inspector", "Independently re-verifies audit-log integrity offline, with no access to RegEngine's servers or database")
+    Person(officer, "Compliance Officer [CURRENT]", "Reviews HITL-flagged rules/transactions, approves policy publication with step-up MFA")
+    Person(inspector, "SEBI Inspector [CURRENT]", "Independently re-verifies audit-log integrity offline, with no access to RegEngine's servers or database")
 
-    System_Ext(sebiSources, "SEBI Circular Sources", "RSS feeds and HTML notice pages publishing new/amended circulars")
-    System_Ext(brokerOms, "Broker OMS / RMS", "Order Management / Risk Management System submitting live orders via FIX")
-    System_Ext(scores, "SEBI SCORES Portal", "Regulator grievance-redress REST API")
-    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted", "Qwen2.5-72B-Instruct (Active primary dual-agent extraction & audit; 7B fallback wired into in-progress LangGraph layer)")
+    System_Ext(sebiSources, "SEBI Circular Sources [CURRENT]", "RSS feeds and HTML notice pages publishing new/amended circulars")
+    System_Ext(brokerRest, "Broker OMS / RMS [CURRENT]", "Submits live transactions for real-time compliance evaluation via REST API")
+    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted [CURRENT]", "Qwen2.5-72B-Instruct (Active primary dual-agent extraction & audit; 7B fallback wired into in-progress LangGraph layer)")
 
-    System(regengine, "RegEngine AI", "Extracts, compiles, executes, and audits SEBI compliance rules against live broker transactions")
+    System_Ext(brokerOms, "Broker OMS via FIX [IN PROGRESS]", "Order Management System submitting orders via QuickFIX bridge (gated off by default)")
+    System_Ext(scores, "SEBI SCORES Portal [IN PROGRESS]", "Regulator grievance-redress REST API (gated off by default)")
 
-    Rel(sebiSources, regengine, "Publishes new circulars", "RSS / HTTPS")
-    Rel(brokerOms, regengine, "Submits orders for validation", "FIX 4.2/4.4")
-    Rel(regengine, brokerOms, "Returns Execution Reports (accept/reject + SEBI clause citation)", "FIX 4.2/4.4")
-    Rel(regengine, hfInference, "Extracts & audits compliance rules from clause text", "HTTPS / Hugging Face Inference API")
-    Rel(regengine, scores, "Files grievance records for systemic broker non-compliance", "HTTPS / REST")
-    Rel(officer, regengine, "Reviews, approves, confirms", "HTTPS / Web UI")
-    Rel(inspector, regengine, "Downloads signed audit binder (offline afterward)", "HTTPS, one-time export")
+    System(regengine, "RegEngine AI [CURRENT]", "Extracts, compiles, executes, and audits SEBI compliance rules against live broker transactions")
+
+    Rel(sebiSources, regengine, "Publishes new circulars", "RSS / HTTPS [CURRENT]")
+    Rel(brokerRest, regengine, "Submits transactions for validation", "HTTPS / REST [CURRENT]")
+    Rel(regengine, brokerRest, "Returns allow/deny decision + clause citations", "HTTPS / REST [CURRENT]")
+    Rel(regengine, hfInference, "Extracts & audits compliance rules from clause text", "HTTPS / Hugging Face Inference API [CURRENT]")
+    Rel(officer, regengine, "Reviews, approves, confirms", "HTTPS / Web UI [CURRENT]")
+    Rel(inspector, regengine, "Downloads signed audit binder (offline afterward)", "HTTPS, one-time export [CURRENT]")
+
+    Rel(brokerOms, regengine, "Submits orders via FIX bridge (feature-flagged)", "FIX 4.2/4.4 [IN PROGRESS]")
+    Rel(regengine, scores, "Files grievance records (feature-flagged)", "HTTPS / REST [IN PROGRESS]")
 ```
 
 ## Level 2 — Containers
@@ -41,45 +50,41 @@ The deployable units inside RegEngine AI's system boundary.
 C4Container
     title RegEngine AI — Containers
 
-    Person(officer, "Compliance Officer")
-    System_Ext(sebiSources, "SEBI Circular Sources")
-    System_Ext(brokerOms, "Broker OMS / RMS")
-    System_Ext(scores, "SEBI SCORES Portal")
-    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted")
+    Person(officer, "Compliance Officer [CURRENT]")
+    System_Ext(sebiSources, "SEBI Circular Sources [CURRENT]")
+    System_Ext(brokerRest, "Broker OMS / RMS [CURRENT]")
+    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted [CURRENT]")
 
     Container_Boundary(regengine, "RegEngine AI") {
-        Container(frontend, "Compliance IDE", "React + Tailwind", "Dashboards: HITL queue, incident feed, grievance timelines, policy diffs")
-        Container(api, "FastAPI Application", "Python 3.11 / FastAPI", "Synchronous REST surface: transaction evaluation, HITL, grievances, translation parity, canary control")
-        Container(workers, "Celery Workers", "Python / Celery", "Async pipeline: ingestion polling, agent extraction, compilation, batch/CDC evaluation, filing/grievance submission & polling")
-        Container(fixGateway, "FIX Gateway", "Python (QuickFIX) + C++", "Intercepts broker NewOrderSingle messages; validates via the native kernel; returns Execution Reports")
-        Container(nativeKernel, "Native Policy Kernel", "C++17, header-only + C-ABI", "Allocation-free compiled-policy evaluator — the sub-millisecond hot path, embedded in the FIX Gateway")
-        Container(opa, "OPA Server", "Open Policy Agent", "Evaluates compiled Rego policy for the general synchronous/batch/CDC path")
+        Container(frontend, "Compliance IDE [CURRENT]", "React + Tailwind", "Dashboards: HITL queue, policy split-view, rule playground, audit vault")
+        Container(api, "FastAPI Application [CURRENT]", "Python 3.11 / FastAPI", "Synchronous REST surface: transaction evaluation, HITL, circular ingestion")
+        Container(workers, "Celery Workers [CURRENT]", "Python / Celery", "Async pipeline: ingestion polling, bounded dual-agent extraction, Rego compilation")
+        Container(opa, "OPA Server [CURRENT]", "Open Policy Agent", "Evaluates compiled Rego policy for synchronous REST transaction evaluations")
 
-        ContainerDb(postgres, "PostgreSQL", "App schema + Audit Ledger", "Circulars, clauses, compiled rules, HITL reviews, and PostgreSQL append-only SHA-256 hash-chained compliance_audit_ledger (QLDB-journal-inspired design per ADR-0003)")
-        ContainerDb(redis, "Redis", "Cache / Queue / Pub-Sub", "Celery broker, policy registry (L2), HITL/grievance/canary/negotiation queues, incident pub-sub")
-        ContainerDb(qdrant, "Qdrant", "Vector Store", "Clause embeddings for semantic retrieval and hybrid Graph-RAG")
-        ContainerDb(neo4j, "Neo4j", "Knowledge Graph", "Circular/Clause/Obligation/Penalty graph, supersession & conflict edges")
+        ContainerDb(postgres, "PostgreSQL [CURRENT]", "App schema + Audit Ledger", "Circulars, clauses, compiled rules, HITL reviews, and PostgreSQL append-only SHA-256 hash-chained compliance_audit_ledger")
+        ContainerDb(redis, "Redis [CURRENT]", "Cache / Queue / Pub-Sub", "Celery broker, policy registry (L2), hot-reload pub-sub")
+        ContainerDb(qdrant, "Qdrant [CURRENT]", "Vector Store", "Clause embeddings for semantic retrieval")
+
+        Container(fixGateway, "FIX Gateway [IN PROGRESS]", "Python (QuickFIX) + C++", "Intercepts broker NewOrderSingle messages (gated: fix_gateway_enabled=False)")
+        Container(nativeKernel, "Native Policy Kernel [IN PROGRESS]", "C++17, header-only + C-ABI", "Allocation-free compiled-policy evaluator (embedded in FIX Gateway)")
+        ContainerDb(neo4j, "Neo4j [IN PROGRESS]", "Knowledge Graph", "Circular/Clause knowledge graph (gated: neo4j_sync_enabled=False)")
     }
 
-    Rel(sebiSources, workers, "Polled by ingestion tasks", "RSS / HTTPS")
-    Rel(workers, hfInference, "Extraction + Audit agent calls", "HTTPS")
-    Rel(workers, opa, "Publishes compiled Rego", "HTTPS Policy API")
-    Rel(workers, postgres, "Persists circulars/clauses/compiled rules")
-    Rel(workers, qdrant, "Indexes clause embeddings")
-    Rel(workers, neo4j, "Syncs compliance knowledge graph")
+    Rel(sebiSources, workers, "Polled by ingestion tasks", "RSS / HTTPS [CURRENT]")
+    Rel(workers, hfInference, "Extraction + Audit agent calls", "HTTPS [CURRENT]")
+    Rel(workers, opa, "Publishes compiled Rego", "HTTPS Policy API [CURRENT]")
+    Rel(workers, postgres, "Persists circulars/clauses/compiled rules", "SQL [CURRENT]")
+    Rel(workers, qdrant, "Indexes clause embeddings", "gRPC / HTTP [CURRENT]")
 
-    Rel(brokerOms, fixGateway, "NewOrderSingle (35=D)", "FIX")
-    Rel(fixGateway, nativeKernel, "evaluate() — in-process call")
-    Rel(fixGateway, brokerOms, "ExecutionReport (35=8)", "FIX")
+    Rel(brokerRest, api, "Evaluates transactions via REST", "HTTPS [CURRENT]")
+    Rel(api, opa, "Evaluates transactions", "HTTPS [CURRENT]")
+    Rel(api, postgres, "Reads/writes app schema + appends to audit ledger", "SQL [CURRENT]")
+    Rel(api, redis, "Policy cache, HITL queues, pub-sub", "Redis protocol [CURRENT]")
+    Rel(api, frontend, "Serves REST", "HTTPS [CURRENT]")
+    Rel(officer, frontend, "Uses", "HTTPS [CURRENT]")
 
-    Rel(api, opa, "Evaluates transactions", "HTTPS")
-    Rel(api, postgres, "Reads/writes app schema + appends to audit ledger")
-    Rel(api, redis, "Policy cache, HITL/grievance queues, pub-sub")
-    Rel(api, scores, "Submits/polls grievances", "HTTPS")
-    Rel(api, frontend, "Serves REST + WebSocket", "HTTPS/WSS")
-
-    Rel(officer, frontend, "Uses", "HTTPS")
-    Rel(nativeKernel, redis, "Hot-reloaded from", "policy_events pub-sub, via app.fix_gateway.hot_reload")
+    Rel(workers, neo4j, "Syncs compliance knowledge graph (dormant)", "Bolt [IN PROGRESS]")
+    Rel(nativeKernel, redis, "Hot-reloaded from pub-sub (dormant)", "Redis [IN PROGRESS]")
 ```
 
 ## Level 3 — Components (inside the FastAPI Application container)
@@ -91,39 +96,37 @@ C4Component
     title RegEngine AI — Components inside the FastAPI Application
 
     Container_Boundary(api, "FastAPI Application") {
-        Component(evaluator, "Evaluator", "app.execution.evaluator", "Reduces per-policy OPA outcomes to allow/deny/flagged (most-restrictive-wins)")
-        Component(opaEngine, "OPAEngine", "app.execution.opa_engine", "Async HTTP client to the co-located OPA server; publishes and evaluates policy")
-        Component(policyCache, "PolicyCache / PolicyRegistry", "app.execution.policy_cache/registry", "L1 in-process + L2 Redis view of which compiled policies apply to which entity_type")
-        Component(hitlQueue, "HITLQueue", "app.execution.hitl_queue", "Redis-backed queue of ambiguous live-transaction decisions awaiting human sign-off")
-        Component(ledgerIntegration, "Ledger Integration", "app.ledger.integration", "Maps one evaluation result onto hash-chained ledger rows; fires breach/grievance triggers")
-        Component(killSwitch, "KillSwitchMiddleware", "app.governance.middleware", "Halts evaluation platform-wide or per-tenant on operator command")
-        Component(negotiation, "Negotiation Orchestrator", "app.negotiation", "Multi-agent consensus + arbiter for cross-domain compliance conflicts")
-        Component(canary, "Canary Orchestrator", "app.canary", "Shadow-evaluates a candidate policy against production traffic; auto-promotes or rolls back")
-        Component(grievance, "Grievance Escalation", "app.grievance_escalation", "Detects systemic broker non-compliance; assembles evidence; files/polls SCORES")
-        Component(incidentPublisher, "Incident Publisher", "app.incident.publisher", "Fans breach/grievance events out to the real-time dashboard and multi-stage escalation")
+        Component(evaluator, "Evaluator [CURRENT]", "app.execution.evaluator", "Reduces per-policy OPA outcomes to allow/deny/flagged (most-restrictive-wins)")
+        Component(opaEngine, "OPAEngine [CURRENT]", "app.execution.opa_engine", "Async HTTP client to the co-located OPA server; publishes and evaluates policy")
+        Component(policyCache, "PolicyCache / PolicyRegistry [CURRENT]", "app.execution.policy_cache/registry", "L1 in-process + L2 Redis view of which compiled policies apply to which entity_type")
+        Component(hitlQueue, "HITLQueue [CURRENT]", "app.execution.hitl_queue", "Redis-backed queue of ambiguous live-transaction decisions awaiting human sign-off")
+        Component(ledgerIntegration, "Ledger Integration [CURRENT]", "app.ledger.integration", "Maps one evaluation result onto hash-chained ledger rows in PostgreSQL")
+        Component(killSwitch, "KillSwitchMiddleware [CURRENT]", "app.governance.middleware", "Halts evaluation platform-wide or per-tenant on operator command")
+
+        Component(negotiation, "Negotiation Orchestrator [IN PROGRESS]", "app.negotiation", "Multi-agent consensus for cross-domain compliance conflicts (gated: negotiation_enabled=False)")
+        Component(canary, "Canary Orchestrator [IN PROGRESS]", "app.canary", "Shadow-evaluates candidate policy against traffic (gated: canary_enabled=False)")
+        Component(grievance, "Grievance Escalation [IN PROGRESS]", "app.grievance_escalation", "Detects systemic broker non-compliance; files SCORES (gated: grievance_escalation_enabled=False)")
+        Component(incidentPublisher, "Incident Publisher [IN PROGRESS]", "app.incident.publisher", "Fans breach events out to WebSockets (gated: incident_broadcast_enabled=False)")
     }
 
-    ContainerDb(opa, "OPA Server")
-    ContainerDb(postgres, "PostgreSQL")
-    ContainerDb(redis, "Redis")
-    System_Ext(brokerOms, "Broker OMS / RMS")
-    System_Ext(scores, "SEBI SCORES Portal")
+    ContainerDb(opa, "OPA Server [CURRENT]")
+    ContainerDb(postgres, "PostgreSQL [CURRENT]")
+    ContainerDb(redis, "Redis [CURRENT]")
+    System_Ext(brokerRest, "Broker OMS / RMS [CURRENT]")
 
-    Rel(brokerOms, evaluator, "TransactionPayload", "via /v1/execution/evaluate")
-    Rel(evaluator, killSwitch, "Checked before evaluating")
-    Rel(evaluator, policyCache, "policies_for(entity_type)")
-    Rel(evaluator, opaEngine, "evaluate(package, input_doc)")
-    Rel(opaEngine, opa, "POST /v1/data/...", "HTTPS")
-    Rel(evaluator, hitlQueue, "enqueue() on FLAGGED")
-    Rel(evaluator, ledgerIntegration, "log_evaluation(transaction, result)")
-    Rel(ledgerIntegration, postgres, "append_entry() — hash-chained insert")
-    Rel(ledgerIntegration, incidentPublisher, "raise_breach_event() on FAIL/HITL_REVIEW")
-    Rel(ledgerIntegration, grievance, "evaluate_and_trigger_grievance_escalation() after a successful FAIL append")
-    Rel(grievance, scores, "submit / poll", "HTTPS")
-    Rel(grievance, incidentPublisher, "notify_grievance_filed / _status_changed")
-    Rel(negotiation, opaEngine, "Per-agent shadow evaluation")
-    Rel(canary, opa, "Publishes candidate under a namespaced package")
-    Rel(incidentPublisher, redis, "Redis pub-sub -> WebSocket dashboard fan-out")
+    Rel(brokerRest, evaluator, "TransactionPayload", "via /v1/execution/transactions/evaluate [CURRENT]")
+    Rel(evaluator, killSwitch, "Checked before evaluating [CURRENT]")
+    Rel(evaluator, policyCache, "policies_for(entity_type) [CURRENT]")
+    Rel(evaluator, opaEngine, "evaluate(package, input_doc) [CURRENT]")
+    Rel(opaEngine, opa, "POST /v1/data/... [CURRENT]")
+    Rel(evaluator, hitlQueue, "enqueue() on FLAGGED [CURRENT]")
+    Rel(evaluator, ledgerIntegration, "log_evaluation(transaction, result) [CURRENT]")
+    Rel(ledgerIntegration, postgres, "append_entry() — hash-chained insert [CURRENT]")
+
+    Rel(ledgerIntegration, incidentPublisher, "raise_breach_event() on FAIL/HITL_REVIEW (dormant) [IN PROGRESS]")
+    Rel(ledgerIntegration, grievance, "evaluate_and_trigger_grievance_escalation() (dormant) [IN PROGRESS]")
+    Rel(negotiation, opaEngine, "Per-agent shadow evaluation (dormant) [IN PROGRESS]")
+    Rel(canary, opa, "Publishes candidate under a namespaced package (dormant) [IN PROGRESS]")
 ```
 
 ## Level 4 — Code (the audit-ledger hash-chain module)
@@ -247,18 +250,21 @@ sequenceDiagram
     end
 ```
 
-## Supplementary — Broker OMS / FIX Order Validation Flow (Dynamic View)
+## Supplementary — Broker OMS / FIX Order Validation Flow (Dynamic View) [`IN PROGRESS`]
+
+> [!NOTE]
+> This sequence represents the feature-flagged FIX Gateway and native C++ policy kernel (`app/fix_gateway/`, `native/`), which is an **`IN PROGRESS`** capability decoupled from the default production REST pipeline.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant OMS as Broker OMS/RMS
-    participant GW as FIX Gateway<br/>(app.fix_gateway)
-    participant Scan as FIX Tag Scanner<br/>(allocation-free)
-    participant Kernel as Native Policy Kernel<br/>(native/, C++)
-    participant Build as Execution Report Builder
-    participant Async as Async Ledger Path<br/>(app.execution / app.ledger)
-    participant Escal as Grievance Escalation<br/>(app.grievance_escalation)
+    participant GW as FIX Gateway [IN PROGRESS]<br/>(app.fix_gateway)
+    participant Scan as FIX Tag Scanner [IN PROGRESS]<br/>(allocation-free)
+    participant Kernel as Native Policy Kernel [IN PROGRESS]<br/>(native/, C++)
+    participant Build as Execution Report Builder [IN PROGRESS]
+    participant Async as Async Ledger Path [IN PROGRESS]<br/>(app.execution / app.ledger)
+    participant Escal as Grievance Escalation [IN PROGRESS]<br/>(app.grievance_escalation)
 
     OMS->>GW: NewOrderSingle (35=D): ClOrdID, Account, OrderQty, Price
     GW->>Scan: scan_new_order_single(raw_bytes)
@@ -284,16 +290,31 @@ sequenceDiagram
 
 ## Diagram-to-Source Cross-Reference
 
-| Diagram element | Source module |
-|---|---|
-| FIX Gateway / Native Policy Kernel | `app/fix_gateway/`, `native/include/regengine/` |
-| Evaluator / OPAEngine / HITLQueue | `app/execution/` |
-| Ledger Integration / hash_chain / verify_chain | `app/ledger/` |
-| Compiler (Rego + JSON-Logic) | `app/compiler/rego_compiler.py`, `app/compiler/jsonlogic_compiler.py` |
-| Extraction + Logic Auditor Agents | `app/agents/crew.py` (active sequential pipeline), `app/agents/graph/` (in-progress LangGraph layer, feature-flagged) |
-| Negotiation Orchestrator | `app/negotiation/` |
-| Canary Orchestrator | `app/canary/` |
-| Grievance Escalation | `app/grievance_escalation/` |
-| Incident Publisher / Dashboard | `app/incident/` |
-| Knowledge Graph sync | `app/graph/` |
-| Ingestion / Parsing | `app/ingestion/`, `app/parsing/` |
+| Diagram Element | Source Module | Capability Status | Live Production Path? |
+|---|---|:---:|:---:|
+| **Evaluator / OPAEngine / HITLQueue** | `app/execution/` | **`CURRENT`** | **Yes** |
+| **Ledger Integration / hash_chain / verify_chain** | `app/ledger/` | **`CURRENT`** | **Yes** |
+| **Compiler (Rego + JSON-Logic)** | `app/compiler/rego_compiler.py`, `app/compiler/jsonlogic_compiler.py` | **`CURRENT`** | **Yes** |
+| **Extraction + Logic Auditor Agents** | `app/agents/crew.py` (active sequential pipeline) | **`CURRENT`** | **Yes** |
+| **Ingestion / Parsing** | `app/ingestion/`, `app/parsing/` | **`CURRENT`** | **Yes** |
+| **Vector Store (Clause Embeddings)** | `app/vectorstore/` | **`CURRENT`** | **Yes** |
+| **Dynamic LangGraph Orchestration** | `app/agents/graph/` (feature-flagged) | **`IN PROGRESS`** | **No** (flagged: `agent_graph_orchestration_enabled=False`) |
+| **FIX Gateway / Native Policy Kernel** | `app/fix_gateway/`, `native/include/regengine/` | **`IN PROGRESS`** | **No** (flagged: `fix_gateway_enabled=False`) |
+| **Negotiation Orchestrator** | `app/negotiation/` | **`IN PROGRESS`** | **No** (flagged: `negotiation_enabled=False`) |
+| **Canary Orchestrator** | `app/canary/` | **`IN PROGRESS`** | **No** (flagged: `canary_enabled=False`) |
+| **Grievance Escalation** | `app/grievance_escalation/` | **`IN PROGRESS`** | **No** (flagged: `grievance_escalation_enabled=False`) |
+| **Incident Publisher / Dashboard** | `app/incident/` | **`IN PROGRESS`** | **No** (flagged: `incident_broadcast_enabled=False`) |
+| **Knowledge Graph Sync (Neo4j)** | `app/graph/` | **`IN PROGRESS`** | **No** (flagged: `neo4j_sync_enabled=False`) |
+| **Zero-Knowledge Proofs (ZKP)** | `app/zkp/` | **`IN PROGRESS`** | **No** (flagged: `zkp_enabled=False`) |
+| **Historical Replay Backtesting** | `app/backtest/` | **`IN PROGRESS`** | **No** (standalone batch script) |
+| **QLoRA Fine-Tuning Scaffolding** | `llm_finetune/` | **`IN PROGRESS`** | **No** (standalone training pipeline) |
+| **Regulatory Filing Adapter** | `app/regulatory_filing/` | **`IN PROGRESS`** | **No** (flagged: `regulatory_filing_enabled=False`) |
+| **Multilingual OCR & Translation** | `app/localization/`, `translation_parity/` | **`IN PROGRESS`** | **No** (flagged: `localization_enabled=False`) |
+| **Regulatory Version Diffing** | `app/diffing/` | **`IN PROGRESS`** | **No** (standalone router) |
+| **Compliance Case-Law Memory Agent** | N/A | **`ROADMAP`** | **No** (proposed; `memory=False` in live pipeline) |
+| **Compliance-as-Collateral Protocol** | N/A | **`ROADMAP`** | **No** (proposed) |
+| **Real-Data Rule-Impact Preview** | N/A | **`ROADMAP`** | **No** (proposed) |
+| **M&A Compliance Due-Diligence Agent**| N/A | **`ROADMAP`** | **No** (proposed) |
+| **Fine-Tuned Domain Model (`sebi-compliance-llm`)** | N/A | **`ROADMAP`** | **No** (proposed; scaffolding in `llm_finetune/`) |
+| **Ingestion Velocity Benchmark Harness** | `benchmarks/` | **`ROADMAP`** | **No** (target: `<10 min`; benchmark harness pending) |
+
