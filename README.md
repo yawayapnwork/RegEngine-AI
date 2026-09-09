@@ -29,6 +29,7 @@ flowchart LR
 - [Environment & Deployment Modes](#environment--deployment-modes)
 - [Configuration Reference](#configuration-reference)
 - [Storage Architecture & Local Fallback](#storage-architecture--local-fallback)
+- [LLM Provider & Model Architecture](#llm-provider--model-architecture)
 - [Canonical End-to-End Workflows](#canonical-end-to-end-workflows)
 - [API Surface](#api-surface)
 - [Testing Guide](#testing-guide)
@@ -42,7 +43,7 @@ flowchart LR
 | Stage | Key Modules | What it does |
 |---|---|---|
 | **1. Ingestion & Provenance** | `app.parsing`, `app.storage`, `app.vectorstore` | Ingests circular PDFs via local filesystem or S3. Computes two distinct SHA-256 digests: `source_document_sha256` (over raw uploaded PDF bytes) and `extracted_text_sha256` (over normalized extracted text). Parses layout-aware clauses (`unstructured` with OCR/Tika fallbacks), chunks clauses deterministically, and indexes clause embeddings into Qdrant. State: `INGESTED`. |
-| **2. Extraction & Audit** | `app.agents`, `app.services.orchestrator` | Runs dual-agent compliance analysis with bounded concurrency (preventing worker memory and provider rate-limit exhaustion). An **Extraction Agent** structures clauses into obligations, numerical thresholds, and entity targets; an independent **Logic Auditor Agent** verifies extraction fidelity before downstream compilation. State: `EXTRACTING` &rarr; `EXTRACTED`. *(Note: A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete).* |
+| **2. Extraction & Audit** | `app.agents`, `app.services.orchestrator` | Runs dual-agent compliance analysis with bounded concurrency (preventing worker memory and provider rate-limit exhaustion). Backed by an open-weight model strategy: **Qwen2.5-72B-Instruct** primary with **Qwen2.5-7B-Instruct** fallback on low confidence (<0.85) via Hugging Face Inference or self-hosted endpoint, alongside deterministic offline execution (`LLM_PROVIDER=offline`). An **Extraction Agent** structures clauses into obligations, numerical thresholds, and entity targets; an independent **Logic Auditor Agent** verifies extraction fidelity before downstream compilation. State: `EXTRACTING` &rarr; `EXTRACTED`. *(Note: A cost-tiered fine-tuning pipeline (QLoRA) is implemented for a self-hosted low-cost model tier; production fine-tuning on a real annotated SEBI corpus is a roadmap item, not yet complete).* |
 | **3. Compilation & HITL Gate** | `app.compiler`, `app.api.hitl_review_routes` | Compiles audited deterministic clauses into **OPA Rego** policies and structurally validated **JSON-Logic** ASTs. Any ambiguous, qualitative, low-confidence, or conflicting clauses generate `HITLReview` records. A rule can **never** become active while any blocking HITL review remains unresolved. State: `COMPILING` &rarr; `AWAITING_HITL`. |
 | **4. Approval & Hot-Reload** | `app.execution.publisher`, `app.execution.policy_hot_reload` | Authorized compliance officers review and approve flagged items (protected by step-up MFA). Approving all blocking reviews transitions the rule to active and publishes it to OPA. A Redis pub/sub subscriber notifies worker pods to hot-reload OPA and invalidate local L1 caches without requiring container restarts. State: `APPROVED` &rarr; `DEPLOYED`. |
 | **5. Execution Engine** | `app.execution`, `app.api.execution_routes` | Evaluates live broker transactions against deployed OPA policies, returning synchronous `allow`, `deny`, or `flagged` decisions. Asynchronous batch files and database CDC events are processed via dedicated Celery/Redis worker queues. |
@@ -296,8 +297,10 @@ Tunables are configured via environment variables (loaded from `.env` in local d
 | `DEMO_MODE` | `false` | Enables test MFA claims in development mode only. Prohibited in staging/production. |
 | `STORAGE_BACKEND` | `local` | `local` (filesystem in `data/uploads`) or `s3` (S3/MinIO). |
 | `STORAGE_LOCAL_DIR` | `data/uploads` | Path for local filesystem PDF storage when `STORAGE_BACKEND=local`. |
-| `LLM_PROVIDER` | `offline` | Extraction LLM provider: `offline` (deterministic local), `huggingface`, `openai`, `anthropic`. |
-| `HUGGINGFACEHUB_API_TOKEN` | — | API token for Hugging Face Inference (Qwen2.5-72B-Instruct). |
+| `LLM_PROVIDER` | `offline` | Extraction LLM provider: `offline` (deterministic local), `huggingface` (production open-weight), `openai`, `anthropic`. |
+| `HUGGINGFACEHUB_API_TOKEN` | — | API token for Hugging Face Inference (or set `HF_TOKEN`). |
+| `HF_MODEL_ID` | `Qwen/Qwen2.5-72B-Instruct` | Primary open-weight model for extraction and logic audit. |
+| `AGENT_FALLBACK_MODEL` | `huggingface/Qwen/Qwen2.5-7B-Instruct` | Fallback model invoked when extraction confidence < 0.85 in dynamic agent graph. |
 | `DATABASE_URL` | `postgresql+asyncpg://...` | Connection URI for the main relational schema. |
 | `LEDGER_DATABASE_URL` | `postgresql+asyncpg://...` | Connection URI for the append-only audit ledger. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Celery broker/backend, policy registry, and hot-reload pub/sub. |
@@ -322,6 +325,29 @@ RegEngine AI provides a storage abstraction (`app/storage/object_store.py`) that
    - For multi-node deployments, Kubernetes clusters, or cloud staging/production.
    - Supports AWS S3, MinIO, Cloudflare R2, and Backblaze B2.
    - Requires `OBJECT_STORAGE_ENDPOINT_URL`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, and `OBJECT_STORAGE_SECRET_ACCESS_KEY`.
+
+---
+
+## LLM Provider & Model Architecture
+
+For the complete architectural specification, see [`docs/architecture/llm-provider-architecture.md`](docs/architecture/llm-provider-architecture.md).
+
+### 1. Model & Provider Matrix
+
+| Provider Identifier | Supported Status | Default / Configured Model | Pipeline Role | Executed in Production? |
+|---|---|---|---|:---:|
+| `huggingface` | **Active Production** | `Qwen/Qwen2.5-72B-Instruct` | **Primary Extraction & Logic Audit** | **Yes** (when `LLM_PROVIDER=huggingface`) |
+| `huggingface` | **Active Fallback** | `huggingface/Qwen/Qwen2.5-7B-Instruct` | **Low-Confidence Fallback** (confidence < 0.85) | **Yes** (conditional on confidence gate) |
+| `offline` | **Active Default** | Deterministic Regex Engine | **Testing, CI & Air-Gapped Demos** | **Yes** (default out-of-the-box mode) |
+| `openai` | **Supported Abstraction** | `gpt-4o` | Alternative provider adapter | **No** (dormant in standard pipeline) |
+| `anthropic` | **Supported Abstraction** | `claude-3-5-sonnet-20241022` | Alternative provider adapter | **No** (dormant in standard pipeline) |
+| `sebi-compliance-llm` | **Roadmap Scaffolding** | `sebi-compliance-llm` | Low-cost tier scaffolding (`llm_finetune/`) | **No** (production training is on roadmap) |
+
+### 2. Single-Provider Open-Weight Architecture Rationale
+- **Data Sovereignty & Deployment Flexibility**: Utilizing open-weight models allows deployment either via Hugging Face Inference API (cloud staging) or containerized on-premises VPC hosting (vLLM / TGI) to comply with data localization mandates without code changes.
+- **Consistent Formatting & Tokenizer Geometry**: Keeping primary (72B) and fallback (7B) in the same model family minimizes schema drift, markdown wrapping anomalies, and prompt template discrepancies.
+- **Dual-Model Cascade**: Ambiguous or low-confidence extractions (<0.85) escalate to the 7B checkpoint in `app.agents.graph` to provide diverse extraction hypotheses prior to Logic Auditor verification.
+- **No Proprietary Cloud Model Execution**: No live calls to Claude, GPT-4, or Llama models are executed in the production pipeline; provider abstractions exist strictly for architectural extensibility.
 
 ---
 

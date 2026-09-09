@@ -20,7 +20,7 @@ C4Context
     System_Ext(sebiSources, "SEBI Circular Sources", "RSS feeds and HTML notice pages publishing new/amended circulars")
     System_Ext(brokerOms, "Broker OMS / RMS", "Order Management / Risk Management System submitting live orders via FIX")
     System_Ext(scores, "SEBI SCORES Portal", "Regulator grievance-redress REST API")
-    System_Ext(hfInference, "Hugging Face Inference API", "Qwen2.5-72B-Instruct — dual-agent clause extraction and audit")
+    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted", "Qwen2.5-72B-Instruct (Primary) & Qwen2.5-7B-Instruct (Fallback) — dual-agent clause extraction and audit")
 
     System(regengine, "RegEngine AI", "Extracts, compiles, executes, and audits SEBI compliance rules against live broker transactions")
 
@@ -45,7 +45,7 @@ C4Container
     System_Ext(sebiSources, "SEBI Circular Sources")
     System_Ext(brokerOms, "Broker OMS / RMS")
     System_Ext(scores, "SEBI SCORES Portal")
-    System_Ext(hfInference, "Hugging Face Inference API")
+    System_Ext(hfInference, "Hugging Face Inference / Self-Hosted")
 
     Container_Boundary(regengine, "RegEngine AI") {
         Container(frontend, "Compliance IDE", "React + Tailwind", "Dashboards: HITL queue, incident feed, grievance timelines, policy diffs")

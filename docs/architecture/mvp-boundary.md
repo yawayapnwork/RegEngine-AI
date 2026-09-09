@@ -59,7 +59,7 @@ The Core MVP is defined as the deterministic 8-stage processing pipeline:
 | Subsystem Name | Directory Path | Role & Classification | Imported by Core MVP? | Startup / Runtime Decoupling |
 |---|---|---|---|---|
 | **Document Ingestion & Storage** | `app/parsing/`, `app/storage/` | **Core MVP** | **Yes** | Uses local filesystem (`STORAGE_BACKEND=local`) or S3. |
-| **Extraction & Logic Audit** | `app/agents/` | **Core MVP** | **Yes** | Supports offline local models (`LLM_PROVIDER=offline`). |
+| **Extraction & Logic Audit** | `app/agents/` | **Core MVP** | **Yes** | Active production path uses open-weight Qwen2.5-72B-Instruct primary via Hugging Face Inference or self-hosted endpoint (with Qwen2.5-7B-Instruct fallback on low confidence) alongside deterministic offline execution (`LLM_PROVIDER=offline`). Provider abstractions exist for OpenAI and Anthropic but are not active in production. |
 | **Taxonomy & Canonical Facts** | `app/regulatory/` (SEBI) | **Core MVP** | **Yes** | In-process canonical schemas. |
 | **Compiler & HITL Gate** | `app/compiler/` | **Core MVP** | **Yes** | In-process Rego and AST compiler. |
 | **HITL Review Management** | `app/api/hitl_review_routes.py` | **Core MVP** | **Yes** | PostgreSQL review records. |
