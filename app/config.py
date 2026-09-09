@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     embedding_model_name: str = "BAAI/bge-large-en-v1.5"
     embedding_dim: int = 1024
     embedding_batch_size: int = 16
+    mock_embeddings_enabled: bool = False
 
     # --- Qdrant ---
     qdrant_url: str = "http://localhost:6333"
@@ -57,6 +58,13 @@ class Settings(BaseSettings):
     qdrant_collection: str = "sebi_master_circulars"
     qdrant_upsert_batch_size: int = 64
     qdrant_timeout_seconds: float = 30.0
+
+    # --- Compliance Case-Law Memory Agent (app.case_law) ---
+    case_law_memory_enabled: bool = True
+    case_law_qdrant_collection: str = "case_law_precedents"
+    case_law_similarity_threshold: float = 0.70
+    case_law_top_k: int = 3
+    case_law_max_age_days: int | None = 3650
 
     # --- Object storage (app.storage.object_store) ---
     # "local" (default for POC & dev) saves to local filesystem in storage_local_dir;

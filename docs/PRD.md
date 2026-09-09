@@ -213,7 +213,7 @@ Every subsystem across the RegEngine AI codebase is cataloged below with its exp
 | **Regulatory Version Diffing** | `app/diffing/` | **`IN PROGRESS`** | **No** | `differ.py`, `app/api/diffing_routes.py` | **No** |
 | **Multi-Regulator Extensions** | `policies/rbi/`, `irdai/`, `pfrda/` | **`IN PROGRESS`** | **No** | Example Rego bundles; core restricted to SEBI | **No** |
 | **Fine-Tuned SEBI Domain Model** | `sebi-compliance-llm` | **`ROADMAP`** | **No** | Conceptual; referenced in model enum; unweighted | **No** |
-| **Compliance Case-Law Memory Agent** | N/A | **`ROADMAP`** | **No** | Proposed; agents run with `memory=False` to prevent bleed | **No** |
+| **Compliance Case-Law Memory Agent** | `app/case_law/` | **`CURRENT`** | **No** | Advisory memory agent (`case_law_memory_enabled=True`); tenant-isolated Qdrant indexing of approved HITL reviews only; non-blocking advisory context | **No** |
 | **Compliance-as-Collateral Protocol** | N/A | **`ROADMAP`** | **No** | Proposed cryptographic collateral verification protocol | **No** |
 | **Real-Data Rule-Impact Preview** | N/A | **`ROADMAP`** | **No** | Proposed live pre-deployment transaction preview | **No** |
 | **M&A Compliance Due-Diligence Agent**| N/A | **`ROADMAP`** | **No** | Proposed autonomous historical compliance auditor | **No** |
@@ -283,10 +283,19 @@ flowchart TD
     end
 ```
 
-### 8.1 Compliance Case-Law Memory Agent [`ROADMAP`]
-- **Proposed Capability**: An autonomous memory agent maintaining an indexed vector memory of Securities Appellate Tribunal (SAT) orders, SEBI adjudication orders, and informal guidances.
-- **Architectural Intent**: When a new circular contains qualitative directives (e.g., *"fit and proper person"*, *"adequate internal controls"*), the agent is designed to retrieve relevant historical case law to assist the compliance officer during HITL review.
-- **Current Status**: **ROADMAP** (Proposed / Not Implemented). In the live pipeline, agents execute with `memory=False` to strictly prevent cross-clause context bleeding.
+### 8.1 Compliance Case-Law Memory Agent [`CURRENT` / Advisory Workflow]
+- **Implemented Capability**: `app/case_law/` implements the Compliance Case-Law Memory Agent, providing semantic vector indexing and tenant-isolated retrieval of approved/resolved HITL compliance decisions over Qdrant (`case_law_precedents` collection).
+- **Workflow**:
+  1. Precedents are indexed exclusively from **APPROVED / RESOLVED** HITL decisions (`app/case_law/indexer.py`); pending, rejected, and unverified outputs are strictly rejected.
+  2. Provenance is preserved bit-for-bit: circular reference, source document SHA-256, clause hash, approving officer ID, timestamp, and policy SHA-256.
+  3. Strict tenant isolation is enforced at query time: tenant A can never retrieve tenant B's private precedents.
+  4. When an ambiguous clause or qualitative directive is flagged for HITL, the agent (`app/case_law/agent.py`) retrieves semantically similar approved precedents to assist the human reviewer.
+- **Trust Boundary & Safety Invariants**:
+  1. *Current Regulatory Text Supremacy*: Current circular text ALWAYS takes absolute precedence over historical precedent.
+  2. *No Automatic Policy Activation*: Precedents are non-binding historical guidance; they can never activate a policy or bypass human approval.
+  3. *Conflict Escalation*: If a precedent conflicts with current regulatory text, the agent explicitly flags the conflict for mandatory HITL review rather than choosing automatically.
+  4. *No Invention*: Historical precedent is never used to invent thresholds, deadlines, or obligations.
+  5. *Untrusted Data Boundary*: Precedent text is treated as untrusted historical data and cannot execute instructions.
 
 ### 8.2 Compliance-as-Collateral / Zero-Knowledge Proofs (ZKP) [`IN PROGRESS` / `ROADMAP`]
 - **Existing Implementation**: `app/zkp/` contains a pure-Python BN254 Groth16 proof verifier (`groth16_verifier.py`) and Circom circuits for margin compliance. **Status: IN PROGRESS** (Gated behind `settings.zkp_enabled=False`; not in live pipeline).

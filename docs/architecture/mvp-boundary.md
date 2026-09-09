@@ -90,7 +90,7 @@ The Core MVP is defined as the deterministic processing pipeline:
 | **Operational Analytics** | `app/analytics/`, `app/llm_ops/` | **`IN PROGRESS`** | **No** | Telemetry and cost tracking routers. |
 | **LLM Fine-Tuning Scaffolding** | `llm_finetune/` | **`IN PROGRESS`** | **No** | Cost-tiered QLoRA pipeline scaffolding; synthetic fixtures provide smoke-test scaffolding only. |
 | **Fine-Tuned SEBI Domain Model** | `sebi-compliance-llm` | **`ROADMAP`** | **No** | Production fine-tuning on a real annotated SEBI corpus is a roadmap item. |
-| **Compliance Case-Law Memory Agent** | N/A | **`ROADMAP`** | **No** | Proposed; agents run with `memory=False` to prevent context bleed. |
+| **Compliance Case-Law Memory Agent** | `app/case_law/` | **`CURRENT`** | **No** | Advisory memory agent (`case_law_memory_enabled=True`); tenant-isolated precedent indexing of approved HITL reviews. |
 | **Compliance-as-Collateral Protocol** | N/A | **`ROADMAP`** | **No** | Proposed cryptographic margin proof protocol for clearing corporations. |
 | **Real-Data Rule-Impact Preview** | N/A | **`ROADMAP`** | **No** | Proposed interactive pre-deployment transaction simulator. |
 | **M&A Compliance Due-Diligence Agent**| N/A | **`ROADMAP`** | **No** | Proposed autonomous multi-year audit analysis agent. |

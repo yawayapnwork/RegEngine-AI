@@ -311,7 +311,7 @@ sequenceDiagram
 | **Regulatory Filing Adapter** | `app/regulatory_filing/` | **`IN PROGRESS`** | **No** (flagged: `regulatory_filing_enabled=False`) |
 | **Multilingual OCR & Translation** | `app/localization/`, `translation_parity/` | **`IN PROGRESS`** | **No** (flagged: `localization_enabled=False`) |
 | **Regulatory Version Diffing** | `app/diffing/` | **`IN PROGRESS`** | **No** (standalone router) |
-| **Compliance Case-Law Memory Agent** | N/A | **`ROADMAP`** | **No** (proposed; `memory=False` in live pipeline) |
+| **Compliance Case-Law Memory Agent** | `app/case_law/` | **`CURRENT`** | **No** (advisory memory agent; `case_law_memory_enabled=True`; indexes approved HITL reviews) |
 | **Compliance-as-Collateral Protocol** | N/A | **`ROADMAP`** | **No** (proposed) |
 | **Real-Data Rule-Impact Preview** | N/A | **`ROADMAP`** | **No** (proposed) |
 | **M&A Compliance Due-Diligence Agent**| N/A | **`ROADMAP`** | **No** (proposed) |

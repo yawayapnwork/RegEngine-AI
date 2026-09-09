@@ -27,7 +27,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CompiledRule, HITLReview
+from app.case_law.models import CaseLawAnalysisResult
+from app.db.models import Clause, CompiledRule, HITLReview
 from app.db.session import get_db_session
 from app.execution.dependencies import get_policy_publisher
 from app.execution.policy_publisher import PolicyPublisher
@@ -158,4 +159,37 @@ async def request_revision_review(
         review_id=review_id,
         principal_subject=principal.subject,
         notes=resolution.notes,
+    )
+
+
+@router.get("/{review_id}/precedents", response_model=CaseLawAnalysisResult)
+async def get_review_precedents(
+    review_id: str,
+    top_k: int = 3,
+    min_similarity: float = 0.70,
+    session: AsyncSession = Depends(get_db_session),
+    _principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER, Role.SYSTEM_ADMIN)),
+) -> CaseLawAnalysisResult:
+    """Retrieves semantically similar approved case-law precedents to assist the officer
+    reviewing this HITL review case.
+
+    SAFETY GUARANTEE: Precedents are strictly advisory and cannot override current regulatory text.
+    """
+    review = await _get_review_or_404(session, review_id)
+    clause = review.clause
+    if clause is None and review.clause_id:
+        clause = await session.get(Clause, review.clause_id)
+
+    clause_text = (clause.text if clause else None) or review.source_excerpt or review.description
+    clause_num = clause.clause_number if clause else None
+
+    from app.case_law import get_case_law_agent
+
+    agent = get_case_law_agent()
+    return await agent.analyze_clause(
+        clause_text=clause_text,
+        clause_number=clause_num,
+        tenant_id=review.tenant_id,
+        top_k=top_k,
+        min_similarity=min_similarity,
     )

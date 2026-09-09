@@ -102,6 +102,35 @@ TRANSACTION_EVALUATION_TOTAL = Counter(
     registry=REGISTRY,
 )
 
+# --- Compliance Case-Law Memory Metrics (app.case_law) ---
+CASE_LAW_RETRIEVAL_TOTAL = Counter(
+    "case_law_retrieval_total",
+    "Count of case-law precedent search operations.",
+    labelnames=("outcome", "tenant_id"),
+    registry=REGISTRY,
+)
+
+CASE_LAW_RETRIEVAL_LATENCY = Histogram(
+    "case_law_retrieval_duration_seconds",
+    "Latency of case-law precedent vector retrieval.",
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5),
+    registry=REGISTRY,
+)
+
+CASE_LAW_HITL_ESCALATION_TOTAL = Counter(
+    "case_law_hitl_escalation_total",
+    "Count of cases where case-law analysis escalated/flagged a conflict for HITL review.",
+    labelnames=("reason",),
+    registry=REGISTRY,
+)
+
+CASE_LAW_INDEXED_TOTAL = Counter(
+    "case_law_indexed_total",
+    "Count of approved HITL decisions indexed into case-law memory.",
+    labelnames=("status",),
+    registry=REGISTRY,
+)
+
 # --- LLM cost-optimization metrics (app.llm_ops) ---
 # tenant_id is deliberately NOT a label here (unbounded-ish cardinality
 # across every SEBI-registered intermediary) -- per-tenant cost breakdown

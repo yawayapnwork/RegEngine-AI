@@ -90,6 +90,56 @@ To extend the trust boundary outward and achieve end-to-end legal authenticity i
 
 ---
 
+## Compliance Case-Law Memory Agent: Trust Boundary & Invariants
+
+The **Compliance Case-Law Memory Agent** (`app/case_law/`) provides semantic memory over historical, human-resolved regulatory interpretations. Because historical precedent can become stale, biased, or superseded by new statutory amendments, strict architectural invariants govern its trust boundary:
+
+```
++-----------------------------------------------------------------------------------+
+| HISTORICAL MEMORY BOUNDARY (Advisory Only)                                        |
+|                                                                                   |
+|  [ Approved HITL Decisions ]                                                      |
+|         |                                                                         |
+|         v (Strict Gate: status in [APPROVED, RESOLVED] only)                      |
+|  [ Secret Scrubbing: Bearer tokens, API keys, passwords redacted ]                |
+|         |                                                                         |
+|         v (Provenance Tagging: doc_sha256, clause_sha256, policy_sha256)          |
+|  [ Qdrant Vectorstore: case_law_precedents (Strict Tenant Isolation) ]            |
+|         |                                                                         |
+|         v (Semantic Search: similarity_score >= threshold, tenant_id match)       |
+|  [ CaseLawMemoryAgent: Tri-Part Context Assembly ]                                |
+|    1. Current Regulatory Source Text   <--- AUTHORITATIVE (Supremacy)             |
+|    2. Retrieved Historical Precedents  <--- ADVISORY / UNTRUSTED HISTORICAL DATA   |
+|    3. Model Interpretation & Guidance  <--- NON-BINDING SYNTHESIS                 |
+|         |                                                                         |
+|         +---> Threshold / Condition Conflict Detected?                            |
+|                 |                                                                 |
+|                 +--- YES ---> Flag Conflict & Escalate to HITL (No Auto-Override) |
+|                 +--- NO  ---> Present Advisory Guidance for Human Officer         |
++-----------------------------------------------------------------------------------+
+```
+
+### Invariants & Non-Negotiable Guarantees
+
+1. **Current Regulatory Supremacy**:
+   - The newly gazetted regulatory text and canonical facts **always override** historical precedent.
+   - Precedents cannot alter, loosen, or override current statutory obligations, numeric thresholds, or reporting deadlines.
+2. **Strict Indexing Gate (Zero Unverified Bleed)**:
+   - Only reviews explicitly stamped `APPROVED` or `RESOLVED` by a verified compliance officer can enter vector memory.
+   - Pending reviews, rejected decisions, unverified LLM drafts, and unreviewed pipeline outputs are rejected with hard runtime errors.
+3. **Secret & Credential Scrubbing**:
+   - Clause text and reviewer notes undergo regex pattern scrubbing for API keys, bearer tokens, passwords, and private keys prior to vector embedding.
+4. **Immutable Multi-Dimensional Provenance**:
+   - Each precedent record in Qdrant retains full cryptographic lineage: `precedent_id`, `circular_id`, `source_document_sha256`, `clause_sha256`, `policy_version`, `policy_sha256`, `reviewer_id`, `review_notes`, and `approval_timestamp`.
+5. **Strict Tenant & Entity Isolation**:
+   - Queries and upserts enforce mandatory `tenant_id` filters in Qdrant payload queries. Precedent from Tenant A is invisible and inaccessible to Tenant B.
+6. **Untrusted Historical Input**:
+   - Retrieved precedent text is treated as untrusted historical data. It is never parsed as executable code, cannot activate policies, and cannot bypass the HITL gate.
+7. **Deterministic Conflict Escalation**:
+   - If retrieved historical precedent recommends an interpretation or threshold that contradicts current circular text, the agent explicitly flags the discrepancy and escalates to HITL review. Automatic reconciliation is prohibited.
+
+---
+
 ## Summary
 
 RegEngine AI's provenance model guarantees that **within the system's operational boundary, no artifact or decision can be secretly modified, backdated, or swapped**. By understanding this trust boundary, compliance and risk teams can confidently verify internal execution integrity while applying appropriate PKI and hardware authentication controls at the boundary.

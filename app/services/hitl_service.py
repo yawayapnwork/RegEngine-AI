@@ -291,6 +291,19 @@ class HITLReviewService:
                     compiled_rule.rule_id,
                 )
 
+        # Index approved review as historical case-law precedent if memory subsystem is enabled
+        settings = get_settings()
+        if getattr(settings, "case_law_memory_enabled", True):
+            try:
+                from app.case_law.indexer import index_approved_hitl_review
+                await index_approved_hitl_review(session, review, settings=settings)
+            except Exception as e:
+                logger.warning(
+                    "Approval of review '%s' succeeded, but indexing into case-law memory failed: %s",
+                    review_id,
+                    e,
+                )
+
         return review, rule_activated, compiled_rule
 
     @classmethod
