@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: float = 30.0
 
     # --- Compliance Case-Law Memory Agent (app.case_law) ---
-    case_law_memory_enabled: bool = True
+    case_law_memory_enabled: bool = False
     case_law_qdrant_collection: str = "case_law_precedents"
     case_law_similarity_threshold: float = 0.70
     case_law_top_k: int = 3
@@ -205,13 +205,14 @@ class Settings(BaseSettings):
     backtest_concurrency: int = 32  # bounded replay concurrency; see app.backtest.replay_engine
     backtest_key_prefix: str = "regengine:backtest"
     celery_backtest_queue: str = "regengine_backtest"
+    rule_preview_enabled: bool = False
     rule_preview_max_transactions: int = 10000
     rule_preview_timeout_seconds: float = 30.0
     rule_preview_default_lookback_days: int = 30
     rule_preview_redis_ttl_seconds: int = 86400
 
     # --- M&A Compliance Due-Diligence Agent (app.mna_due_diligence) ---
-    mna_due_diligence_enabled: bool = True
+    mna_due_diligence_enabled: bool = False
     mna_job_timeout_seconds: float = 300.0
     mna_key_prefix: str = "regengine:mna"
     celery_mna_queue: str = "regengine_mna"

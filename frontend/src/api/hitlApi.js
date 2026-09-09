@@ -86,3 +86,19 @@ export async function rejectHitlReview(reviewId, { notes = "", accessToken, base
   }
   return body;
 }
+
+export async function getHitlReviewEvidence(reviewId, { accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
+  const response = await fetch(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/evidence`, window.location.origin), {
+    method: "GET",
+    headers: authHeaders(accessToken),
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new HitlApiError(
+      body?.detail || `Failed to fetch review evidence with status ${response.status}.`,
+      response.status
+    );
+  }
+  return body;
+}

@@ -294,3 +294,34 @@ async def get_review_impact_preview(
         )
     return report
 
+
+# --- Unified Review Evidence Endpoint ---
+
+@router.get("/{review_id}/evidence")
+async def get_review_evidence(
+    review_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    principal: Principal = Depends(require_roles(Role.COMPLIANCE_OFFICER, Role.SYSTEM_ADMIN)),
+):
+    """Assembles and returns the unified evidence package for a HITL review case.
+
+    SAFETY INVARIANTS:
+    1. Human-in-the-Loop compliance officer remains the SOLE approval authority.
+    2. Every evidence artifact is strictly typed and labeled (source evidence,
+       deterministic evidence, AI-generated analysis, historical precedent,
+       simulation, cryptographic proof).
+    3. AI analysis and simulations are marked advisory with mandatory non-delegation disclaimers.
+    4. Strict multi-tenant isolation is enforced on every query.
+    5. Candidate rules are NEVER mutated or activated.
+    """
+    from app.config import get_settings
+    from app.hitl_evidence.collector import HITLEvidenceCollector
+
+    settings = get_settings()
+    return await HITLEvidenceCollector.collect_review_evidence(
+        session=session,
+        review_id=review_id,
+        principal=principal,
+        settings=settings,
+    )
+
