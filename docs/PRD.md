@@ -9,7 +9,7 @@
 ## 1. Product Overview & Problem Statement
 
 ### 1.1 Executive Summary
-RegEngine AI is a deterministic regulatory intelligence and policy enforcement platform designed specifically for financial market intermediaries governed by the Securities and Exchange Board of India (SEBI). The platform ingests complex regulatory circulars (PDFs), extracts machine-readable obligations and quantitative thresholds under bounded concurrency, compiles them into executable Open Policy Agent (OPA) Rego policies, evaluates live broker transactions in sub-millisecond timeframes, and records every evaluation into a tamper-evident, append-only PostgreSQL audit ledger.
+RegEngine AI is a deterministic regulatory intelligence and policy enforcement platform designed specifically for financial market intermediaries governed by the Securities and Exchange Board of India (SEBI). The platform ingests complex regulatory circulars (PDFs), extracts machine-readable obligations and quantitative thresholds under bounded concurrency, compiles them into executable Open Policy Agent (OPA) Rego policies, evaluates live broker transactions in low single-digit milliseconds via synchronous REST (with sub-millisecond in-process L1 policy cache lookups and native C++ kernel evaluation), and records every evaluation into a tamper-evident, append-only PostgreSQL audit ledger.
 
 ### 1.2 The Core Problem
 Financial intermediaries (stockbrokers, asset management companies, depositories, clearing corporations) face substantial operational risk due to the latency and subjectivity of manual compliance interpretation:
@@ -53,13 +53,13 @@ flowchart LR
 ```
 
 ### Stage 1: Layout-Aware Ingestion & Dual Cryptographic Hashing [`CURRENT`]
-- **Modules**: `app/parsing/pdf_extractor.py`, `app/parsing/hasher.py`, `app/storage/object_store.py`
+- **Modules**: `app/parsing/extractor.py`, `app/parsing/hashing.py`, `app/storage/object_store.py`
 - **Functionality**:
   - Ingests circular PDFs via local filesystem (`STORAGE_BACKEND=local`) or S3-compatible object storage (`STORAGE_BACKEND=s3`).
   - Computes two distinct SHA-256 digests immediately upon upload:
     1. `source_document_sha256`: Computed over raw uploaded PDF bytes prior to any processing.
     2. `extracted_text_sha256`: Computed over normalized extracted text.
-  - Extracts layout-aware clauses using Apache Tika and structured parsing, chunking text into clause units.
+  - Extracts layout-aware clauses using Unstructured with Apache Tika and OCR fallbacks, chunking text into clause units.
   - State Transition: `UPLOADED` &rarr; `INGESTED`.
 - **Verification**: Verified by `tests/test_document_hashing.py` and `tests/test_parsing.py`.
 
@@ -74,14 +74,14 @@ flowchart LR
 - **Verification**: Verified by `tests/test_agent_providers.py` and `tests/test_e2e_pipeline.py`.
 
 ### Stage 3: Deterministic Policy Compilation & HITL Flagging [`CURRENT`]
-- **Modules**: `app/compiler/rego_compiler.py`, `app/compiler/jsonlogic_compiler.py`, `app/compiler/hitl_flagger.py`
+- **Modules**: `app/compiler/rego_compiler.py`, `app/compiler/jsonlogic_compiler.py`, `app/compiler/hitl.py`
 - **Functionality**:
   - Compiles audited compliance rules into production **OPA Rego** packages (`data.<regulator>.<domain>.circulars.<slug>`).
   - Generates structural **JSON-Logic** Abstract Syntax Trees (ASTs) for non-OPA consumers.
   - Inspects extracted rules for qualitative obligations, low auditor confidence, or conflicting parameters; automatically generates `HITLReview` records in PostgreSQL.
   - Rules with pending reviews remain strictly blocked in `AWAITING_HITL` state; active rule count remains 0.
   - State Transition: `EXTRACTED` &rarr; `COMPILING` &rarr; `AWAITING_HITL`.
-- **Verification**: Verified by `tests/test_compiler.py`, `tests/test_rego_compiler.py`, and `tests/test_hitl_service.py`.
+- **Verification**: Verified by `tests/test_compiler.py` and `tests/test_hitl_approval_gate.py`.
 
 ### Stage 4: Compliance Officer Approval & Zero-Downtime Hot-Reload [`CURRENT`]
 - **Modules**: `app/services/hitl_service.py`, `app/execution/policy_publisher.py`, `app/execution/policy_hot_reload.py`
@@ -92,7 +92,7 @@ flowchart LR
   - Publishes policies to the OPA server over HTTP and broadcasts a cache invalidation signal via Redis pub/sub (`policy_events`).
   - Worker pods invalidate local in-process L1 policy caches without container restart.
   - State Transition: `AWAITING_HITL` &rarr; `APPROVED` &rarr; `DEPLOYED`.
-- **Verification**: Verified by `tests/test_policy_hot_reload.py` and `tests/test_api.py`.
+- **Verification**: Verified by `tests/test_policy_cache_and_hot_reload.py` and `tests/test_api_error_handling.py`.
 
 ### Stage 5: High-Throughput Live Transaction Evaluation [`CURRENT`]
 - **Modules**: `app/execution/evaluator.py`, `app/execution/opa_engine.py`, `app/api/execution_routes.py`
@@ -101,10 +101,10 @@ flowchart LR
   - Resolves active policies for the submitting entity type (`Stockbroker`, `AMC`, etc.) via two-tier cache (in-process L1 + Redis L2).
   - Evaluates broker transaction payloads against active OPA Rego policies, returning deterministic `allow`, `deny`, or `flagged` outcomes.
   - In the event of a `deny` outcome, cites the exact SEBI clause reference and violation detail.
-- **Verification**: Verified by `tests/test_evaluator.py` and `tests/test_execution_engine.py`.
+- **Verification**: Verified by `tests/test_opa_execution.py`.
 
 ### Stage 6: Cryptographic Append-Only Audit Ledger [`CURRENT`]
-- **Modules**: `app/ledger/hash_chain.py`, `app/ledger/ledger_service.py`, `app/ledger/verify_cli.py`, `sql/ledger_schema.sql`
+- **Modules**: `app/ledger/hash_chain.py`, `app/ledger/service.py`, `app/ledger/verifier.py`, `app/ledger/verify_cli.py`, `sql/ledger_schema.sql`
 - **Functionality**:
   - Implemented natively in PostgreSQL using append-only, SHA-256 hash-chained journal blocks following a QLDB-journal-inspired design per [ADR-0003](docs/adr/0003-sha256-hash-chain-audit-log.md) (requires zero AWS QLDB dependencies).
   - Every transaction evaluation appends an immutable record binding:
@@ -114,7 +114,7 @@ flowchart LR
     - `previous_hash`, `payload_digest`, and block `current_hash`
   - Database-level PostgreSQL triggers strictly prevent `UPDATE` and `DELETE` operations.
   - Includes an on-demand audit verification CLI (`python -m app.ledger.verify_cli`) that recomputes the hash chain to detect tampering.
-- **Verification**: Verified by `tests/test_ledger.py`, `tests/test_ledger_immutability.py`, and `tests/test_ledger_verify.py`.
+- **Verification**: Verified by `tests/test_ledger.py` and `tests/test_vault_integrity.py`.
 
 ### Stage 7: Compliance IDE & Verification Portal [`CURRENT`]
 - **Modules**: `frontend/` (React + Vite + Tailwind CSS)
@@ -187,14 +187,14 @@ Every subsystem across the RegEngine AI codebase is cataloged below with its exp
 
 | Subsystem / Capability | Directory / File Path | Status | Live Pipeline? | Evidence in Code | E2E Verified? |
 |---|---|:---:|:---:|---|:---:|
-| **Document Ingestion & Dual Hashing** | `app/parsing/`, `app/storage/` | **`CURRENT`** | **Yes** | `pdf_extractor.py`, `hasher.py`, `object_store.py` | **Yes** |
-| **Sequential Dual-Agent Extraction** | `app/agents/crew.py`, `providers.py` | **`CURRENT`** | **Yes** | `run_dual_validation()`, `ProductionLLMProvider` | **Yes** |
-| **Taxonomy & Canonical Fact Binding** | `app/regulatory/` | **`CURRENT`** | **Yes** | `taxonomy.py`, `canonical_facts.py` | **Yes** |
+| **Document Ingestion & Dual Hashing** | `app/parsing/`, `app/storage/` | **`CURRENT`** | **Yes** | `extractor.py`, `hashing.py`, `object_store.py` | **Yes** |
+| **Sequential Dual-Agent Extraction** | `app/agents/crew.py`, `providers.py` | **`CURRENT`** | **Yes** | `run_dual_validation()`, `HuggingFaceProvider` / `OfflineLLMProvider` | **Yes** |
+| **Taxonomy & Canonical Fact Binding** | `app/regulatory/` | **`CURRENT`** | **Yes** | `taxonomy.py`, `facts.py` | **Yes** |
 | **Policy Compilation (Rego/AST)** | `app/compiler/` | **`CURRENT`** | **Yes** | `rego_compiler.py`, `jsonlogic_compiler.py` | **Yes** |
 | **HITL Review Gate & Step-Up MFA** | `app/services/hitl_service.py` | **`CURRENT`** | **Yes** | `hitl_service.py`, `app/api/hitl_review_routes.py` | **Yes** |
 | **Policy Registry & Hot-Reload** | `app/execution/policy_*` | **`CURRENT`** | **Yes** | `policy_publisher.py`, `policy_hot_reload.py` | **Yes** |
 | **Synchronous OPA Evaluation** | `app/execution/evaluator.py` | **`CURRENT`** | **Yes** | `evaluator.py`, `opa_engine.py` | **Yes** |
-| **Append-Only SHA-256 Audit Ledger** | `app/ledger/` | **`CURRENT`** | **Yes** | `hash_chain.py`, `ledger_service.py`, `sql/ledger_schema.sql` | **Yes** |
+| **Append-Only SHA-256 Audit Ledger** | `app/ledger/` | **`CURRENT`** | **Yes** | `hash_chain.py`, `service.py`, `verifier.py`, `sql/ledger_schema.sql` | **Yes** |
 | **Compliance IDE & Dashboard** | `frontend/` | **`CURRENT`** | **Yes** | React components wired to REST endpoints | **Yes** |
 | **Dynamic LangGraph Orchestration** | `app/agents/graph/` | **`IN PROGRESS`** | **No** | `graph.py`, `nodes.py`, `complexity_router.py` (flagged off) | **No** (stubs only) |
 | **Dual-Model Cascade (72B + 7B)** | `app/agents/graph/nodes.py` | **`IN PROGRESS`** | **No** | `fallback_extraction_node`, `agent_fallback_model` | **No** |
@@ -299,6 +299,7 @@ flowchart TD
 ### 8.4 Real-Data Rule-Impact Preview & Backtesting [`IN PROGRESS` / `ROADMAP`]
 - **Existing Implementation**: `app/backtest/replay_engine.py` provides an offline engine capable of replaying historical ledger events against candidate policies. **Status: IN PROGRESS** (Offline batch script; not integrated into live pipeline).
 - **Proposed Capability**: An interactive dashboard feature allowing compliance officers to simulate the immediate trading impact (rejection rate, margin shortfall) of a draft circular against live transaction streams prior to approval. **Status: ROADMAP** (Interactive preview proposed).
+- **Digital Twin Clarification**: "Digital Twin" market simulation is **NOT FOUND / UNSUPPORTED** anywhere in the repository; historical backtesting is strictly limited to deterministic offline transaction replays via `app/backtest/replay_engine.py`.
 
 ### 8.5 M&A Compliance Due-Diligence Agent [`ROADMAP`]
 - **Proposed Capability**: An autonomous compliance due-diligence agent that ingests multi-year trading records, historical circular versions, and entity filings of an acquisition target to produce an automated regulatory liability report.
