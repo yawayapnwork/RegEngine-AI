@@ -1,4 +1,4 @@
-const DEFAULT_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+import { API_BASE_URL as DEFAULT_BASE_URL, fetchWithTimeout, UPLOAD_TIMEOUT_MS } from "./config";
 
 export class CircularsApiError extends Error {
   constructor(message, status) {
@@ -20,11 +20,10 @@ export async function processCircularE2E(file, { accessToken, baseUrl = DEFAULT_
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(new URL(`${baseUrl}/v1/circulars/process-e2e`, window.location.origin), {
-    method: "POST",
-    headers: authHeaders(accessToken),
-    body: formData,
-  });
+  const response = await fetchWithTimeout(
+    new URL(`${baseUrl}/v1/circulars/process-e2e`, window.location.origin),
+    { method: "POST", headers: authHeaders(accessToken), body: formData, timeout: UPLOAD_TIMEOUT_MS },
+  );
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -37,7 +36,7 @@ export async function processCircularE2E(file, { accessToken, baseUrl = DEFAULT_
 }
 
 export async function getCircularStatus(circularId, { accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/circulars/${circularId}/status`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/circulars/${circularId}/status`, window.location.origin), {
     method: "GET",
     headers: authHeaders(accessToken),
   });
@@ -53,7 +52,7 @@ export async function getCircularStatus(circularId, { accessToken, baseUrl = DEF
 }
 
 export async function getCircularDetails(circularId, { accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/circulars/${circularId}/details`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/circulars/${circularId}/details`, window.location.origin), {
     method: "GET",
     headers: authHeaders(accessToken),
   });
@@ -69,7 +68,7 @@ export async function getCircularDetails(circularId, { accessToken, baseUrl = DE
 }
 
 export async function listCirculars({ accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/circulars`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/circulars`, window.location.origin), {
     method: "GET",
     headers: authHeaders(accessToken),
   });

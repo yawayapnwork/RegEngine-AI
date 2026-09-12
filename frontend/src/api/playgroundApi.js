@@ -21,7 +21,7 @@
 //   playground draft shows up in the existing HITL Compliance Review
 //   dashboard with no separate UI.
 
-const DEFAULT_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+import { API_BASE_URL as DEFAULT_BASE_URL, fetchWithTimeout } from "./config";
 
 export class PlaygroundApiError extends Error {
   constructor(message, status, body) {
@@ -33,7 +33,7 @@ export class PlaygroundApiError extends Error {
 }
 
 export async function submitForHitlReview(payload, { baseUrl = DEFAULT_BASE_URL, accessToken } = {}) {
-  const response = await fetch(`${baseUrl}/v1/hitl-reviews/playground-submissions`, {
+  const response = await fetchWithTimeout(`${baseUrl}/v1/hitl-reviews/playground-submissions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

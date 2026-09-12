@@ -3,7 +3,7 @@
 // credentials are posted directly to this backend, which verifies them
 // against app.security.local_user_store and returns a self-issued JWT.
 
-const DEFAULT_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+import { API_BASE_URL as DEFAULT_BASE_URL, fetchWithTimeout } from "./config";
 
 export class AuthApiError extends Error {
   constructor(message, status) {
@@ -14,7 +14,7 @@ export class AuthApiError extends Error {
 }
 
 export async function login(email, password, { baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/auth/login`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/auth/login`, window.location.origin), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -28,7 +28,7 @@ export async function login(email, password, { baseUrl = DEFAULT_BASE_URL } = {}
 }
 
 export async function signup(email, password, { baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/auth/signup`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/auth/signup`, window.location.origin), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),

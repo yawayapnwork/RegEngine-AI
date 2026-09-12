@@ -1,4 +1,4 @@
-const DEFAULT_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+import { API_BASE_URL as DEFAULT_BASE_URL, fetchWithTimeout } from "./config";
 
 export class ExecutionApiError extends Error {
   constructor(message, status) {
@@ -17,7 +17,7 @@ function authHeaders(accessToken) {
 }
 
 export async function evaluateTransaction(payload, { accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/execution/transactions/evaluate`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/execution/transactions/evaluate`, window.location.origin), {
     method: "POST",
     headers: authHeaders(accessToken),
     body: JSON.stringify(payload),
@@ -37,7 +37,7 @@ export async function getLedgerEntries({ limit = 50, accessToken, baseUrl = DEFA
   const url = new URL(`${baseUrl}/v1/execution/ledger/entries`, window.location.origin);
   url.searchParams.set("limit", limit);
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "GET",
     headers: authHeaders(accessToken),
   });
@@ -53,7 +53,7 @@ export async function getLedgerEntries({ limit = 50, accessToken, baseUrl = DEFA
 }
 
 export async function verifyLedgerChain({ accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/execution/ledger/verify`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/execution/ledger/verify`, window.location.origin), {
     method: "GET",
     headers: authHeaders(accessToken),
   });

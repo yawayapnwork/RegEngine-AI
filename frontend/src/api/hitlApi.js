@@ -1,4 +1,4 @@
-const DEFAULT_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+import { API_BASE_URL as DEFAULT_BASE_URL, fetchWithTimeout } from "./config";
 
 export class HitlApiError extends Error {
   constructor(message, status) {
@@ -22,7 +22,7 @@ export async function listHitlReviews({ statusFilter, accessToken, baseUrl = DEF
     url.searchParams.set("status_filter", statusFilter);
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "GET",
     headers: authHeaders(accessToken),
   });
@@ -38,7 +38,7 @@ export async function listHitlReviews({ statusFilter, accessToken, baseUrl = DEF
 }
 
 export async function getHitlReview(reviewId, { accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}`, window.location.origin), {
     method: "GET",
     headers: authHeaders(accessToken),
   });
@@ -54,7 +54,7 @@ export async function getHitlReview(reviewId, { accessToken, baseUrl = DEFAULT_B
 }
 
 export async function approveHitlReview(reviewId, { notes = "", accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/approve`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/approve`, window.location.origin), {
     method: "POST",
     headers: authHeaders(accessToken),
     body: JSON.stringify({ notes }),
@@ -71,7 +71,7 @@ export async function approveHitlReview(reviewId, { notes = "", accessToken, bas
 }
 
 export async function rejectHitlReview(reviewId, { notes = "", accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/reject`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/reject`, window.location.origin), {
     method: "POST",
     headers: authHeaders(accessToken),
     body: JSON.stringify({ notes }),
@@ -88,7 +88,7 @@ export async function rejectHitlReview(reviewId, { notes = "", accessToken, base
 }
 
 export async function getHitlReviewEvidence(reviewId, { accessToken, baseUrl = DEFAULT_BASE_URL } = {}) {
-  const response = await fetch(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/evidence`, window.location.origin), {
+  const response = await fetchWithTimeout(new URL(`${baseUrl}/v1/hitl-reviews/${reviewId}/evidence`, window.location.origin), {
     method: "GET",
     headers: authHeaders(accessToken),
   });

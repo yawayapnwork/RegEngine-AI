@@ -9,7 +9,7 @@
 // instance and Content-Type must be left for the browser to set (it adds
 // the multipart boundary itself -- setting it manually breaks parsing).
 
-const DEFAULT_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+import { API_BASE_URL as DEFAULT_BASE_URL, fetchWithTimeout, UPLOAD_TIMEOUT_MS } from "./config";
 
 export class IngestionApiError extends Error {
   constructor(message, status, body) {
@@ -30,7 +30,7 @@ export async function parseAndIndexCircular(
   const url = new URL(`${baseUrl}/v1/circulars/parse-and-index`, window.location.origin);
   url.searchParams.set("recreate_collection", String(recreateCollection));
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
       // No Content-Type here -- fetch sets `multipart/form-data;
@@ -38,6 +38,7 @@ export async function parseAndIndexCircular(
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: formData,
+    timeout: UPLOAD_TIMEOUT_MS,
   });
 
   const body = await response.json().catch(() => null);
@@ -58,12 +59,13 @@ export async function createUploadJob(file, { baseUrl = DEFAULT_BASE_URL, access
 
   const url = new URL(`${baseUrl}/v1/ingestion/uploads`, window.location.origin);
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: formData,
+    timeout: UPLOAD_TIMEOUT_MS,
   });
 
   const body = await response.json().catch(() => null);
@@ -76,7 +78,7 @@ export async function createUploadJob(file, { baseUrl = DEFAULT_BASE_URL, access
 export async function getUploadJobStatus(jobId, { baseUrl = DEFAULT_BASE_URL, accessToken } = {}) {
   const url = new URL(`${baseUrl}/v1/ingestion/uploads/${jobId}`, window.location.origin);
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
