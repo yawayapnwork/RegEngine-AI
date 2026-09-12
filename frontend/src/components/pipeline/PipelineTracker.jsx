@@ -55,8 +55,26 @@ function metricsFor(run) {
 }
 
 function RunRow({ run, onSelectRun }) {
+  const isFailed = run.status === "failed" || run.currentStage === "failed";
   const overallDone = run.currentStage === "done";
+  const isReview = run.status === "review_required" || run.currentStage === "verification";
   const m = metricsFor(run);
+
+  const badgeStatus = isFailed
+    ? "failed"
+    : overallDone
+    ? "complete"
+    : isReview
+    ? "hitl_review"
+    : "in_progress";
+
+  const badgeLabel = isFailed
+    ? "failed"
+    : overallDone
+    ? "complete"
+    : isReview
+    ? "review req"
+    : "running";
 
   return (
     <tr
@@ -95,8 +113,8 @@ function RunRow({ run, onSelectRun }) {
       </td>
       <td className="whitespace-nowrap px-4 py-3">
         <StatusBadge
-          status={overallDone ? "complete" : "in_progress"}
-          label={overallDone ? "complete" : "running"}
+          status={badgeStatus}
+          label={badgeLabel}
         />
       </td>
     </tr>

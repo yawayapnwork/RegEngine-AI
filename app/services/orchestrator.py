@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.pipeline import extract_and_audit_clause
@@ -519,6 +519,12 @@ class E2EOrchestrator:
             else ("ADVISORY" if compilation.hitl_flags else "NONE")
         )
 
+        policy_sha256 = (
+            hashlib.sha256(compilation.rego.rego_code.encode("utf-8")).hexdigest()
+            if (compilation.rego and compilation.rego.rego_code)
+            else None
+        )
+
         if existing_rule is not None:
             compiled_rule = existing_rule
             compiled_rule.rego_policy = compilation.rego.rego_code if compilation.rego else None
@@ -527,6 +533,7 @@ class E2EOrchestrator:
             compiled_rule.is_compiled = compilation.compiled
             compiled_rule.is_active = False  # NEVER auto-deploy after retry!
             compiled_rule.hitl_status = hitl_status
+            compiled_rule.policy_sha256 = policy_sha256
             await session.flush()
         else:
             compiled_rule = CompiledRule(
@@ -541,6 +548,7 @@ class E2EOrchestrator:
                 is_active=False,  # inactive until approved!
                 hitl_status=hitl_status,
                 compiler_version="1.0.0",
+                policy_sha256=policy_sha256,
             )
             session.add(compiled_rule)
             await session.flush()
@@ -681,6 +689,7 @@ class E2EOrchestrator:
         tenant_id: str = DEFAULT_TENANT_ID,
     ) -> ProcessE2EResult:
         """Executes extraction and compilation stages with transactional checkpoints and resumability."""
+        circular_id = circular.id
         try:
             # Check existing compiled rules for each clause
             clause_ids = [c.id for c in clauses]
@@ -856,17 +865,27 @@ class E2EOrchestrator:
             return await self._build_process_result(session, circular, clauses)
 
         except Exception as exc:
-            logger.exception("Pipeline execution failed for circular %s: %s", circular.id, exc)
+            logger.exception("Pipeline execution failed for circular %s: %s", circular_id, exc)
             try:
-                await self.transition_circular_state(
-                    session=session,
-                    circular=circular,
-                    to_state=ProcessingState.FAILED,
-                    error_message=str(exc),
-                )
-                await session.commit()
+                await session.rollback()
+                reloaded = await session.get(Circular, circular_id)
+                if reloaded is not None:
+                    await self.transition_circular_state(
+                        session=session,
+                        circular=reloaded,
+                        to_state=ProcessingState.FAILED,
+                        error_message=str(exc)[:4000],
+                    )
+                    await session.commit()
+                else:
+                    await session.execute(
+                        update(Circular)
+                        .where(Circular.id == circular_id)
+                        .values(processing_state=ProcessingState.FAILED.value, error_message=str(exc)[:4000])
+                    )
+                    await session.commit()
             except Exception as inner_exc:
-                logger.error("Failed to persist FAILED state for circular %s: %s", circular.id, inner_exc)
+                logger.error("Failed to persist FAILED state for circular %s: %s", circular_id, inner_exc)
             raise
 
     async def process_circular_pdf(
@@ -879,49 +898,68 @@ class E2EOrchestrator:
         source_retrieved_at: dt.datetime | None = None,
     ) -> ProcessE2EResult:
         """Executes the resumable, observable staged circular processing pipeline."""
-        # 1. Parse PDF
-        parsed = await self.parse_pdf(file_bytes, filename=filename)
-        if source_url and (source_url.startswith("http://") or source_url.startswith("https://") or source_url.startswith("ftp://")):
-            parsed.metadata.source_url = source_url
-        if source_retrieved_at:
-            parsed.metadata.source_retrieved_at = source_retrieved_at
+        circular_id = None
+        try:
+            # 1. Parse PDF
+            parsed = await self.parse_pdf(file_bytes, filename=filename)
+            if source_url and (source_url.startswith("http://") or source_url.startswith("https://") or source_url.startswith("ftp://")):
+                parsed.metadata.source_url = source_url
+            if source_retrieved_at:
+                parsed.metadata.source_retrieved_at = source_retrieved_at
 
-        # STAGE 1: INGESTION
-        circular = await self.persist_circular(
-            session=session,
-            parsed=parsed,
-            file_bytes=file_bytes,
-            filename=filename,
-            tenant_id=tenant_id,
-            source_url=source_url,
-            source_retrieved_at=source_retrieved_at,
-        )
+            # STAGE 1: INGESTION
+            circular = await self.persist_circular(
+                session=session,
+                parsed=parsed,
+                file_bytes=file_bytes,
+                filename=filename,
+                tenant_id=tenant_id,
+                source_url=source_url,
+                source_retrieved_at=source_retrieved_at,
+            )
+            circular_id = circular.id
 
-        clauses = await self.persist_clauses(session, circular, parsed.chunks, tenant_id)
+            clauses = await self.persist_clauses(session, circular, parsed.chunks, tenant_id)
 
-        # If circular is already deployed, return existing result without re-executing
-        if circular.processing_state == ProcessingState.DEPLOYED.value:
-            logger.info("Circular %s is already DEPLOYED. Returning existing status.", circular.id)
-            return await self._build_process_result(session, circular, clauses)
+            # If circular is already deployed, return existing result without re-executing
+            if circular.processing_state == ProcessingState.DEPLOYED.value:
+                logger.info("Circular %s is already DEPLOYED. Returning existing status.", circular_id)
+                return await self._build_process_result(session, circular, clauses)
 
-        # Transition to INGESTED if newly created or uninitialized
-        if circular.processing_state in (None, "", ProcessingState.INGESTED.value):
-            await self.transition_circular_state(
+            # Transition to INGESTED if newly created, uninitialized, or previously failed
+            if circular.processing_state in (None, "", ProcessingState.INGESTED.value, ProcessingState.FAILED.value):
+                await self.transition_circular_state(
+                    session=session,
+                    circular=circular,
+                    to_state=ProcessingState.INGESTED,
+                    details={"clause_count": len(clauses)},
+                )
+            await session.commit()  # Stage 1 committed checkpoint
+
+            # Execute extraction and compilation stages
+            return await self._execute_processing_stages(
                 session=session,
                 circular=circular,
-                to_state=ProcessingState.INGESTED,
-                details={"clause_count": len(clauses)},
+                clauses=clauses,
+                chunks=parsed.chunks,
+                tenant_id=tenant_id,
             )
-        await session.commit()  # Stage 1 committed checkpoint
-
-        # Execute extraction and compilation stages
-        return await self._execute_processing_stages(
-            session=session,
-            circular=circular,
-            clauses=clauses,
-            chunks=parsed.chunks,
-            tenant_id=tenant_id,
-        )
+        except Exception as exc:
+            if circular_id is not None:
+                try:
+                    await session.rollback()
+                    reloaded = await session.get(Circular, circular_id)
+                    if reloaded and reloaded.processing_state != ProcessingState.FAILED.value:
+                        await self.transition_circular_state(
+                            session=session,
+                            circular=reloaded,
+                            to_state=ProcessingState.FAILED,
+                            error_message=str(exc)[:4000],
+                        )
+                        await session.commit()
+                except Exception as inner_exc:
+                    logger.error("Failed to mark circular %s as FAILED: %s", circular_id, inner_exc)
+            raise
 
     async def resume_circular(
         self,

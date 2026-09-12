@@ -40,6 +40,10 @@ const VARIANTS = {
     icon: XCircle,
     classes: "border-red-200 bg-red-100 text-red-800",
   },
+  failed: {
+    icon: XCircle,
+    classes: "border-red-200 bg-red-100 text-red-800",
+  },
   rejected: {
     icon: XCircle,
     classes: "border-red-200 bg-red-100 text-red-800",

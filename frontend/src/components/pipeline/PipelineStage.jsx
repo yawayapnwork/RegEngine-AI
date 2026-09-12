@@ -3,6 +3,7 @@ import { PIPELINE_STAGES, STAGE_LABELS } from "../../constants/pipeline";
 function segmentClasses(status) {
   if (status === "complete") return "bg-green-500";
   if (status === "in_progress") return "bg-blue-500";
+  if (status === "failed") return "bg-red-500";
   return "bg-ink-700";
 }
 

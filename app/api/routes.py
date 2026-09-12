@@ -297,6 +297,8 @@ async def list_circulars(
             "raw_text_digest": c.raw_text_digest,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "status": c_status.get("status", "unknown"),
+            "processing_state": c.processing_state,
+            "error_message": c.error_message,
             "clause_count": c_status.get("clause_count", 0),
             "active_rules": c_status.get("active_rules", 0),
             "pending_reviews": c_status.get("pending_reviews", 0),
@@ -394,6 +396,8 @@ async def get_circular_details(
             "extracted_text_sha256": circular.raw_text_digest,
             "raw_text_digest": circular.raw_text_digest,
             "status": status_obj.status if status_obj else "unknown",
+            "processing_state": status_obj.processing_state if status_obj else circular.processing_state,
+            "error_message": circular.error_message,
         },
         "clauses": clauses_out,
     }

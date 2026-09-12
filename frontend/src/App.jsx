@@ -97,36 +97,89 @@ function mapLedgerEntries(entries) {
 
 function buildPipelineRuns(circularsList) {
   if (!circularsList) return [];
-  return circularsList.map((c) => ({
-    id: `run-${c.id}`,
-    filename: c.source_filename || `${c.circular_number || "Circular"}.pdf`,
-    sourceUrl: c.source_url || null,
-    circularNumber: c.circular_number,
-    startedAt: c.created_at || new Date().toISOString(),
-    currentStage: c.status === "deployed" ? "done" : c.status === "review_required" ? "verification" : "compilation",
-    stages: {
-      ingestion: {
-        status: "complete",
-        detail: `${c.clause_count} clauses parsed and stored`,
-        durationMs: 1200,
+  return circularsList.map((c) => {
+    const isFailed = c.status === "failed" || c.processing_state === "FAILED";
+    const isDeployed = c.status === "deployed" || c.processing_state === "DEPLOYED";
+    const isApproved = c.status === "approved" || c.processing_state === "APPROVED";
+    const isReview = c.status === "review_required" || c.processing_state === "AWAITING_HITL";
+    const isExtracting = c.processing_state === "EXTRACTING";
+    const isExtracted = c.processing_state === "EXTRACTED";
+    const isCompiling = c.processing_state === "COMPILING";
+
+    let currentStage = "compilation";
+    if (isFailed) {
+      currentStage = "failed";
+    } else if (isDeployed || isApproved) {
+      currentStage = "done";
+    } else if (isReview) {
+      currentStage = "verification";
+    } else if (isExtracting) {
+      currentStage = "extraction";
+    } else if (isExtracted || isCompiling) {
+      currentStage = "compilation";
+    }
+
+    const runStatus = isFailed
+      ? "failed"
+      : isDeployed
+      ? "deployed"
+      : isApproved
+      ? "approved"
+      : isReview
+      ? "review_required"
+      : "processing";
+
+    return {
+      id: `run-${c.id}`,
+      filename: c.source_filename || `${c.circular_number || "Circular"}.pdf`,
+      sourceUrl: c.source_url || null,
+      circularNumber: c.circular_number,
+      startedAt: c.created_at || new Date().toISOString(),
+      currentStage,
+      status: runStatus,
+      errorMessage: c.error_message || null,
+      stages: {
+        ingestion: {
+          status: isFailed && (c.clause_count || 0) === 0 ? "failed" : "complete",
+          detail: `${c.clause_count || 0} clauses parsed and stored`,
+          durationMs: 1200,
+        },
+        extraction: {
+          status: isFailed && (c.clause_count || 0) === 0
+            ? "failed"
+            : isExtracting
+            ? "in_progress"
+            : "complete",
+          detail: `${c.clause_count || 0} clauses extracted into structured rules`,
+          durationMs: 2400,
+        },
+        verification: {
+          status: isFailed
+            ? "failed"
+            : isReview
+            ? "complete"
+            : isExtracting
+            ? "pending"
+            : "complete",
+          detail: `${c.pending_reviews || 0} flagged for HITL, ${c.active_rules || 0} active`,
+          durationMs: 800,
+        },
+        compilation: {
+          status: isFailed
+            ? "failed"
+            : (c.active_rules > 0 || isDeployed || isApproved)
+            ? "complete"
+            : isReview
+            ? "pending"
+            : "in_progress",
+          detail: isFailed
+            ? (c.error_message || "Processing failed")
+            : `${c.active_rules || 0} Rego policies compiled & deployed`,
+          durationMs: 500,
+        },
       },
-      extraction: {
-        status: "complete",
-        detail: `${c.clause_count} clauses extracted into structured rules`,
-        durationMs: 2400,
-      },
-      verification: {
-        status: "complete",
-        detail: `${c.pending_reviews} flagged for HITL, ${c.active_rules} active`,
-        durationMs: 800,
-      },
-      compilation: {
-        status: c.active_rules > 0 ? "complete" : c.status === "review_required" ? "pending" : "in_progress",
-        detail: `${c.active_rules} Rego policies compiled & deployed`,
-        durationMs: 500,
-      },
-    },
-  }));
+    };
+  });
 }
 
 export default function App() {
@@ -221,6 +274,21 @@ export default function App() {
     }
   }, [isAuthenticated, session?.token]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const hasActiveRun = pipelineRuns.some(
+      (r) => r.status === "processing" || r.currentStage === "compilation" || r.currentStage === "extraction"
+    );
+    const pollIntervalMs = hasActiveRun || uploadState === "processing" ? 3000 : 15000;
+
+    const timer = setInterval(() => {
+      loadBackendData();
+    }, pollIntervalMs);
+
+    return () => clearInterval(timer);
+  }, [isAuthenticated, session?.token, pipelineRuns, uploadState]);
+
   const handleLogin = async (email, password, rememberMe = true) => {
     setAuthLoading(true);
     setAuthError(null);
@@ -281,10 +349,11 @@ export default function App() {
         setClauses(mappedClauses);
       }
 
-      await loadBackendData();
+      await loadBackendData(e2eResult.circular_id);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload processing failed.");
       setUploadState("error");
+      await loadBackendData();
     }
   };
 
