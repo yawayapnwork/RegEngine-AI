@@ -1,15 +1,16 @@
 // Shared API configuration for the frontend.
 
-// The deployed backend API. The Vercel frontend (regengine-ai.vercel.app)
-// only serves static files -- there is no /v1 backend on that origin -- so
-// a production build must target the real API. VITE_API_BASE_URL, when set
-// at build time (e.g. for local dev against a different backend, or a
-// per-preview override), always wins.
-const PROD_API_BASE_URL = "https://regengine-ai.onrender.com";
-
+// The deployed backend API. The Vercel deployment serves BOTH the API and
+// this frontend from the same origin: `vercel.json` (repo root) routes
+// /v1/... to the FastAPI app in app/main.py and serves the built frontend
+// beside it, so a production build calls same-origin /v1/... -- no
+// cross-origin request, no CORS. Local dev is likewise same-origin
+// (/v1/... proxied to the backend by vite.config.js). VITE_API_BASE_URL,
+// when set at build time (e.g. to point a preview at a different backend,
+// or a split frontend/API deployment), always wins.
 const envBaseUrl = (import.meta.env?.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
 
-export const API_BASE_URL = envBaseUrl || (import.meta.env.PROD ? PROD_API_BASE_URL : "");
+export const API_BASE_URL = envBaseUrl || "";
 
 // Default and upload request budgets. The E2E circular path (OCR/extraction
 // + indexing) is synchronous and can run for minutes on large PDFs, so it

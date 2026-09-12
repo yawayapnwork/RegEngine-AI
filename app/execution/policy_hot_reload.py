@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 import redis.asyncio as redis
 
@@ -39,6 +40,9 @@ from app.execution.opa_engine import OPAEngine, OPAEngineError
 from app.execution.policy_cache import PolicyCache
 from app.execution.policy_events import POLICY_EVENTS_CHANNEL, PolicyEvent, PolicyEventType
 from app.execution.policy_registry import PolicyRegistry
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -57,23 +61,28 @@ class PolicyHotReloadSubscriber:
         opa_engine: OPAEngine,
         policy_registry: PolicyRegistry,
         policy_cache: PolicyCache,
+        session_factory: "async_sessionmaker | None" = None,
     ) -> None:
         self._redis = redis_client
         self._opa = opa_engine
         self._registry = policy_registry
         self._cache = policy_cache
+        self._session_factory = session_factory
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
         self._stop.set()
 
     async def run(self) -> None:
-        """Runs until `stop()` is called (normal shutdown, from
-        app.main's lifespan). Any Redis connection failure is caught and
-        retried with backoff, forever -- a dropped connection must never
-        permanently silence hot-reloads for the rest of this process's
-        lifetime; that would quietly turn every subsequent policy change
-        into "stale until this worker is restarted"."""
+        """Reconciles the full active policy set into OPA once on boot, then
+        runs until `stop()` is called (normal shutdown, from app.main's
+        lifespan). Any Redis connection failure is caught and retried with
+        backoff, forever -- a dropped connection must never permanently
+        silence hot-reloads for the rest of this process's lifetime; that
+        would quietly turn every subsequent policy change into "stale until
+        this worker is restarted"."""
+        await self._reconcile_active_policies()
+
         attempt = 0
         while not self._stop.is_set():
             try:
@@ -93,6 +102,71 @@ class PolicyHotReloadSubscriber:
             await asyncio.wait_for(self._stop.wait(), timeout=delay)
         except asyncio.TimeoutError:
             pass  # normal case: delay elapsed without stop() being called
+
+    async def _reconcile_active_policies(self) -> None:
+        """Ensures every ACTIVE compiled policy is present in OPA when this
+        process boots. OPA keeps policies in memory only -- after an OPA
+        restart its policy set is empty, so without this pass the
+        PolicyRegistry (Redis) still lists rule_ids and every evaluation
+        POSTs to a policy that no longer exists on OPA, 404s, and the
+        evaluator fail-safe-FLAGs every transaction (silently routing
+        everything to HITL). Re-publishing is idempotent (OPA's Policy API
+        compiles and hot-swaps atomically) and redundant across replica
+        processes, matching the module docstring's redundancy rationale.
+
+        Where the registry has no entity scoping recorded (CompiledRule does
+        not persist target_entities) the rule is (re)registered under the
+        wildcard "*" (no entity guard); entities that already have a
+        scoped entry for that rule_id in the registry keep their narrower
+        scoping because `PolicyRegistry.policies_for` prefers the specific
+        entity key."""
+        if self._session_factory is None:
+            return
+
+        from sqlalchemy import select
+
+        from app.db.models import CompiledRule
+
+        try:
+            async with self._session_factory() as session:
+                rows = (
+                    await session.execute(
+                        select(CompiledRule).where(
+                            CompiledRule.is_active.is_(True),
+                            CompiledRule.is_compiled.is_(True),
+                        )
+                    )
+                ).scalars().all()
+        except Exception:  # noqa: BLE001 - reconcile failing at boot must not sink the process
+            logger.exception("OPA reconcile: failed to query active compiled policies; skipping boot reconcile.")
+            return
+
+        republished = 0
+        for row in rows:
+            if not row.rego_policy or not row.opa_package_name:
+                continue
+            compiled = CompiledRego(
+                rule_id=row.rule_id,
+                package=row.opa_package_name,
+                rego_code=row.rego_policy,
+                thresholds_compiled=0,
+            )
+            try:
+                await self._opa.publish_policy(compiled)
+                await self._registry.register(compiled, ["*"])
+                republished += 1
+            except OPAEngineError:  # noqa: BLE001
+                logger.exception("OPA reconcile: failed to re-publish active policy rule_id=%s.", row.rule_id)
+                continue
+            except Exception:  # noqa: BLE001 - one bad policy must not abort the rest of the reconcile
+                logger.exception("OPA reconcile: unexpected error re-publishing rule_id=%s.", row.rule_id)
+                continue
+
+        logger.info(
+            "OPA reconcile complete: published %d/%d active compiled policies to OPA.",
+            republished,
+            len(rows),
+        )
 
     async def _subscribe_and_listen(self) -> None:
         pubsub = self._redis.pubsub()

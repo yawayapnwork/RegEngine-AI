@@ -12,7 +12,7 @@ import logging
 
 from app.config import get_settings
 from app.execution.dependencies import get_redis_pool
-from app.execution.models import EvaluationResult, PolicyOutcome, TransactionPayload
+from app.execution.models import Decision, EvaluationResult, PolicyOutcome, TransactionPayload
 from app.explainability.explainer import explain_policy_outcome_deterministic
 from app.incident.publisher import raise_breach_event
 from app.incident.trigger_matrix import ambiguous_hitl_event, clause_violation_event
@@ -34,6 +34,19 @@ def _outcome_result(outcome: PolicyOutcome) -> EvaluationOutcome:
     if outcome.allow is None:
         return EvaluationOutcome.HITL_REVIEW
     return EvaluationOutcome.PASS if outcome.allow else EvaluationOutcome.FAIL
+
+
+def _decision_result(decision: Decision) -> EvaluationOutcome:
+    """Maps a transaction-level `Decision` (not a per-policy `PolicyOutcome`
+    verdict) to a ledger `EvaluationOutcome`. Only reachable for the
+    transaction-level rows emitted when NO policy outcome was produced at
+    all (no matching policy / kill switch / silent OPA failure)."""
+
+    if decision == Decision.ALLOW:
+        return EvaluationOutcome.PASS
+    if decision == Decision.DENY:
+        return EvaluationOutcome.FAIL
+    return EvaluationOutcome.HITL_REVIEW
 
 
 def _explanation_texts(outcome: PolicyOutcome) -> list[str]:
@@ -136,6 +149,52 @@ def build_ledger_events(transaction: TransactionPayload, result: EvaluationResul
                 details=details,
             )
         )
+
+    if not events:
+        # No policy outcome was produced for this transaction at all: no
+        # compiled policy matched the entity type ("no policy -> ALLOW"),
+        # an active kill switch FLAGGED the whole entity type, or every
+        # per-policy OPA call failed and the evaluator fell back fail-safe.
+        # The ledger's guarantee is "every evaluation recorded", so emit ONE
+        # transaction-level row rather than zero rows.
+        synthetic_rule_id = {
+            Decision.FLAGGED: "GLOBAL/KILL-SWITCH",
+            Decision.DENY: "GLOBAL/DENY",
+            Decision.ALLOW: "GLOBAL/NO-MATCHING-POLICY",
+        }.get(result.decision, "GLOBAL/NO-MATCHING-POLICY")
+
+        evidence_payload = {
+            "transaction_id": transaction.transaction_id,
+            "transaction_input_digest": tx_digest,
+            "rule_id": synthetic_rule_id,
+            "evaluation_result": _decision_result(result.decision).value,
+            "violations": result.reasons,
+            "decision": result.decision.value,
+            "hitl_case_id": result.hitl_case_id,
+        }
+        ev_digest = compute_evidence_digest(evidence_payload)
+
+        details = {
+            "decision": result.decision.value,
+            "reasons": result.reasons,
+            "transaction_input_digest": tx_digest,
+            "evidence_digest": ev_digest,
+        }
+        events.append(
+            ComplianceEvaluationEvent(
+                broker_id=transaction.broker_id or "unknown",
+                transaction_id=transaction.transaction_id,
+                evaluated_at=result.evaluated_at,
+                circular_id="unknown",
+                clause_hash=_clause_hash(synthetic_rule_id),
+                section_reference="unscoped",
+                rule_id=synthetic_rule_id,
+                evaluation_result=_decision_result(result.decision),
+                hitl_review_id=result.hitl_case_id if result.decision == Decision.FLAGGED else None,
+                details=details,
+            )
+        )
+
     return events
 
 

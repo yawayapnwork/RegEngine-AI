@@ -19,6 +19,7 @@ into something a transaction could be evaluated against.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 
@@ -72,6 +73,43 @@ async def _get_review_or_404(session: AsyncSession, review_id: str) -> HITLRevie
     if review is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No HITL review '{review_id}'.")
     return review
+
+
+async def _reprocess_circular_in_background(circular_id: int, tenant_id: str) -> None:
+    """Re-runs the extraction/compilation stages for a revised circular as a
+    background task with its OWN DB session -- the request's session cannot
+    outlive the HTTP response. `resume_circular` skips clauses that already
+    have a compiled rule, but request_revision marks the revised clause's
+    rule stale (is_compiled=False) and detaches its terminal review, so the
+    re-run re-extracts that clause and creates a FRESH PENDING review for
+    the officer. The orchestrator marks the circular FAILED itself on any
+    pipeline error, so this task never leaves it silently stuck EXTRACTING.
+    """
+    from app.config import get_settings
+    from app.db.session import get_session_factory
+    from app.services.orchestrator import E2EOrchestrator
+
+    settings = get_settings()
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        try:
+            orchestrator = E2EOrchestrator(settings)
+            await orchestrator.resume_circular(
+                session=session,
+                circular_id=circular_id,
+                tenant_id=tenant_id,
+            )
+            await session.commit()
+            logger.info(
+                "Reprocess completed for circular_id=%s after revision request (tenant_id=%s).",
+                circular_id,
+                tenant_id,
+            )
+        except Exception:  # noqa: BLE001 - FAILED-state marking is the orchestrator's own job; log here only
+            logger.exception(
+                "Background reprocess failed for circular_id=%s after revision request; the orchestrator marks the circular failed.",
+                circular_id,
+            )
 
 
 @router.get("", response_model=list[HITLReviewOut])
@@ -155,12 +193,28 @@ async def request_revision_review(
 ) -> HITLReview:
     """Flags the review as requiring revision: the policy is not activated
     and routes back for re-extraction."""
-    return await HITLReviewService.request_revision(
+    review = await HITLReviewService.request_revision(
         session=session,
         review_id=review_id,
         principal_subject=principal.subject,
         notes=resolution.notes,
     )
+
+    # Dispatch the actual re-extraction instead of just leaving the circular
+    # stuck in "EXTRACTING" with no work queued (the former behavior). The
+    # reprocess runs on a fresh session so this response returns immediately.
+    if review.clause_id:
+        clause = await session.get(Clause, review.clause_id)
+        if clause is not None and clause.circular_id is not None:
+            asyncio.create_task(
+                _reprocess_circular_in_background(
+                    circular_id=clause.circular_id,
+                    tenant_id=review.tenant_id,
+                ),
+                name=f"hitl-revision-reprocess-{review.review_id}",
+            )
+
+    return review
 
 
 @router.get("/{review_id}/precedents", response_model=CaseLawAnalysisResult)

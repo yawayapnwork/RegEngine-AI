@@ -522,7 +522,8 @@ class HITLReview(Base):
     field_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, server_default="PENDING"
+        # 24 chars: "REVISION_REQUIRED" (17) must fit, see _HITL_REVIEW_STATUSES.
+        String(24), nullable=False, server_default="PENDING"
     )
     compliance_officer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

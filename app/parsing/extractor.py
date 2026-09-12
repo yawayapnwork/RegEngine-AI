@@ -1,21 +1,40 @@
-"""Layout-aware PDF extraction using Unstructured (primary) with an Apache
-Tika fallback, and an OCR fallback (app.localization.ocr) below that for
-scanned/image-only pages neither text-layer backend can read.
+"""Layout-aware PDF extraction using pypdf (fast text-layer pass), then
+Unstructured (layout/table-aware) and Apache Tika as secondary backends,
+with an OCR fallback (app.localization.ocr) below that for scanned/image-
+only pages none of the text-layer backends could read.
 
-Both `unstructured.partition.pdf.partition_pdf` and `tika.parser.from_file`
+`unstructured.partition.pdf.partition_pdf` and `tika.parser.from_file`
 are synchronous, CPU/IO-heavy calls (the former shells out to detectron2/
 poppler for layout+table detection, the latter talks to a Tika server over
-HTTP). We run them in a worker thread via `asyncio.to_thread` so the FastAPI
-event loop is never blocked, and enforce a hard timeout so a pathological
-PDF cannot pin a worker indefinitely.
+HTTP). We run them on a dedicated bounded worker pool via
+`asyncio.get_running_loop().run_in_executor` so the FastAPI event loop is
+never blocked, and enforce a per-backend timeout so a pathological PDF
+cannot pin a worker indefinitely.
+
+IMPORTANT (why not a single shared cascade budget, and why not
+`asyncio.to_thread`): each backend gets its OWN `asyncio.wait_for` budget.
+With a single shared `parse_timeout_seconds` around the whole cascade, a
+slow/hung primary backend (e.g. unstructured stalled on a network model
+download) silently consumed the ENTIRE budget before the "cheap" pypdf
+fallback ever ran -- the exact failure signature observed in production as
+"PDF extraction exceeded configured timeout" for a 1-page text-layer PDF.
+And `asyncio.to_thread` runs on the default executor (~32 threads on
+CPython) and does NOT interrupt a worker thread when the awaiting coroutine
+times out: a hung backend leaks a thread, and enough leaked threads
+saturated the default pool so even pypdf was left queued behind them,
+turning a one-off timeout into "every upload times out". The dedicated,
+small `_EXTRACTION_EXECUTOR` below bounds that damage.
 """
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
+import os
 import re
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from app.config import Settings
@@ -30,6 +49,16 @@ from app.parsing.hierarchy import HierarchyTracker, detect_clause_number, is_foo
 from app.regulatory.taxonomy import detect_regulator_and_document
 
 logger = logging.getLogger(__name__)
+
+# Dedicated, bounded worker pool for the extraction backend calls below.
+# See the module docstring for why this is NOT asyncio.to_thread: leaked
+# threads from timed-out backend calls must never saturate the default
+# executor and starve every later parse.
+_EXTRACTION_MAX_WORKERS = min(4, (os.cpu_count() or 1) + 2)
+_EXTRACTION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_EXTRACTION_MAX_WORKERS,
+    thread_name_prefix="pdf-extract",
+)
 
 _PDF_MAGIC = b"%PDF-"
 
@@ -198,6 +227,16 @@ def _partition_with_pypdf(path: str) -> list[dict]:
 def _has_text(elements: list[dict]) -> bool:
     """Return True if at least one element contains non-whitespace text."""
     return bool(elements) and any(bool(el.get("text", "").strip()) for el in elements)
+
+
+async def _run_backend(call, timeout: float):
+    """Run one synchronous partition backend call on the dedicated bounded
+    executor with its OWN wait_for budget. A slow/hung backend burns only
+    its own budget (the cheaper backends that follow stay eligible), and
+    the thread it leaks is confined to the small `_EXTRACTION_EXECUTOR`
+    pool so it cannot starve other work."""
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(loop.run_in_executor(_EXTRACTION_EXECUTOR, call), timeout=timeout)
 
 
 
@@ -432,38 +471,57 @@ async def extract_pdf(
     _validate_pdf_bytes(file_bytes)
 
     async def _run() -> list[dict]:
-        # Extraction cascade order:
-        # 1. unstructured (if primary or default)
-        # 2. tika
-        # 3. pypdf
-        # If a primary backend is explicitly configured, that candidate is attempted first.
-        candidate_order = [settings.extraction_backend]
-        for b in ("unstructured", "tika", "pypdf"):
+        # Extraction cascade order and per-backend budgets.
+        #
+        # pypdf is the ONLY backend with no third-party system/model
+        # dependencies and no outbound network calls: it is instant for a
+        # text-layer PDF (every real SEBI/RBI/IRDAI/PFRDA circular). It
+        # runs FIRST with its own small budget so a slow/hung configured
+        # backend (unstructured's layout model / a network model download)
+        # can never starve it; the configured backend is then attempted
+        # for documents pypdf cannot read (scanned/layout-heavy), with
+        # tika last of all.
+        candidate_order = ["pypdf"]
+        for b in (settings.extraction_backend, "unstructured", "tika", "pypdf"):
             if b not in candidate_order:
                 candidate_order.append(b)
 
         errors: list[tuple[str, Exception]] = []
         last_empty_result: list[dict] | None = None
 
-        for backend in candidate_order:
-            try:
-                if backend == "unstructured":
-                    res = await asyncio.to_thread(
-                        _partition_with_unstructured, str(source_path), settings.unstructured_strategy
-                    )
-                elif backend == "tika":
-                    res = await asyncio.to_thread(
-                        _partition_with_tika, str(source_path), settings.tika_server_url
-                    )
-                elif backend == "pypdf":
-                    res = await asyncio.to_thread(_partition_with_pypdf, str(source_path))
-                else:
-                    logger.warning("Unknown extraction backend '%s' configured; skipping.", backend)
-                    continue
+        # Each backend gets its own budget -- never one shared budget for
+        # the whole cascade (see the module docstring). pypdf is capped so
+        # a pathological text-layer PDF is declined quickly and the slower
+        # layout-aware backends still get most of parse_timeout_seconds.
+        per_backend_timeout = {
+            "pypdf": min(30, settings.parse_timeout_seconds),
+            "unstructured": settings.parse_timeout_seconds,
+            "tika": min(60, settings.parse_timeout_seconds),
+        }
 
+        for backend in candidate_order:
+            if backend == "unstructured":
+                call = functools.partial(_partition_with_unstructured, str(source_path), settings.unstructured_strategy)
+            elif backend == "tika":
+                call = functools.partial(_partition_with_tika, str(source_path), settings.tika_server_url)
+            elif backend == "pypdf":
+                call = functools.partial(_partition_with_pypdf, str(source_path))
+            else:
+                logger.warning("Unknown extraction backend '%s' configured; skipping.", backend)
+                continue
+
+            timeout = per_backend_timeout.get(backend, min(60, settings.parse_timeout_seconds))
+            try:
+                res = await _run_backend(call, timeout)
                 if _has_text(res):
                     return res
                 last_empty_result = res
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Extraction backend '%s' exceeded its %ss budget for '%s'; trying next backend.",
+                    backend, timeout, filename or source_path,
+                )
+                errors.append((backend, asyncio.TimeoutError(f"backend exceeded {timeout}s budget")))
             except Exception as exc:  # noqa: BLE001 - deliberate cascade boundary
                 logger.warning("Extraction backend '%s' failed for '%s': %r", backend, filename or source_path, exc)
                 errors.append((backend, exc))
@@ -488,21 +546,21 @@ async def extract_pdf(
     # layout it doesn't handle well even though the PDF has a real text
     # layer. Before assuming that's a scanned/image-only PDF and paying for
     # OCR, retry once with "hi_res" -- much cheaper than OCR and often
-    # enough to recover text "fast" under-extracted.
-    if (
-        not _has_text(raw_elements)
-        and settings.extraction_backend == "unstructured"
-        and settings.unstructured_strategy == "fast"
-    ):
+    # enough to recover text "fast" under-extracted. This escalation is not
+    # gated on the configured backend name: pypdf (the default first
+    # backend) is a plain text-layer extractor, so a layout that defeats it
+    # benefits from the hi_res retry exactly as much as one that defeated
+    # unstructured "fast" would.
+    if not _has_text(raw_elements) and settings.unstructured_strategy == "fast":
         logger.info(
             "'%s' produced no extractable text with the 'fast' Unstructured strategy -- retrying with "
             "'hi_res' before falling back to OCR.",
             filename or "<unnamed upload>",
         )
         try:
-            hi_res_elements = await asyncio.wait_for(
-                asyncio.to_thread(_partition_with_unstructured, str(source_path), "hi_res"),
-                timeout=settings.parse_timeout_seconds,
+            hi_res_elements = await _run_backend(
+                functools.partial(_partition_with_unstructured, str(source_path), "hi_res"),
+                settings.parse_timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
             raise ParseTimeoutError(

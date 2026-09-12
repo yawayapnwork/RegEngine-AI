@@ -413,11 +413,21 @@ class HITLReviewService:
                 if compiled_rule is not None:
                     compiled_rule.is_active = False
                     compiled_rule.hitl_status = "BLOCKING"
+                    # Marks the compiled artifact stale so the re-extraction
+                    # pass (E2EOrchestrator.resume_circular, dispatched by the
+                    # request-revision route) re-runs THIS clause instead of
+                    # skipping it as "already compiled".
+                    compiled_rule.is_compiled = False
 
             review.status = "REVISION_REQUIRED"
             review.compliance_officer_id = principal_subject
             review.resolution_notes = notes
             review.resolved_at = now_utc
+            # Detach this (now-terminal) review from its compiled rule so the
+            # re-compilation pass creates a FRESH PENDING review for the officer
+            # to re-approve, rather than re-using this same ticket whose status
+            # will never become actionable again.
+            review.compiled_rule_id = None
 
             if review.clause_id:
                 clause = await session.get(Clause, review.clause_id)
@@ -426,6 +436,7 @@ class HITLReviewService:
                     if circular and circular.processing_state in ("AWAITING_HITL", "APPROVED"):
                         old_state = circular.processing_state
                         circular.processing_state = "EXTRACTING"
+                        clause.processing_status = ClauseProcessingState.EXTRACTING.value
                         session.add(
                             CircularStateTransition(
                                 circular_id=circular.id,

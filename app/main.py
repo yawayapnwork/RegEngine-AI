@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
 import logging
 import re
 import uuid
@@ -53,6 +54,7 @@ from app.security.middleware import (
     SessionManagementMiddleware,
     TenantRateLimitMiddleware,
 )
+from app.services.stale_state_reaper import reap_stale_circulars
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -136,8 +138,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         opa_engine=get_opa_engine(settings),
         policy_registry=get_policy_registry(settings),
         policy_cache=get_policy_cache(),
+        session_factory=get_session_factory(),
     )
     hot_reload_task = asyncio.create_task(subscriber.run(), name="policy-hot-reload-subscriber")
+
+    # Stale-state recovery: any circular left in EXTRACTING/COMPILING without
+    # an update for stale_circular_reclaim_seconds (crashed background
+    # reprocess / dead worker) is swept to FAILED so the UI never shows a
+    # permanent spinner.
+    reaper_stop = asyncio.Event()
+    reaper_task = asyncio.create_task(
+        reap_stale_circulars(
+            session_factory=get_session_factory(),
+            interval_seconds=settings.stale_state_reaper_interval_seconds,
+            stale_after=dt.timedelta(seconds=settings.stale_circular_reclaim_seconds),
+            stop_event=reaper_stop,
+        ),
+        name="stale-state-reaper",
+    )
 
     queue_depth_stop = asyncio.Event()
     hitl_queue = HITLQueue(redis_client=get_redis_pool(), key_prefix=settings.hitl_key_prefix)
@@ -187,7 +205,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         hot_reload_task.cancel()
         queue_depth_stop.set()
         queue_depth_task.cancel()
-        background_tasks = [hot_reload_task, queue_depth_task]
+        reaper_stop.set()
+        reaper_task.cancel()
+        background_tasks = [hot_reload_task, queue_depth_task, reaper_task]
         if breach_subscriber is not None and breach_broadcast_task is not None:
             breach_subscriber.stop()
             breach_broadcast_task.cancel()

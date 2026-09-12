@@ -19,10 +19,27 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=50, description="Max accepted PDF size in MB")
     parse_timeout_seconds: int = Field(default=180, description="Hard timeout for a single parse job")
     parse_concurrency: int = Field(default=4, description="Max PDFs processed concurrently by this instance")
+    # Stale-state recovery (app.services.stale_state_reaper). A circular left
+    # in an intermediate processing state (EXTRACTING/COMPILING) with no
+    # update for `stale_circular_reclaim_seconds` is presumed abandoned by a
+    # crashed worker and swept to FAILED with a clear error message -- a stuck
+    # spinner with no terminal state is the most confusing user-visible
+    # failure this system can have. The window is generous so a legitimately
+    # slow (large-circular / cold LLM) in-progress job is never reclaimed.
+    stale_circular_reclaim_seconds: int = Field(default=900, description="No-update window before a stalled circular is swept to FAILED")
+    stale_state_reaper_interval_seconds: int = Field(default=120, description="How often the stale-state reaper sweeps")
 
     # --- Extraction backend ---
-    # "unstructured" (hi_res, layout aware) or "tika" (fallback, faster, weaker layout fidelity)
-    extraction_backend: str = "unstructured"
+    # Default is "pypdf" (native text-layer extraction, no system/model
+    # dependencies, no outbound network calls) because most SEBI/RBI/IRDAI/
+    # PFRDA circulars are native-text, digitally-published PDFs. The
+    # extractor's cascade (app.parsing.extractor.extract_pdf) always
+    # attempts pypdf FIRST regardless of this setting, then falls through
+    # to the configured backend ("unstructured"/"tika") for documents a
+    # plain text-layer pass can't read -- so this default is the safe,
+    # deterministic one, and a deployment that wants layout-aware
+    # extraction can still set EXTRACTION_BACKEND=unstructured.
+    extraction_backend: str = "pypdf"
     # "fast" (text-layer extraction only, no layout model) is the default because
     # most SEBI/RBI/IRDAI/PFRDA circulars are native-text, digitally-published
     # PDFs that don't need detectron2 layout detection -- "hi_res" runs it over
@@ -632,19 +649,19 @@ class Settings(BaseSettings):
     )
     payload_encryption_enabled: bool = False
     # Origins the browser-facing frontend (frontend/) is allowed to call
-    # this API from cross-origin. Defaults to localhost-only (local dev
-    # against `npm run dev`'s Vite server); same-origin/no-CORS deployments
-    # (served behind the same domain, or accessed only via curl/server-to-
-    # server) never need this touched. The production split-deployment
-    # case (frontend on Vercel/Render/Netlify/a custom domain, API
-    # elsewhere) DOES: this MUST be set explicitly to that deployment's
-    # actual frontend origin(s) -- there is no placeholder URL here to
-    # silently match against, on purpose, since one deployment's domain is
-    # never another's. Without it, the browser blocks every cross-origin
-    # request with no server-side symptom to point at (the request never
-    # even reaches a route handler to log) -- see the startup log line in
-    # app/main.py.
-    cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    # this API from cross-origin. Defaults to the local dev origin plus the
+    # deployed Vercel frontend (regengine-ai.vercel.app). The production
+    # deployment serves the frontend and this API from the SAME Vercel
+    # origin (vercel.json routes /v1/... to app/main.py), so its requests
+    # are same-origin and never hit CORS; the Vercel origin is listed here
+    # anyway so preview/split deployments calling this API cross-origin
+    # are not silently blocked by the browser (the request never even
+    # reaches a route handler to log -- see the startup log line in
+    # app/main.py). Override CORS_ALLOWED_ORIGINS in the deployment env to
+    # match its actual frontend origin(s).
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "https://regengine-ai.vercel.app"]
+    )
 
     # --- Cron-triggered queue drain (POST /v1/internal/drain-queue) ---
     # Cost-free substitute for a standing Celery worker process on

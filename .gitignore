@@ -31,7 +31,13 @@ coverage.xml
 
 # --- Node.js (frontend/) ---
 node_modules/
-frontend/dist/
+# frontend/dist/ is committed: vercel.json serves the built app with
+# @vercel/static next to the /v1/... Python backend (no Vercel build step).
+frontend/dist/*
+!frontend/dist/
+!frontend/dist/index.html
+!frontend/dist/assets/
+!frontend/dist/assets/*
 *.tsbuildinfo
 npm-debug.log*
 
